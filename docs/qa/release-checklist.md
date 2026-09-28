@@ -9,6 +9,7 @@
 - [x] `pnpm build`
 - [x] 生产 manifest 不包含 `cookies`、`webRequest`、`scripting` 或 `<all_urls>`
 - [x] 生产代码不保存 Cookie、密码或 token
+- [x] 设置页支持清除全部本地数据
 
 ## 人工门禁
 

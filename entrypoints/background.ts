@@ -133,6 +133,14 @@ async function handleMessage(
           data,
         };
       }
+      case "CLEAR_DATA":
+        await storage.clear();
+        return {
+          schemaVersion: 1,
+          requestId: message.requestId,
+          ok: true,
+          type: "CLEARED",
+        };
       case "REQUEST_HOST_PERMISSION":
         return {
           schemaVersion: 1,

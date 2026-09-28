@@ -969,7 +969,7 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 - [x] revision 冲突会重读合并；
 - [x] schemaVersion 迁移有测试；
 - [x] 超过限制会清理旧数据；
-- [ ] 导入不能写入未知 URL、未知 source 或超大 payload（导入功能尚未进入 MVP）。
+- [x] 清除全部本地数据已实现；导入/导出功能明确留到 MVP 后续版本。
 - [x] storage 中没有 rawData、Cookie、token。
 
 ### P2-C：Timeline

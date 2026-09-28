@@ -25,6 +25,7 @@ export type RuntimeMessage =
       requestId: string;
       accountId: string;
     }
+  | { schemaVersion: 1; type: "CLEAR_DATA"; requestId: string }
   | {
       schemaVersion: 1;
       type: "REQUEST_HOST_PERMISSION";
@@ -58,6 +59,12 @@ export type RuntimeResponse =
       schemaVersion: 1;
       requestId: string;
       ok: true;
+      type: "CLEARED";
+    }
+  | {
+      schemaVersion: 1;
+      requestId: string;
+      ok: true;
       type: "PERMISSION";
       granted: boolean;
     }
@@ -81,6 +88,7 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
       "SYNC_REQUEST",
       "UPDATE_ACCOUNT",
       "DELETE_ACCOUNT",
+      "CLEAR_DATA",
       "REQUEST_HOST_PERMISSION",
     ].includes(item.type)
   );

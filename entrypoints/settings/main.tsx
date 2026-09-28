@@ -100,6 +100,20 @@ function App() {
     if (response.ok) setData(response.data);
   }
 
+  async function clearData(): Promise<void> {
+    if (!window.confirm("确定清除全部本地账号和提交记录吗？")) return;
+    const response = await send<Extract<RuntimeResponse, { type: "CLEARED" }>>({
+      schemaVersion: 1,
+      type: "CLEAR_DATA",
+      requestId: crypto.randomUUID(),
+    });
+    if (response.ok) {
+      setData(null);
+      setMessage("本地数据已清除。");
+      await load();
+    }
+  }
+
   return (
     <main className="settings-shell">
       <a href={browser.runtime.getURL("/timeline.html")}>← 返回时间线</a>
@@ -155,6 +169,13 @@ function App() {
           ))}
         </ul>
       </section>
+      <button
+        type="button"
+        className="danger clear-data"
+        onClick={() => void clearData()}
+      >
+        清除全部本地数据
+      </button>
     </main>
   );
 }

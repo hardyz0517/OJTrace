@@ -72,6 +72,25 @@ describe("storage port", () => {
     expect(loaded.submissions).toHaveLength(1);
   });
 
+  it("clears all local data through the serialized storage port", async () => {
+    const area = fakeArea();
+    const store = createStoragePort(area);
+    await store.update((current) => ({
+      ...current,
+      accounts: [
+        {
+          accountId: "a",
+          source: "codeforces",
+          identifier: "u",
+          enabled: true,
+          authMode: "public",
+        },
+      ],
+    }));
+    await store.clear();
+    expect(await store.load()).toEqual(defaultStoredData());
+  });
+
   it("preserves a concurrent account write when a stale mutator commits", async () => {
     let value: Record<string, unknown> = {
       "ojtrace:data": defaultStoredData(),

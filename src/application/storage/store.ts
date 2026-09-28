@@ -17,6 +17,7 @@ export interface StoragePort {
   update(
     mutator: (current: StoredData) => StoredData | Promise<StoredData>,
   ): Promise<StoredData>;
+  clear(): Promise<void>;
 }
 
 export function defaultStoredData(): StoredData {
@@ -118,6 +119,13 @@ export function createStoragePort(area: StorageAreaLike): StoragePort {
       writeQueue = operation.catch(() => undefined);
       await operation;
       return output;
+    },
+    async clear() {
+      const operation = writeQueue.then(async () => {
+        await area.set({ [STORAGE_KEY]: defaultStoredData() });
+      });
+      writeQueue = operation.catch(() => undefined);
+      await operation;
     },
   };
 }

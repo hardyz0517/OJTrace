@@ -1,6 +1,7 @@
 node_modules/
 .output/
 .wxt/
+.tmp/
 dist/
 coverage/
 playwright-report/

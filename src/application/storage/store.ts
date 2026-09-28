@@ -14,7 +14,9 @@ export interface StorageAreaLike {
 
 export interface StoragePort {
   load(): Promise<StoredData>;
-  update(mutator: (current: StoredData) => StoredData): Promise<StoredData>;
+  update(
+    mutator: (current: StoredData) => StoredData | Promise<StoredData>,
+  ): Promise<StoredData>;
 }
 
 export function defaultStoredData(): StoredData {
@@ -44,9 +46,46 @@ function isStoredData(value: unknown): value is StoredData {
   );
 }
 
+function validateStoredData(value: StoredData): StoredData {
+  const accounts = value.accounts.filter(
+    (account) =>
+      typeof account.accountId === "string" &&
+      typeof account.identifier === "string" &&
+      ["codeforces", "luogu", "qoj", "loj"].includes(account.source),
+  );
+  const submissions = value.submissions.filter(
+    (item) =>
+      typeof item.source === "string" &&
+      typeof item.accountId === "string" &&
+      typeof item.submissionId === "string" &&
+      Number.isFinite(item.submittedAt) &&
+      Number.isFinite(item.fetchedAt),
+  );
+  return { ...value, accounts, submissions };
+}
+
 function migrate(value: unknown): StoredData {
-  if (isStoredData(value)) return value;
+  if (isStoredData(value)) return validateStoredData(value);
   return defaultStoredData();
+}
+
+function mergeConcurrent(
+  current: StoredData,
+  candidate: StoredData,
+): StoredData {
+  const accounts = new Map(
+    current.accounts.map((account) => [account.accountId, account]),
+  );
+  for (const account of candidate.accounts)
+    accounts.set(account.accountId, account);
+  const syncStates = { ...current.syncStates, ...candidate.syncStates };
+  const submissions = [...current.submissions, ...candidate.submissions];
+  return {
+    ...candidate,
+    accounts: [...accounts.values()],
+    submissions,
+    syncStates,
+  };
 }
 
 export function createStoragePort(area: StorageAreaLike): StoragePort {
@@ -62,7 +101,12 @@ export function createStoragePort(area: StorageAreaLike): StoragePort {
       let output!: StoredData;
       const operation = writeQueue.then(async () => {
         const current = await this.load();
-        output = mutator(current);
+        const candidate = await mutator(current);
+        const latest = await this.load();
+        output =
+          latest.revision === current.revision
+            ? candidate
+            : mergeConcurrent(latest, candidate);
         const next: StoredData = {
           ...output,
           schemaVersion: STORAGE_SCHEMA_VERSION,

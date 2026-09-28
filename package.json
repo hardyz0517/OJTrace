@@ -7,6 +7,7 @@
     "build": "wxt build",
     "audit:manifest": "node tools/audit-manifest.mjs",
     "typecheck": "tsc --noEmit",
+    "test:contract": "vitest run tests/adapters tests/domain",
     "test": "vitest run",
     "test:watch": "vitest",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"entrypoints/**/*.{ts,tsx,css}\" \"tests/**/*.{ts,tsx}\" \"*.{ts,json}\""

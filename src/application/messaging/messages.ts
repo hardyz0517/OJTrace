@@ -85,3 +85,7 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
     ].includes(item.type)
   );
 }
+
+export function isSchemaVersionSupported(value: unknown): value is 1 {
+  return value === MESSAGE_SCHEMA_VERSION;
+}

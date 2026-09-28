@@ -3,6 +3,7 @@ import { createStoragePort } from "../src/application/storage/store";
 import { syncEnabledAccounts } from "../src/application/sync/sync-service";
 import {
   isRuntimeMessage,
+  isSchemaVersionSupported,
   type RuntimeMessage,
   type RuntimeResponse,
 } from "../src/application/messaging/messages";
@@ -19,6 +20,14 @@ function responseError(requestId: string, message: string): RuntimeResponse {
     ok: false,
     error: { code: "invalid_request", message },
   };
+}
+
+function requestIdOf(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return "unknown";
+  const requestId = (raw as { requestId?: unknown }).requestId;
+  return typeof requestId === "string" && requestId.length > 0
+    ? requestId
+    : "unknown";
 }
 
 async function openOrFocusTimeline(): Promise<void> {
@@ -41,8 +50,20 @@ export default defineBackground(() => {
   });
 
   browser.runtime.onMessage.addListener((raw: unknown, sender) => {
-    if (sender.id !== browser.runtime.id || !isRuntimeMessage(raw))
-      return undefined;
+    if (sender.id !== browser.runtime.id) return undefined;
+    const schemaVersion =
+      raw && typeof raw === "object"
+        ? (raw as { schemaVersion?: unknown }).schemaVersion
+        : undefined;
+    if (!isSchemaVersionSupported(schemaVersion)) {
+      return responseError(
+        requestIdOf(raw),
+        "Unsupported message schema version",
+      );
+    }
+    if (!isRuntimeMessage(raw)) {
+      return responseError(requestIdOf(raw), "Invalid runtime message");
+    }
     const message = raw as RuntimeMessage;
     return handleMessage(message);
   });

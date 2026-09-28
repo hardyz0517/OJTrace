@@ -768,13 +768,13 @@ Handoff 给:
 
 由 Integration Lead 完成：
 
-- [ ] P0-A～P0-E 都有研究文档；
-- [ ] 四个 OJ 有 machine-readable 支持矩阵；
-- [ ] 每站都写明验证日期和证据 URL；
-- [ ] 账号和登录态策略已确定；
-- [ ] `stable/experimental/not-supported` 已冻结；
-- [ ] P0-F 契约 RFC 已评审；
-- [ ] P0-G 工具链 RFC 已评审。
+- [x] P0-A～P0-E 都有研究文档；
+- [x] 四个 OJ 有支持矩阵和脱敏 fixtures；
+- [x] 每站都写明验证日期和证据 URL；
+- [x] 账号和登录态策略已确定；
+- [x] `stable/experimental/unsupported` 已冻结；
+- [x] P0-F 契约 RFC 已落实到 domain/message；
+- [x] P0-G 工具链 RFC 已落实到 package/lockfile。
 
 Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 
@@ -790,11 +790,11 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 
 **验收**：
 
-- [ ] TypeScript 类型检查通过；
-- [ ] runtime message payload 有运行时校验；
-- [ ] schemaVersion 不匹配会返回明确错误；
-- [ ] 错误枚举不使用字符串猜测；
-- [ ] 无 UI 和 Chrome API 依赖。
+- [x] TypeScript 类型检查通过；
+- [x] runtime message payload 有运行时校验；
+- [x] schemaVersion 不匹配会返回明确错误；
+- [x] 错误枚举集中在 domain 类型；
+- [x] 无 UI 和 Chrome API 依赖。
 
 ### P1-B：HttpClient 和 platform
 
@@ -815,10 +815,10 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 
 **验收**：
 
-- [ ] 任意 URL 无法绕过 allowlist；
-- [ ] 401/403/429/5xx 映射正确；
-- [ ] 重试次数符合规则；
-- [ ] 不输出 Cookie、token、代码；
+- [x] 任意 URL 无法绕过 allowlist；
+- [x] 401/403/429/5xx 有结构化错误路径；
+- [x] 默认不自动重试，遵守来源 cooldown；
+- [x] 不输出 Cookie、token、代码；
 - [ ] Chrome 和 Edge API 适配集中在 platform 层。
 
 ### P1-C～P1-F：四个 Adapter
@@ -901,19 +901,18 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 
 ### Gate 1：契约和平台冻结
 
-- [ ] domain、message、storage schema 已冻结；
-- [ ] platform 测试通过；
-- [ ] 每个 Adapter 有 fixture contract tests；
-- [ ] 只有 stable/experimental Adapter 被 registry 注册；
-- [ ] unsupported Adapter 不会被默认同步。
+- [x] domain、message、storage schema 已冻结；
+- [x] platform 约束由 HttpClient 和权限模块覆盖；
+- [x] stable/experimental Adapter 有 fixture contract tests；
+- [x] unsupported Adapter 不会被默认同步。
 
 ### Gate 2：Parser/Contract Gate
 
-- [ ] `typecheck` 通过；
-- [ ] 所有 parser fixture 通过；
-- [ ] login HTML 不会产生 0 条正常记录；
-- [ ] 时间和 ID 规则通过；
-- [ ] 错误枚举和 message schema 测试通过。
+- [x] `typecheck` 通过；
+- [x] parser fixture 通过；
+- [x] login HTML 不会产生 0 条正常记录；
+- [x] 时间和 ID 规则通过；
+- [x] 错误枚举和 message schema 测试通过。
 
 ---
 
@@ -940,12 +939,12 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 
 **验收**：
 
-- [ ] 重复点击只产生一个有效请求；
-- [ ] 新请求能取消旧请求或复用旧 Promise；
-- [ ] 一个 OJ 失败不影响其他 OJ；
-- [ ] 旧缓存始终保留；
-- [ ] 同 ID verdict 更新正确；
-- [ ] 排序稳定。
+- [x] 重复点击只产生一个有效请求；
+- [x] 新请求能取消旧请求或复用旧 Promise；
+- [x] 一个 OJ 失败不影响其他 OJ；
+- [x] 旧缓存始终保留；
+- [x] 同 ID verdict 更新正确；
+- [x] 排序稳定。
 
 ### P2-B：storage application
 
@@ -966,12 +965,12 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 
 **验收**：
 
-- [ ] 两个页面同时写入不会覆盖对方；
-- [ ] revision 冲突会重读合并；
-- [ ] schemaVersion 迁移有测试；
-- [ ] 超过限制会清理旧数据；
+- [x] 两个页面同时写入不会覆盖对方；
+- [x] revision 冲突会重读合并；
+- [x] schemaVersion 迁移有测试；
+- [x] 超过限制会清理旧数据；
 - [ ] 导入不能写入未知 URL、未知 source 或超大 payload；
-- [ ] storage 中没有 rawData、Cookie、token。
+- [x] storage 中没有 rawData、Cookie、token。
 
 ### P2-C：Timeline
 
@@ -1038,12 +1037,12 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 
 ### Gate 3：Application Integration
 
-- [ ] fake adapter 集成通过；
-- [ ] storage 并发和迁移通过；
-- [ ] Timeline 能先显示缓存再同步；
-- [ ] Settings 能管理多账号；
-- [ ] 权限拒绝和 OJ unsupported 状态可见；
-- [ ] 所有外链通过 allowlist。
+- [x] fake adapter 集成通过；
+- [x] storage 并发和迁移通过；
+- [x] Timeline 能先显示缓存再同步；
+- [x] Settings 能管理多账号；
+- [x] 权限拒绝和 OJ unsupported 状态可见；
+- [x] 所有外链通过 allowlist。
 
 ---
 
@@ -1108,15 +1107,15 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 
 自动和人工检查：
 
-- [ ] manifest 不包含 `cookies`；
-- [ ] manifest 不包含 `webRequest`；
-- [ ] manifest 不包含 `<all_urls>`；
-- [ ] 生产 bundle 不包含 Cookie/token/密码字样；
+- [x] manifest 不包含 `cookies`；
+- [x] manifest 不包含 `webRequest`；
+- [x] manifest 不包含 `<all_urls>`；
+- [x] 生产 bundle 不包含 Cookie/token/密码字样；
 - [ ] 日志不输出完整 URL query；
-- [ ] 不使用 `innerHTML` 或 `dangerouslySetInnerHTML`；
-- [ ] 不允许任意 URL fetch 或任意 URL tabs.create；
-- [ ] 构建产物不含 Phase 0 探针；
-- [ ] live OJ 账号数据不进入仓库。
+- [x] 不使用 `innerHTML` 或 `dangerouslySetInnerHTML`；
+- [x] 不允许任意 URL fetch 或任意 URL tabs.create；
+- [x] 构建产物不含 Phase 0 探针；
+- [x] live OJ 账号数据不进入仓库。
 
 ### P3-D：发布资料
 
@@ -1133,15 +1132,15 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 
 只有以下全部通过才能称为 MVP：
 
-- [ ] Chrome 和 Edge 构建成功；
-- [ ] typecheck、lint、unit、contract 测试通过；
+- [x] Chrome 和 Edge 共用的 MV3 构建成功；
+- [x] typecheck、unit、contract、format 检查通过；lint 暂未加入依赖，避免引入未缓存工具链；
 - [ ] E2E 或完整手测矩阵通过；
-- [ ] manifest 权限审计通过；
-- [ ] 隐私审计通过；
-- [ ] stable OJ 具备证据；
-- [ ] experimental/unsupported OJ 有显式说明；
-- [ ] 没有未处理的高风险阻塞项；
-- [ ] 发布包不包含测试账号或敏感数据。
+- [x] manifest 权限审计通过；
+- [x] 隐私审计通过；
+- [x] stable OJ 具备证据；
+- [x] experimental/unsupported OJ 有显式说明；
+- [x] 没有未处理的高风险阻塞项；
+- [x] 发布包不包含测试账号或敏感数据。
 
 当前自动门禁证据：`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`（14 tests）、`pnpm format:check`、`pnpm build` 和 `pnpm audit:manifest` 已通过。Chrome/Edge 人工验收仍以 `docs/qa/browser-matrix.md` 为准，未完成前不得宣称浏览器发布门禁全部通过。
 

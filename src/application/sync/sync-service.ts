@@ -24,7 +24,13 @@ export interface SyncResult {
 }
 
 const MAX_LIMIT = 100;
-const inFlight = new Map<string, Promise<SyncSourceResult>>();
+interface InFlightSync {
+  promise: Promise<SyncSourceResult>;
+  controller: AbortController;
+}
+
+const inFlight = new Map<string, InFlightSync>();
+const controllers = new Map<string, AbortController>();
 
 function toError(
   error: unknown,
@@ -67,7 +73,7 @@ async function syncOne(
   }
 
   const existing = inFlight.get(account.accountId);
-  if (existing) return existing;
+  if (existing) return existing.promise;
 
   const controller = new AbortController();
   const promise = (async () => {
@@ -95,10 +101,15 @@ async function syncOne(
         error: toError(error, account, requestId),
       };
     } finally {
-      inFlight.delete(account.accountId);
+      const active = inFlight.get(account.accountId);
+      if (active?.controller === controller) {
+        inFlight.delete(account.accountId);
+        controllers.delete(account.accountId);
+      }
     }
   })();
-  inFlight.set(account.accountId, promise);
+  controllers.set(account.accountId, controller);
+  inFlight.set(account.accountId, { promise, controller });
   return promise;
 }
 
@@ -118,6 +129,11 @@ export async function syncEnabledAccounts(
       now - state.lastSuccessAt >= current.preferences.freshnessCooldownMs
     );
   });
+  if (options.force) {
+    for (const account of eligible) {
+      inFlight.get(account.accountId)?.controller.abort();
+    }
+  }
   const sources = await Promise.all(
     eligible.map((account) => syncOne(account, http, now)),
   );

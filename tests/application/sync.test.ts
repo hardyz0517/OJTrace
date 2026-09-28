@@ -117,4 +117,34 @@ describe("sync application", () => {
     expect(calls).toBe(1);
     expect(second.sources).toHaveLength(0);
   });
+
+  it("does not immediately retry a rate-limited source", async () => {
+    const storage = createStoragePort(
+      area({ ...defaultStoredData(), accounts: [codeforcesAccount] }),
+    );
+    let calls = 0;
+    const http: HttpClient = {
+      async request() {
+        calls += 1;
+        return {
+          status: 429,
+          url: "https://codeforces.com/api/user.status",
+          contentType: "application/json",
+          text: "{}",
+          headers: new Headers(),
+        };
+      },
+    };
+    const first = await syncEnabledAccounts(storage, http, {
+      force: true,
+      now: 1_700_000_000_000,
+    });
+    const second = await syncEnabledAccounts(storage, http, {
+      force: true,
+      now: 1_700_000_001_000,
+    });
+    expect(first.sources[0]?.error?.kind).toBe("rate_limited");
+    expect(second.sources).toHaveLength(0);
+    expect(calls).toBe(1);
+  });
 });

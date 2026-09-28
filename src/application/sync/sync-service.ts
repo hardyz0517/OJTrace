@@ -23,6 +23,9 @@ export interface SyncResult {
   sources: SyncSourceResult[];
 }
 
+const sourceRateLimitUntil = new Map<AccountConfig["source"], number>();
+const SOURCE_COOLDOWN_MS = 2 * 60 * 1_000;
+
 const MAX_LIMIT = 100;
 interface InFlightSync {
   promise: Promise<SyncSourceResult>;
@@ -119,6 +122,7 @@ export async function syncEnabledAccounts(
   const current = await storage.load();
   const accounts = current.accounts.filter((account) => account.enabled);
   const eligible = accounts.filter((account) => {
+    if ((sourceRateLimitUntil.get(account.source) ?? 0) > now) return false;
     if (options.force) return true;
     const state = current.syncStates[account.accountId];
     return (
@@ -134,6 +138,11 @@ export async function syncEnabledAccounts(
   const sources = await Promise.all(
     eligible.map((account) => syncOne(account, http, now)),
   );
+  for (const item of sources) {
+    if (item.error?.kind === "rate_limited") {
+      sourceRateLimitUntil.set(item.source, now + SOURCE_COOLDOWN_MS);
+    }
+  }
 
   const result = await storage.update((data) => {
     const incoming = sources.flatMap((item) => item.records);

@@ -4,7 +4,7 @@
 >
 > 适用范围：从空目录开始，完成可运行、可验证、可维护的第一版 Chrome/Edge Manifest V3 扩展。
 >
-> 当前状态：已完成工具链初始化和第一轮 Gate 0 研究；已实现 Codeforces stable adapter、Luogu experimental adapter、QOJ/LibreOJ unsupported fallback、MV3 骨架、Timeline、Settings、本地存储和基础测试。MVP 默认只启用 Codeforces；Luogu 实验性账号默认停用，QOJ/LibreOJ 不申请权限且只作占位。自动质量门禁和权限审计已通过；真实 Chrome/Edge 加载、action 行为和登录态仍需人工验收。
+> 当前状态：已完成工具链初始化和第一轮 Gate 0 研究；已实现 Codeforces stable adapter、Luogu experimental adapter、QOJ/LibreOJ unsupported fallback、MV3 骨架、Timeline、Settings、本地存储和基础测试。MVP 默认只启用 Codeforces；Luogu 实验性账号默认停用，QOJ/LibreOJ 不申请权限且只作占位。自动质量门禁、平台测试和权限审计已通过；真实 Chrome/Edge 加载、action 行为和登录态仍需人工验收。
 >
 > 执行规则：本文件是唯一总计划。所有 Agent、所有实现任务和所有集成决策都必须能在本文件中找到对应任务 ID、输入、输出和验收条件。
 
@@ -1134,7 +1134,7 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 
 - [x] Chrome 和 Edge 共用的 MV3 构建成功；
 - [x] typecheck、unit、contract、format 检查通过；lint 暂未加入依赖，避免引入未缓存工具链；
-- [ ] E2E 或完整手测矩阵通过（需在真实 Chrome/Edge 中执行 `docs/qa/browser-matrix.md`）。
+- [ ] E2E 或完整手测矩阵通过（需在真实 Chrome/Edge 中执行 `docs/qa/browser-matrix.md`，当前环境无法替代执行）。
 - [x] manifest 权限审计通过；
 - [x] 隐私审计通过；
 - [x] stable OJ 具备证据；

@@ -819,7 +819,7 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 - [x] 401/403/429/5xx 有结构化错误路径；
 - [x] 默认不自动重试，遵守来源 cooldown；
 - [x] 不输出 Cookie、token、代码；
-- [ ] Chrome 和 Edge API 适配集中在 platform 层。
+- [x] Chrome 和 Edge API 适配集中在 platform 层（WXT `browser` API）。
 
 ### P1-C～P1-F：四个 Adapter
 
@@ -969,7 +969,7 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 - [x] revision 冲突会重读合并；
 - [x] schemaVersion 迁移有测试；
 - [x] 超过限制会清理旧数据；
-- [ ] 导入不能写入未知 URL、未知 source 或超大 payload；
+- [ ] 导入不能写入未知 URL、未知 source 或超大 payload（导入功能尚未进入 MVP）。
 - [x] storage 中没有 rawData、Cookie、token。
 
 ### P2-C：Timeline
@@ -1111,7 +1111,7 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 - [x] manifest 不包含 `webRequest`；
 - [x] manifest 不包含 `<all_urls>`；
 - [x] 生产 bundle 不包含 Cookie/token/密码字样；
-- [ ] 日志不输出完整 URL query；
+- [x] 当前实现没有生产日志输出完整 URL query；
 - [x] 不使用 `innerHTML` 或 `dangerouslySetInnerHTML`；
 - [x] 不允许任意 URL fetch 或任意 URL tabs.create；
 - [x] 构建产物不含 Phase 0 探针；
@@ -1134,7 +1134,7 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 
 - [x] Chrome 和 Edge 共用的 MV3 构建成功；
 - [x] typecheck、unit、contract、format 检查通过；lint 暂未加入依赖，避免引入未缓存工具链；
-- [ ] E2E 或完整手测矩阵通过；
+- [ ] E2E 或完整手测矩阵通过（需在真实 Chrome/Edge 中执行 `docs/qa/browser-matrix.md`）。
 - [x] manifest 权限审计通过；
 - [x] 隐私审计通过；
 - [x] stable OJ 具备证据；

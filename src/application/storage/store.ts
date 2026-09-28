@@ -110,7 +110,7 @@ export function createStoragePort(area: StorageAreaLike): StoragePort {
         const next: StoredData = {
           ...output,
           schemaVersion: STORAGE_SCHEMA_VERSION,
-          revision: current.revision + 1,
+          revision: Math.max(current.revision, latest.revision) + 1,
         };
         await area.set({ [STORAGE_KEY]: next });
         output = next;

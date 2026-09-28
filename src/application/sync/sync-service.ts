@@ -30,7 +30,6 @@ interface InFlightSync {
 }
 
 const inFlight = new Map<string, InFlightSync>();
-const controllers = new Map<string, AbortController>();
 
 function toError(
   error: unknown,
@@ -104,11 +103,9 @@ async function syncOne(
       const active = inFlight.get(account.accountId);
       if (active?.controller === controller) {
         inFlight.delete(account.accountId);
-        controllers.delete(account.accountId);
       }
     }
   })();
-  controllers.set(account.accountId, controller);
   inFlight.set(account.accountId, { promise, controller });
   return promise;
 }

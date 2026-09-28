@@ -1,10 +1,10 @@
 # OJTrace（题迹）MVP 总体执行计划
 
-> 文档版本：0.2
+> 文档版本：0.3
 >
 > 适用范围：从空目录开始，完成可运行、可验证、可维护的第一版 Chrome/Edge Manifest V3 扩展。
 >
-> 当前状态：仅有目录骨架和本计划；尚未初始化项目、安装依赖或编写业务代码。
+> 当前状态：已完成工具链初始化和第一轮 Gate 0 研究；已实现 Codeforces stable adapter、Luogu experimental adapter、QOJ/LibreOJ unsupported fallback、MV3 骨架、Timeline、Settings、本地存储和基础测试。MVP 默认只启用 Codeforces；Luogu 实验性账号默认停用，QOJ/LibreOJ 不申请权限且只作占位。自动质量门禁和权限审计已通过；真实 Chrome/Edge 加载、action 行为和登录态仍需人工验收。
 >
 > 执行规则：本文件是唯一总计划。所有 Agent、所有实现任务和所有集成决策都必须能在本文件中找到对应任务 ID、输入、输出和验收条件。
 
@@ -531,9 +531,9 @@ service worker 必须验证 `sender.id`，不得把任意网页消息当作可�
 | OJ | 初始等级 | 首选数据源 | 登录 | submission URL | 主要风险 | fallback |
 |---|---|---|---|---|---|---|
 | Codeforces | stable 候选 | 官方 `user.status` | 通常不需要 | `/contest/{contestId}/submission/{id}` | 2 秒限流、特殊题库 URL | 用户列表页 |
-| Luogu | needs-more-evidence | `/record/list` 页面数据 | 需实测 | `/record/{id}` | 非稳定内部数据、反爬、401/HTML | 已打开页面读取 |
-| QOJ | experimental 候选 | 登录态提交列表/XHR | 当前通常需要 | `/submission/{id}` | 提交列表可能临时关闭、接口未公开 | 登录页面读取 |
-| LibreOJ | needs-more-evidence | `api.loj.ac` 或页面 | 需实测 | `/s/{id}` | API/站点迁移、旧文档 | 页面读取或暂不支持 |
+| Luogu | experimental | `/record/list` 页面数据 | 需登录态实测 | 未确认，默认只跳列表 | 非稳定内部数据、反爬、401/HTML | 记录列表页 |
+| QOJ | unsupported | 无可复现用户历史接口 | 当前通常需要 | 未确认 | 提交列表可能临时关闭、接口未公开 | 保留旧缓存，不申请权限 |
+| LibreOJ | unsupported | 无可复现当前接口 | 需实测 | 未确认 | API/站点迁移、旧文档 | 保留旧缓存，不申请权限 |
 
 只有 `stable` 才能默认启用。`experimental` 默认关闭并显示说明。`unsupported` 不注册到同步列表，但保留代码目录以便以后重新验证。
 
@@ -1143,6 +1143,8 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 - [ ] 没有未处理的高风险阻塞项；
 - [ ] 发布包不包含测试账号或敏感数据。
 
+当前自动门禁证据：`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`（14 tests）、`pnpm format:check`、`pnpm build` 和 `pnpm audit:manifest` 已通过。Chrome/Edge 人工验收仍以 `docs/qa/browser-matrix.md` 为准，未完成前不得宣称浏览器发布门禁全部通过。
+
 ---
 
 ## 15. 明确的同步行为
@@ -1305,7 +1307,7 @@ live OJ 请求不得成为默认 CI 测试。live 测试只能显式 opt-in，�
 
 ### 第一步：只做 Wave 0
 
-并行完成 P0-A～P0-G，不初始化正式项目，不写业务代码。
+并行完成 P0-A～P0-G，先完成数据源和权限验证，再进入正式实现。
 
 ### 第二步：执行 Gate 0
 
@@ -1348,7 +1350,7 @@ P2-A～P2-E 并行，但 UI 只能依赖已冻结的应用接口和 fake adapter
 5. 由 Integration Lead 执行 Gate 0；
 6. Gate 0 通过后，才初始化 TypeScript/WXT 项目。
 
-当前目录骨架已经创建，但它不代表项目已经初始化。`src/`、`entrypoints/` 和 `tests/` 在 Gate 0 前保持空实现状态。
+Gate 0 的研究结论已经形成，项目已按冻结后的契约完成第一轮 MV3 实现。后续工作以真实浏览器加载、登录态验证、适配器补强和发布审计为主；任何接口结论发生变化，都必须同步更新 `docs/research/`、适配器测试和本计划中的风险记录。
 
 ---
 

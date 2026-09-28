@@ -1,0 +1,25 @@
+{
+  "source": "https://qoj.ac/hacks?page=3",
+  "observedColumns": ["id", "submissionId", "problem", "hacker", "owner", "result", "submitTime"],
+  "records": [
+    {
+      "id": "<hack-id>",
+      "submissionId": "<submission-id>",
+      "problem": {"id": "<problem-id>", "title": "<redacted>"},
+      "hacker": "<redacted>",
+      "owner": "<redacted>",
+      "result": "Success!",
+      "submitTime": "2026-08-29 17:44:01"
+    },
+    {
+      "id": "<hack-id>",
+      "submissionId": "<submission-id>",
+      "problem": {"id": "<problem-id>", "title": "<redacted>"},
+      "hacker": "<redacted>",
+      "owner": "<redacted>",
+      "result": "Failed.",
+      "submitTime": "2026-08-29 17:44:01"
+    }
+  ],
+  "note": "Shape only; Hack records are not a user's complete submission history. Names and IDs are placeholders."
+}

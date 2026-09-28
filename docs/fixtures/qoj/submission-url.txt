@@ -1,0 +1,4 @@
+Observed URL shape in public QOJ content:
+https://qoj.ac/submission/<numeric-id>
+
+Examples were replaced with <numeric-id>; direct anonymous page fetch was not verified.

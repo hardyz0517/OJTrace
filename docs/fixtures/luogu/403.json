@@ -1,0 +1,1 @@
+{"errorCode":403,"errorType":"Symfony\\Component\\HttpKernel\\Exception\\AccessDeniedHttpException","errorMessage":"Access denied","errorData":{},"__fixture_note":"contract-only; 403 not observed in anonymous run"}

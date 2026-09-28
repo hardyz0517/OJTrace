@@ -1,0 +1,5 @@
+Observation date: 2026-09-28 (UTC+8)
+Request: GET https://qoj.ac/submissions
+Observed final URL: https://qoj.ac/login
+Observed page: login form (not an empty submission list)
+HTTP status: redirect status was not exposed by the web capture; do not infer it here.

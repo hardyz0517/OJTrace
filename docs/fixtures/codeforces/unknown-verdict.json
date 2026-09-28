@@ -1,0 +1,4 @@
+{
+  "status": "OK",
+  "result": [{"id": 999999999, "contestId": 2268, "creationTimeSeconds": 1790438553, "problem": {"contestId": 2268, "index": "A", "name": "REDACTED"}, "author": {"members": [{"handle": "REDACTED"}]}, "programmingLanguage": "C++", "verdict": "FUTURE_VERDICT"}]
+}

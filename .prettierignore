@@ -1,0 +1,7 @@
+.output
+.wxt
+node_modules
+docs/fixtures
+docs/research
+PLAN.md
+pnpm-lock.yaml

@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "url": "https://api.loj.ac/api/submission/querySubmission",
+  "headers": {"Content-Type": "application/json"},
+  "body": {
+    "problemDisplayId": "<problem-display-id>",
+    "locale": "zh_CN",
+    "takeCount": 1,
+    "status": "Accepted"
+  },
+  "provenance": "Third-party userscript observed in 2026; not an official LibreOJ API fixture."
+}

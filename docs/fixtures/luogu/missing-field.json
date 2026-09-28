@@ -1,0 +1,1 @@
+{"errorCode":200,"data":{"records":[{"id":123456,"problem":{"pid":"P1000","title":"REDACTED"},"status":{"status":"AC"},"submitTime":1790598000}]},"__fixture_note":"missing-field contract fixture; not captured while authenticated"}

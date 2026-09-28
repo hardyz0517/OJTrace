@@ -1,0 +1,23 @@
+{
+  "status": "OK",
+  "__fixture_note": "participantId and handle redacted; submission/contest IDs retained for URL parser tests",
+  "result": [
+    {
+      "id": 392217392,
+      "contestId": 2268,
+      "creationTimeSeconds": 1790438553,
+      "relativeTimeSeconds": 5253,
+      "problem": {"contestId": 2268, "index": "D", "name": "AghaBalaSar and Hamed", "type": "PROGRAMMING", "points": 2250.0, "tags": ["data structures", "dp"]},
+      "author": {"contestId": 2268, "participantId": 0, "members": [{"handle": "REDACTED"}], "participantType": "CONTESTANT", "ghost": false, "startTimeSeconds": 1790433300},
+      "programmingLanguage": "C++23 (GCC 14-64, msys2)",
+      "verdict": "OK",
+      "testset": "TESTS",
+      "passedTestCount": 40,
+      "timeConsumedMillis": 265,
+      "memoryConsumedBytes": 36352000
+    }
+  ]
+}
+
+
+

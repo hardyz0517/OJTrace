@@ -16,3 +16,16 @@ export async function requestSourcePermission(
 ): Promise<boolean> {
   return browser.permissions.request({ origins: SOURCE_ORIGINS[source] });
 }
+
+export function isAllowedNavigation(source: SourceId, rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== "https:") return false;
+    return SOURCE_ORIGINS[source].some((pattern) => {
+      const origin = new URL(pattern.replace("/*", "")).origin;
+      return url.origin === origin;
+    });
+  } catch {
+    return false;
+  }
+}

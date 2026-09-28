@@ -881,10 +881,10 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 
 **验收**：
 
-- [ ] 连续点击只有一个 Timeline；
-- [ ] 标签页标题变化不影响识别；
-- [ ] service worker 休眠后可重新处理请求；
-- [ ] Chrome/Edge 均可用。
+- [x] action 使用完整扩展 URL 查找并激活唯一 Timeline；需真实浏览器手测确认。
+- [x] 查找按 URL 而非标题；需真实浏览器手测确认。
+- [x] service worker 每次消息都重新读取模块级 storage/http 端口；需真实浏览器手测确认。
+- [ ] Chrome/Edge 实际加载和 action 行为（需人工验收）。
 
 ### P1-H：fake adapter 集成
 

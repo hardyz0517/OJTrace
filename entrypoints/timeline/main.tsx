@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { RuntimeResponse } from "../../src/application/messaging/messages";
 import type { StoredData, Submission } from "../../src/domain";
+import { isAllowedNavigation } from "../../src/platform/permissions/hosts";
 import "./style.css";
 
 const sourceLabels: Record<Submission["source"], string> = {
@@ -56,6 +57,13 @@ function groupByDate(items: Submission[]): Array<[string, Submission[]]> {
     groups.set(key, group);
   }
   return [...groups.entries()];
+}
+
+function navigationUrl(item: Submission): string | undefined {
+  const candidate = item.submissionUrl ?? item.fallbackListUrl;
+  return candidate && isAllowedNavigation(item.source, candidate)
+    ? candidate
+    : undefined;
 }
 
 function App() {
@@ -180,25 +188,37 @@ function App() {
         {groupByDate(visible).map(([day, items]) => (
           <section className="day" key={day}>
             <h2>{day}</h2>
-            {items.map((item) => (
-              <a
-                className="row"
-                href={item.submissionUrl ?? item.fallbackListUrl}
-                target="_blank"
-                rel="noreferrer"
-                key={`${item.source}:${item.accountId}:${item.submissionId}`}
-              >
-                <time>{formatTime(item.submittedAt)}</time>
-                <span className="source">{sourceLabels[item.source]}</span>
-                <span className="problem">
-                  {item.problemId}
-                  {item.problemName ? ` ${item.problemName}` : ""}
-                </span>
-                <span className={`verdict verdict-${item.verdict.code}`}>
-                  {verdictLabel(item)}
-                </span>
-              </a>
-            ))}
+            {items.map((item) =>
+              navigationUrl(item) ? (
+                <a
+                  className="row"
+                  href={navigationUrl(item)}
+                  target="_blank"
+                  rel="noreferrer"
+                  key={`${item.source}:${item.accountId}:${item.submissionId}`}
+                >
+                  <time>{formatTime(item.submittedAt)}</time>
+                  <span className="source">{sourceLabels[item.source]}</span>
+                  <span className="problem">
+                    {item.problemId}
+                    {item.problemName ? ` ${item.problemName}` : ""}
+                  </span>
+                  <span className={`verdict verdict-${item.verdict.code}`}>
+                    {verdictLabel(item)}
+                  </span>
+                </a>
+              ) : (
+                <div
+                  className="row row-disabled"
+                  key={`${item.source}:${item.accountId}:${item.submissionId}`}
+                >
+                  <time>{formatTime(item.submittedAt)}</time>
+                  <span className="source">{sourceLabels[item.source]}</span>
+                  <span className="problem">{item.problemId}</span>
+                  <span className="verdict verdict-other">链接不可用</span>
+                </div>
+              ),
+            )}
           </section>
         ))}
       </section>

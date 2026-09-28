@@ -122,6 +122,10 @@ select {
 .row:hover {
   background: #eef4ff;
 }
+.row-disabled {
+  cursor: default;
+  opacity: 0.72;
+}
 time {
   color: #64748b;
   font-variant-numeric: tabular-nums;

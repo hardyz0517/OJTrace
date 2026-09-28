@@ -73,6 +73,15 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
   const item = value as Partial<RuntimeMessage>;
   return (
     item.schemaVersion === MESSAGE_SCHEMA_VERSION &&
-    typeof item.type === "string"
+    typeof item.type === "string" &&
+    typeof item.requestId === "string" &&
+    item.requestId.length > 0 &&
+    [
+      "GET_STATE",
+      "SYNC_REQUEST",
+      "UPDATE_ACCOUNT",
+      "DELETE_ACCOUNT",
+      "REQUEST_HOST_PERMISSION",
+    ].includes(item.type)
   );
 }

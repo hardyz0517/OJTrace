@@ -1,5 +1,6 @@
 import {
   DEFAULT_PREFERENCES,
+  normalizeAuthMode,
   STORAGE_SCHEMA_VERSION,
   type AccountConfig,
   type StoredData,
@@ -48,21 +49,72 @@ function isStoredData(value: unknown): value is StoredData {
 }
 
 function validateStoredData(value: StoredData): StoredData {
-  const accounts = value.accounts.filter(
-    (account) =>
-      typeof account.accountId === "string" &&
-      typeof account.identifier === "string" &&
-      ["codeforces", "luogu", "qoj", "loj"].includes(account.source),
-  );
+  const accounts = value.accounts
+    .filter(
+      (account) =>
+        typeof account.accountId === "string" &&
+        typeof account.identifier === "string" &&
+        ["codeforces", "luogu", "qoj", "atcoder", "hydroj"].includes(
+          account.source,
+        ) &&
+        [
+          "public",
+          "browser_session",
+          "public-handle",
+          "browser-session",
+          "manual-cookie",
+          "password",
+        ].includes(account.authMode),
+    )
+    .map((account) => ({
+      ...account,
+      authMode: normalizeAuthMode(account.authMode),
+      ...(account.credentials &&
+      typeof account.credentials === "object" &&
+      !Array.isArray(account.credentials)
+        ? {
+            credentials: Object.fromEntries(
+              Object.entries(account.credentials).filter(
+                ([key, value]) =>
+                  key.length > 0 &&
+                  typeof value === "string" &&
+                  !/[\r\n]/.test(value),
+              ),
+            ),
+          }
+        : {}),
+      ...(typeof account.cookie === "string" ? { cookie: account.cookie } : {}),
+      ...(typeof account.origin === "string" ? { origin: account.origin } : {}),
+    }));
   const submissions = value.submissions.filter(
     (item) =>
       typeof item.source === "string" &&
       typeof item.accountId === "string" &&
       typeof item.submissionId === "string" &&
+      (item.origin === undefined || typeof item.origin === "string") &&
       Number.isFinite(item.submittedAt) &&
       Number.isFinite(item.fetchedAt),
   );
-  return { ...value, accounts, submissions };
+  const validAccountIds = new Set(accounts.map((account) => account.accountId));
+  const syncAccountIds = Array.isArray(value.preferences.syncAccountIds)
+    ? [
+        ...new Set(
+          value.preferences.syncAccountIds.filter(
+            (accountId): accountId is string =>
+              typeof accountId === "string" && validAccountIds.has(accountId),
+          ),
+        ),
+      ]
+    : undefined;
+  const preferences = { ...value.preferences };
+  if (syncAccountIds === undefined) delete preferences.syncAccountIds;
+  else preferences.syncAccountIds = syncAccountIds;
+  return {
+    ...value,
+    accounts,
+    submissions,
+    preferences,
+  };
 }
 
 function migrate(value: unknown): StoredData {

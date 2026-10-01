@@ -1,9 +1,23 @@
 export const STORAGE_SCHEMA_VERSION = 1 as const;
 export const MESSAGE_SCHEMA_VERSION = 1 as const;
 
-export type SourceId = "codeforces" | "luogu" | "qoj" | "loj";
+export type SourceId = "codeforces" | "luogu" | "qoj" | "atcoder" | "hydroj";
 export type Availability = "stable" | "experimental" | "unsupported";
-export type AuthMode = "public" | "browser_session";
+export type AccountAuthMode =
+  "public-handle" | "browser-session" | "manual-cookie" | "password";
+
+/**
+ * Legacy values are accepted while loading existing local data. New account
+ * records are always written with AccountAuthMode values.
+ */
+export type AuthMode = AccountAuthMode | "public" | "browser_session";
+export type AccountCredentials = Record<string, string>;
+
+export function normalizeAuthMode(mode: AuthMode): AccountAuthMode {
+  if (mode === "public") return "public-handle";
+  if (mode === "browser_session") return "browser-session";
+  return mode;
+}
 export type IdentityQuality = "stable" | "composite";
 
 export type VerdictCode =
@@ -26,6 +40,12 @@ export interface AccountConfig {
   label?: string;
   enabled: boolean;
   authMode: AuthMode;
+  /** Structured user-provided credentials for the explicit manual fallback. */
+  credentials?: AccountCredentials;
+  /** Legacy full Cookie value kept for migration compatibility. */
+  cookie?: string;
+  /** Exact HydroOJ instance origin, required for HydroOJ accounts. */
+  origin?: string;
   providerAccountKey?: string;
   providerDisplayName?: string;
   verifiedAt?: number;
@@ -35,6 +55,7 @@ export interface Submission {
   source: SourceId;
   accountId: string;
   providerAccountKey?: string;
+  origin?: string;
   submissionId: string;
   identityQuality: IdentityQuality;
   problemId: string;
@@ -44,6 +65,13 @@ export interface Submission {
     code: VerdictCode;
     raw: string;
   };
+  score?: number;
+  /** Execution time in milliseconds. */
+  timeMs?: number;
+  /** Peak memory in kilobytes. */
+  memoryKb?: number;
+  /** Submitted source size in bytes. */
+  codeLength?: number;
   language?: string;
   submissionUrl?: string;
   problemUrl?: string;
@@ -94,6 +122,12 @@ export interface Preferences {
   enabledSources: SourceId[];
   retentionPerAccount: number;
   freshnessCooldownMs: number;
+  /**
+   * Accounts selected for manual and automatic sync. An omitted value keeps
+   * the legacy/default behavior of syncing every enabled account; an empty
+   * array is an intentional "sync nothing" choice.
+   */
+  syncAccountIds?: string[];
 }
 
 export interface StoredData {

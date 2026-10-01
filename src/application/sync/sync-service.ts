@@ -54,6 +54,7 @@ async function syncOne(
   account: AccountConfig,
   http: HttpClient,
   now: number,
+  resolveCookie?: (account: AccountConfig) => Promise<string | undefined>,
 ): Promise<SyncSourceResult> {
   const requestId = crypto.randomUUID();
   const adapter = adapterBySource.get(account.source);
@@ -80,8 +81,12 @@ async function syncOne(
   const controller = new AbortController();
   const promise = (async () => {
     try {
+      const requestAccount =
+        account.authMode === "browser-session"
+          ? { ...account, cookie: undefined }
+          : account;
       const result = await adapter.fetchRecent({
-        account,
+        account: requestAccount,
         limit: MAX_LIMIT,
         signal: controller.signal,
         now,
@@ -116,11 +121,28 @@ async function syncOne(
 export async function syncEnabledAccounts(
   storage: StoragePort,
   http: HttpClient,
-  options: { force: boolean; now?: number } = { force: false },
+  options: {
+    force: boolean;
+    now?: number;
+    accountIds?: string[];
+    resolveCookie?: (account: AccountConfig) => Promise<string | undefined>;
+  } = { force: false },
 ): Promise<SyncResult> {
   const now = options.now ?? Date.now();
   const current = await storage.load();
-  const accounts = current.accounts.filter((account) => account.enabled);
+  const selectedAccountIds =
+    options.accountIds ?? current.preferences.syncAccountIds;
+  const requestedAccountIds =
+    options.accountIds === undefined && selectedAccountIds === undefined
+      ? undefined
+      : new Set(options.accountIds ?? selectedAccountIds ?? []);
+  const accounts = current.accounts.filter(
+    (account) =>
+      account.enabled &&
+      (selectedAccountIds === undefined ||
+        selectedAccountIds.includes(account.accountId)) &&
+      (!requestedAccountIds || requestedAccountIds.has(account.accountId)),
+  );
   const eligible = accounts.filter((account) => {
     if ((sourceRateLimitUntil.get(account.source) ?? 0) > now) return false;
     if (options.force) return true;
@@ -136,7 +158,9 @@ export async function syncEnabledAccounts(
     }
   }
   const sources = await Promise.all(
-    eligible.map((account) => syncOne(account, http, now)),
+    eligible.map((account) =>
+      syncOne(account, http, now, options.resolveCookie),
+    ),
   );
   for (const item of sources) {
     if (item.error?.kind === "rate_limited") {

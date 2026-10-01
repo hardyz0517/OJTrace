@@ -1,7 +1,11 @@
 export interface CodeforcesRawSubmission {
   id: number;
+  points?: number;
   contestId?: number;
   creationTimeSeconds: number;
+  timeConsumedMillis?: number;
+  memoryConsumedBytes?: number;
+  relativeTimeSeconds?: number;
   problem?: {
     contestId?: number;
     index?: string;

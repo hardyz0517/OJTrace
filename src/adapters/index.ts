@@ -1,12 +1,15 @@
 import { codeforcesAdapter } from "./codeforces";
-import { lojAdapter, qojAdapter } from "./unsupported";
+import { qojAdapter } from "./qoj";
 import { luoguAdapter } from "./luogu";
+import { atcoderAdapter } from "./atcoder";
+import { hydroOJAdapter } from "./hydroj";
 
 export const adapters = [
   codeforcesAdapter,
   luoguAdapter,
   qojAdapter,
-  lojAdapter,
+  atcoderAdapter,
+  hydroOJAdapter,
 ];
 
 export const adapterBySource = new Map(

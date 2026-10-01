@@ -50,6 +50,15 @@ export function normalizeCodeforcesSubmission(
       code: normalizeCodeforcesVerdict(raw.verdict),
       raw: raw.verdict ?? "UNKNOWN",
     },
+    score: Number.isFinite(raw.points) ? raw.points : undefined,
+    timeMs: Number.isFinite(raw.timeConsumedMillis)
+      ? raw.timeConsumedMillis
+      : undefined,
+    memoryKb:
+      raw.memoryConsumedBytes !== undefined &&
+      Number.isFinite(raw.memoryConsumedBytes)
+        ? raw.memoryConsumedBytes / 1_024
+        : undefined,
     language: raw.programmingLanguage,
     submissionUrl: prefix
       ? `https://codeforces.com/${prefix}/${contestId}/submission/${raw.id}`

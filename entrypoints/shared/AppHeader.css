@@ -1,0 +1,150 @@
+:root {
+  scrollbar-gutter: stable;
+  view-transition-name: none;
+}
+
+.app-header {
+  display: flex;
+  min-height: 66px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 0 24px;
+  border-bottom: 1px solid #eef0f3;
+}
+.app-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  color: inherit;
+  text-decoration: none;
+}
+.app-brand strong {
+  color: #172033;
+  font-size: 23px;
+  font-weight: 650;
+}
+.app-brand span {
+  color: #8a93a3;
+  font-size: 12px;
+}
+.app-nav {
+  display: grid;
+  grid-template-columns: 68px 52px;
+  gap: 4px;
+}
+.app-nav a {
+  position: relative;
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  color: #7a8494;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 140ms ease;
+}
+.app-nav a:hover,
+.app-nav a.is-active {
+  color: #344054;
+}
+.app-nav a.is-active {
+  font-weight: 600;
+}
+.app-nav a:focus-visible,
+.app-brand:focus-visible {
+  outline: 2px solid #b8c7e8;
+  outline-offset: 2px;
+}
+.app-nav-indicator {
+  position: absolute;
+  bottom: 0;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  background: #8398bb;
+  view-transition-name: nav-indicator;
+}
+.app-nav-indicator.is-manual-moving {
+  transform: translateX(var(--indicator-shift)) scaleX(var(--indicator-scale));
+  transform-origin: left center;
+  transition: transform 110ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.timeline-page-content,
+.settings-content {
+  view-transition-name: page-content;
+}
+.page-content-enter {
+  animation: page-enter 170ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.page-content-exit {
+  animation: page-exit 110ms ease-out both;
+  pointer-events: none;
+}
+
+@view-transition {
+  navigation: auto;
+}
+
+::view-transition-old(page-content) {
+  animation: page-exit 110ms ease-out both;
+}
+::view-transition-new(page-content) {
+  animation: page-enter 170ms cubic-bezier(0.2, 0.8, 0.2, 1) 30ms both;
+}
+::view-transition-group(page-content) {
+  animation: none;
+}
+::view-transition-group(nav-indicator) {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+::view-transition-old(nav-indicator),
+::view-transition-new(nav-indicator) {
+  animation: none;
+}
+@keyframes page-exit {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (max-width: 720px) {
+  .app-header {
+    padding: 0 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-nav a {
+    transition: none;
+  }
+  .page-content-enter,
+  .page-content-exit {
+    animation: none;
+  }
+  .app-nav-indicator.is-manual-moving {
+    transform: none;
+    transition: none;
+  }
+  ::view-transition-group(page-content),
+  ::view-transition-group(nav-indicator) {
+    animation-duration: 1ms !important;
+  }
+  ::view-transition-old(page-content),
+  ::view-transition-new(page-content),
+  ::view-transition-old(nav-indicator),
+  ::view-transition-new(nav-indicator) {
+    animation: none !important;
+  }
+}

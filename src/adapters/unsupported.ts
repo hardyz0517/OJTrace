@@ -2,7 +2,7 @@ import type { OJAdapter } from "../domain";
 import { AdapterFailure } from "../domain/errors";
 
 export function createUnsupportedAdapter(
-  source: "qoj" | "loj",
+  source: never,
   displayName: string,
 ): OJAdapter {
   return {
@@ -10,7 +10,9 @@ export function createUnsupportedAdapter(
       id: source,
       displayName,
       availability: "unsupported",
-      authModes: ["public", "browser_session"],
+      // No current submission-history implementation exists for these OJs.
+      // Do not advertise an auth mode that would imply sync support.
+      authModes: [],
       capabilities: {
         accountLookup: false,
         stableSubmissionId: false,
@@ -32,6 +34,3 @@ export function createUnsupportedAdapter(
     },
   };
 }
-
-export const qojAdapter = createUnsupportedAdapter("qoj", "QOJ");
-export const lojAdapter = createUnsupportedAdapter("loj", "LibreOJ");

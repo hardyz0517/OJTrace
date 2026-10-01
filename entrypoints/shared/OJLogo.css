@@ -1,0 +1,42 @@
+.oj-logo {
+  display: inline-block;
+  flex: 0 0 auto;
+  object-fit: contain;
+  vertical-align: middle;
+}
+
+.oj-logo-qoj {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "OJTrace QOJ Glyphicons";
+  font-style: normal;
+  font-weight: normal;
+  font-size: 18px;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.oj-logo-qoj::before {
+  content: "\e135";
+}
+
+.oj-logo-tiny {
+  width: 15px;
+  height: 15px;
+}
+
+.oj-logo-small {
+  width: 18px;
+  height: 18px;
+}
+
+@font-face {
+  /* QOJ's own Bootstrap Glyphicons globe (U+E135). */
+  font-family: "OJTrace QOJ Glyphicons";
+  font-style: normal;
+  font-weight: normal;
+  font-display: block;
+  src: url("/oj-logos/qoj-glyphicons.woff2") format("woff2");
+}

@@ -4,6 +4,107 @@ import { parseCodeforcesResponse } from "../../src/adapters/codeforces/parser";
 import { codeforcesAdapter } from "../../src/adapters/codeforces";
 
 describe("Codeforces parser and normalizer", () => {
+  it("advertises browser, cookie, and direct username modes", () => {
+    expect(codeforcesAdapter.metadata.authModes).toEqual([
+      expect.objectContaining({
+        type: "browser-session",
+        recommended: true,
+      }),
+      expect.objectContaining({
+        type: "manual-cookie",
+        identifierRequired: false,
+        credentialFields: [expect.objectContaining({ key: "cookie" })],
+      }),
+      expect.objectContaining({
+        type: "public-handle",
+        label: "直接输入用户名",
+      }),
+    ]);
+  });
+
+  it("detects a logged-in browser session from the Codeforces home page", async () => {
+    let credentials: RequestCredentials | undefined;
+    const result = await codeforcesAdapter.detectBrowserSession!({
+      signal: new AbortController().signal,
+      requestId: "request",
+      http: {
+        async request(_source, _url, options) {
+          credentials = options?.credentials;
+          return {
+            status: 200,
+            url: "https://codeforces.com/",
+            contentType: "text/html",
+            text: '<a class="user-link" href="/profile/tester">tester</a>',
+            headers: new Headers(),
+          };
+        },
+      },
+    });
+    expect(credentials).toBe("include");
+    expect(result).toEqual({
+      authenticated: true,
+      status: "authenticated",
+      username: "tester",
+    });
+  });
+
+  it("accepts a username read from the current Codeforces page", async () => {
+    const result = await codeforcesAdapter.detectBrowserSession!({
+      signal: new AbortController().signal,
+      requestId: "request",
+      pageIdentity: "tester",
+      http: {
+        async request() {
+          throw new Error("page identity should avoid service-worker fetch");
+        },
+      },
+    });
+    expect(result).toEqual({
+      authenticated: true,
+      status: "authenticated",
+      username: "tester",
+    });
+  });
+
+  it("uses a manual cookie to discover and fetch the current account", async () => {
+    const requests: Array<{
+      url: string;
+      headers?: Record<string, string>;
+    }> = [];
+    const result = await codeforcesAdapter.fetchRecent({
+      account: {
+        accountId: "account",
+        source: "codeforces",
+        identifier: "",
+        enabled: true,
+        authMode: "manual-cookie",
+        credentials: { cookie: "JSESSIONID=session" },
+      },
+      limit: 10,
+      signal: new AbortController().signal,
+      now: 100,
+      requestId: "request",
+      http: {
+        async request(_source, url, options) {
+          requests.push({ url, headers: options?.headers });
+          return {
+            status: 200,
+            url,
+            contentType: url.endsWith("/") ? "text/html" : "application/json",
+            text: url.endsWith("/")
+              ? '<a href="/profile/tester">tester</a>'
+              : JSON.stringify({ status: "OK", result: [] }),
+            headers: new Headers(),
+          };
+        },
+      },
+    });
+    expect(result.account.providerAccountKey).toBe("tester");
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.headers?.Cookie).toBe("JSESSIONID=session");
+    expect(requests[1]?.headers?.Cookie).toBe("JSESSIONID=session");
+  });
+
   it("parses a successful response and normalizes epoch seconds", () => {
     const parsed = parseCodeforcesResponse(
       JSON.stringify({
@@ -16,6 +117,8 @@ describe("Codeforces parser and normalizer", () => {
             problem: { contestId: 10, index: "A", name: "A + B" },
             programmingLanguage: "GNU C++17",
             verdict: "OK",
+            timeConsumedMillis: 80,
+            memoryConsumedBytes: 835_584,
           },
         ],
       }),
@@ -29,6 +132,9 @@ describe("Codeforces parser and normalizer", () => {
     expect(result.submissionId).toBe("42");
     expect(result.submittedAt).toBe(1_700_000_000_000);
     expect(result.verdict.code).toBe("accepted");
+    expect(result.timeMs).toBe(80);
+    expect(result.memoryKb).toBe(816);
+    expect(result.language).toBe("GNU C++17");
     expect(result.submissionUrl).toBe(
       "https://codeforces.com/contest/10/submission/42",
     );

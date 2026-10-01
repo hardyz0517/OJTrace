@@ -72,6 +72,54 @@ describe("storage port", () => {
     expect(loaded.submissions).toHaveLength(1);
   });
 
+  it("migrates legacy auth mode values without exposing a cookie in UI data", async () => {
+    const area = fakeArea();
+    const valid = defaultStoredData();
+    await area.set({
+      "ojtrace:data": {
+        ...valid,
+        accounts: [
+          {
+            accountId: "legacy",
+            source: "luogu",
+            identifier: "99",
+            enabled: true,
+            authMode: "browser_session",
+          },
+        ],
+      },
+    });
+    const loaded = await createStoragePort(area).load();
+    expect(loaded.accounts[0]?.authMode).toBe("browser-session");
+    expect(loaded.accounts[0]?.cookie).toBeUndefined();
+  });
+
+  it("keeps only valid persisted sync account ids", async () => {
+    const area = fakeArea();
+    const valid = defaultStoredData();
+    await area.set({
+      "ojtrace:data": {
+        ...valid,
+        accounts: [
+          {
+            accountId: "account",
+            source: "codeforces",
+            identifier: "user",
+            enabled: true,
+            authMode: "public",
+          },
+        ],
+        preferences: {
+          ...valid.preferences,
+          syncAccountIds: ["account", "account", 3, null],
+        },
+      },
+    });
+    expect(
+      (await createStoragePort(area).load()).preferences.syncAccountIds,
+    ).toEqual(["account"]);
+  });
+
   it("clears all local data through the serialized storage port", async () => {
     const area = fakeArea();
     const store = createStoragePort(area);

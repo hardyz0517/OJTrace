@@ -25,6 +25,140 @@ const codeforcesAccount = {
 };
 
 describe("sync application", () => {
+  it("syncs only the persisted account selection", async () => {
+    const otherAccount = {
+      accountId: "luogu-account",
+      source: "luogu" as const,
+      identifier: "10001",
+      enabled: true,
+      authMode: "browser_session" as const,
+    };
+    const storage = createStoragePort(
+      area({
+        ...defaultStoredData(),
+        accounts: [codeforcesAccount, otherAccount],
+        preferences: {
+          ...defaultStoredData().preferences,
+          syncAccountIds: [codeforcesAccount.accountId],
+        },
+      }),
+    );
+    let calls = 0;
+    const http: HttpClient = {
+      async request(source) {
+        calls += 1;
+        return {
+          status: 200,
+          url:
+            source === "luogu"
+              ? "https://www.luogu.com.cn/record/list"
+              : "https://codeforces.com/api/user.status",
+          contentType: "application/json",
+          text: JSON.stringify({ status: "OK", result: [] }),
+          headers: new Headers(),
+        };
+      },
+    };
+
+    const result = await syncEnabledAccounts(storage, http, {
+      force: true,
+      now: 1_700_000_000_000,
+    });
+    expect(calls).toBe(1);
+    expect(result.sources.map((item) => item.accountId)).toEqual([
+      codeforcesAccount.accountId,
+    ]);
+  });
+
+  it("honors an explicit request selection over persisted ids", async () => {
+    const storage = createStoragePort(
+      area({
+        ...defaultStoredData(),
+        accounts: [codeforcesAccount],
+        preferences: {
+          ...defaultStoredData().preferences,
+          syncAccountIds: [codeforcesAccount.accountId],
+        },
+      }),
+    );
+    let calls = 0;
+    const http: HttpClient = {
+      async request() {
+        calls += 1;
+        throw new Error("should not request an unselected account");
+      },
+    };
+
+    const result = await syncEnabledAccounts(storage, http, {
+      force: true,
+      accountIds: [],
+      now: 1_700_000_000_000,
+    });
+    expect(calls).toBe(0);
+    expect(result.sources).toHaveLength(0);
+  });
+
+  it("does not sync any account when persisted selection is empty", async () => {
+    const storage = createStoragePort(
+      area({
+        ...defaultStoredData(),
+        accounts: [codeforcesAccount],
+        preferences: {
+          ...defaultStoredData().preferences,
+          syncAccountIds: [],
+        },
+      }),
+    );
+    const http: HttpClient = {
+      async request() {
+        throw new Error("should not request with an empty selection");
+      },
+    };
+    const result = await syncEnabledAccounts(storage, http, { force: true });
+    expect(result.sources).toHaveLength(0);
+  });
+
+  it("does not request Luogu when it is not explicitly selected", async () => {
+    const luoguAccount = {
+      accountId: "luogu-account",
+      source: "luogu" as const,
+      identifier: "10001",
+      enabled: true,
+      authMode: "browser_session" as const,
+    };
+    const storage = createStoragePort(
+      area({
+        ...defaultStoredData(),
+        accounts: [codeforcesAccount, luoguAccount],
+        preferences: {
+          ...defaultStoredData().preferences,
+          syncAccountIds: [codeforcesAccount.accountId],
+        },
+      }),
+    );
+    const requestedSources: string[] = [];
+    const http: HttpClient = {
+      async request(source) {
+        requestedSources.push(source);
+        return {
+          status: 200,
+          url: "https://codeforces.com/api/user.status",
+          contentType: "application/json",
+          text: JSON.stringify({ status: "OK", result: [] }),
+          headers: new Headers(),
+        };
+      },
+    };
+
+    const result = await syncEnabledAccounts(storage, http, {
+      force: true,
+      now: 1_700_000_000_000,
+    });
+
+    expect(requestedSources).toEqual(["codeforces"]);
+    expect(result.sources.some((item) => item.source === "luogu")).toBe(false);
+  });
+
   it("keeps successful records when another source fails", async () => {
     const initial = {
       ...defaultStoredData(),

@@ -1,5 +1,0 @@
-Source page: https://contest-archive.loj.ac/contest/12/
-Observed link label: 提交记录
-Observed href: https://contest-archive.loj.ac/submissions?contest=12
-Direct capture: HTTP 200 was reported, but no response body lines were exposed.
-Scope: archived contest only; not a current per-user history endpoint.

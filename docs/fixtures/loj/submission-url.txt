@@ -1,4 +1,0 @@
-Observed redirect shape in a third-party script:
-https://loj.ac/s/<numeric-id>
-
-The numeric ID is replaced with <numeric-id>; current page availability and access control were not verified.

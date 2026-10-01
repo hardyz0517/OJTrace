@@ -4,7 +4,7 @@
 >
 > 适用范围：从空目录开始，完成可运行、可验证、可维护的第一版 Chrome/Edge Manifest V3 扩展。
 >
-> 当前状态：已完成工具链初始化和第一轮 Gate 0 研究；已实现 Codeforces stable adapter、Luogu experimental adapter、QOJ/LibreOJ unsupported fallback、MV3 骨架、Timeline、Settings、本地存储和基础测试。MVP 默认只启用 Codeforces；Luogu 实验性账号默认停用，QOJ/LibreOJ 不申请权限且只作占位。自动质量门禁、平台测试和权限审计已通过；真实 Chrome/Edge 加载、action 行为和登录态仍需人工验收。
+> 当前状态：已完成工具链初始化和第一轮 Gate 0 研究；已实现 Codeforces stable adapter、Luogu 正式授权与扫描链路、QOJ experimental UOJ HTML adapter、LibreOJ unsupported fallback、MV3 骨架、Timeline、Settings、本地存储和自动化测试。QOJ 已在 2026-10-01 的已登录 Codex 浏览器会话中完成人工页面验收；Chrome/Edge service worker 复用登录态仍待最小扩展验证。
 >
 > 执行规则：本文件是唯一总计划。所有 Agent、所有实现任务和所有集成决策都必须能在本文件中找到对应任务 ID、输入、输出和验收条件。
 
@@ -23,12 +23,12 @@
 - 使用 Manifest V3；
 - 同时兼容 Chrome 和 Edge；
 - 使用完整标签页，而不是 popup；
-- 支持 Codeforces，并对 Luogu、QOJ、LibreOJ 做真实验证；
+- 支持 Codeforces 和 Luogu；对 QOJ、LibreOJ 做真实验证并明确支持边界；
 - 将每个 OJ 的结果转换为统一模型；
 - 使用本地存储；
 - 支持手动刷新；
 - 显示单 OJ 错误和旧缓存；
-- 不读取或保存完整 Cookie；
+- 不要求用户手动粘贴 Cookie；洛谷授权只在用户主动操作后申请最小权限，不持久化或上传完整 Cookie；
 - 不使用服务端；
 - 不上传账号、提交、Cookie 或代码内容。
 
@@ -531,8 +531,8 @@ service worker 必须验证 `sender.id`，不得把任意网页消息当作可�
 | OJ | 初始等级 | 首选数据源 | 登录 | submission URL | 主要风险 | fallback |
 |---|---|---|---|---|---|---|
 | Codeforces | stable 候选 | 官方 `user.status` | 通常不需要 | `/contest/{contestId}/submission/{id}` | 2 秒限流、特殊题库 URL | 用户列表页 |
-| Luogu | experimental | `/record/list` 页面数据 | 需登录态实测 | 未确认，默认只跳列表 | 非稳定内部数据、反爬、401/HTML | 记录列表页 |
-| QOJ | unsupported | 无可复现用户历史接口 | 当前通常需要 | 未确认 | 提交列表可能临时关闭、接口未公开 | 保留旧缓存，不申请权限 |
+| Luogu | stable 目标 | `/record/list` 页面数据 | 用户主动授权的浏览器登录态 | 需真实登录验证 | 非稳定内部数据、反爬、401/HTML、Cookie/SameSite | 记录列表页；页面上下文请求 |
+| QOJ | experimental | 登录后 UOJ HTML 列表（`/submissions?submitter=&page=`） | 需要浏览器登录态 | 已确认上游 UOJ 字段和分页；QOJ 线上匿名入口到 `/login` | QOJ 页面改版、登录态过期、限流 | 保留旧缓存；按需申请 qoj.ac host permission |
 | LibreOJ | unsupported | 无可复现当前接口 | 需实测 | 未确认 | API/站点迁移、旧文档 | 保留旧缓存，不申请权限 |
 
 只有 `stable` 才能默认启用。`experimental` 默认关闭并显示说明。`unsupported` 不注册到同步列表，但保留代码目录以便以后重新验证。
@@ -1142,7 +1142,7 @@ Gate 0 不通过时，只修研究和风险，不开始正式 Adapter。
 - [x] 没有未处理的高风险阻塞项；
 - [x] 发布包不包含测试账号或敏感数据。
 
-当前自动门禁证据：`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`（14 tests）、`pnpm format:check`、`pnpm build` 和 `pnpm audit:manifest` 已通过。Chrome/Edge 人工验收仍以 `docs/qa/browser-matrix.md` 为准，未完成前不得宣称浏览器发布门禁全部通过。
+当前自动门禁证据：`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`（34 tests）、`pnpm format:check`、`pnpm build` 和 `pnpm audit:manifest` 已通过。Chrome/Edge 人工验收仍以 `docs/qa/browser-matrix.md` 为准，未完成前不得宣称浏览器发布门禁全部通过。
 
 ---
 

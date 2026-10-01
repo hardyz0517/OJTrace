@@ -1,6 +1,0 @@
-{
-  "submissions": [
-    {"id": "<submission-id>"}
-  ],
-  "note": "Only submissions[0].id was read by the third-party script. This is a redacted shape, not a captured live response; time, verdict, problem and pagination fields are unknown."
-}

@@ -68,7 +68,7 @@ Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Method Post `
 
 ## 结论
 
-**needs-more-evidence**。当前 Luogu `/record/list`（包括 `_contentOnly=1`）对匿名请求稳定返回 401，HTML/JSON 登录错误可可靠识别；但成功提交列表的字段路径、时间单位、分页、submission URL、浏览器 session/CSRF 要求和 service worker 可用性都没有已登录实测证据。MVP 应暂不注册为 stable：可保留实验性 Adapter 探针，收到 401 时显示 `auth_required` 并保留旧缓存；禁止猜测接口、申请 `cookies` 权限或绕过反爬。升级为 `experimental`/`stable` 前必须补充一次真实登录浏览器 Network 记录及对应脱敏 fixture。
+**实现状态：stable 目标，发布门禁仍待真实登录浏览器验收**。当前 Luogu `/record/list`（包括 `_contentOnly=1`）对匿名请求稳定返回 401，HTML/JSON 登录错误可可靠识别；代码已实现正式 Adapter、数值/字符串 verdict 映射、`/record/{id}` URL、Service Worker 直连、旧缓存保留和授权入口。同步不会创建或复用洛谷标签页；如果扩展上下文没有可用登录态，会明确返回认证错误并保留缓存。仍必须用真实测试账号确认成功响应字段、时间单位、分页、登录态和 Chrome/Edge 行为，并补充脱敏成功 fixture 后才能完成发布门禁。
 
 最后验证证据：2026-09-28 对 `www.luogu.com.cn` 的真实 401/405 响应、官方开放平台文档入口（[lgapi-docs](https://github.com/luogu-dev/lgapi-docs)），以及本目录脱敏 fixtures。
 
@@ -90,5 +90,5 @@ Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck -Method Post `
 - 频率限制：未确认；401 阶段没有可用的分页/限流证据。
 - CORS / CSRF / Cloudflare：匿名响应无 `Access-Control-Allow-Origin`；HTML 含短时 `csrf-token`；OPTIONS 为 405。
 - service worker fetch 结果：未登录环境只确认普通 HTTPS 可返回 401；`credentials: include`/Cookie/CSRF 行为未验证。
-- 页面内 fetch 结果：无已登录浏览器会话，未验证。
-- content script 是否必要：未决定；先做最小实验再决定，不得直接申请 `scripting`。
+- 页面内 fetch 结果：无已登录浏览器会话，未验证；当前实现不依赖页面上下文。
+- content script 是否必要：当前实现不使用洛谷 content script，后台同步只走 Service Worker 直连。

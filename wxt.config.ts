@@ -5,17 +5,11 @@ export default defineConfig({
     name: "OJTrace（题迹）",
     description: "Local-first cross-OJ submission timeline",
     version: "0.1.0",
-    permissions: [
-      "storage",
-      "tabs",
-      "scripting",
-      "cookies",
-      "https://qoj.ac/*",
-    ],
+    permissions: ["storage", "tabs", "cookies"],
+    host_permissions: ["https://qoj.ac/*"],
     optional_host_permissions: [
       "https://codeforces.com/*",
       "https://www.luogu.com.cn/*",
-      "https://qoj.ac/*",
       "https://atcoder.jp/*",
       "https://kenkoooo.com/*",
       // Chrome only permits permissions.request() for patterns declared here.
@@ -25,8 +19,19 @@ export default defineConfig({
       "https://*/*",
       "http://*/*",
     ],
+    icons: {
+      16: "icons/ojtrace-16.png",
+      32: "icons/ojtrace-32.png",
+      48: "icons/ojtrace-48.png",
+      128: "icons/ojtrace-128.png",
+    },
     action: {
       default_title: "Open OJTrace",
+      default_icon: {
+        16: "icons/ojtrace-16.png",
+        32: "icons/ojtrace-32.png",
+        48: "icons/ojtrace-48.png",
+      },
     },
   },
 });

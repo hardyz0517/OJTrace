@@ -6,6 +6,7 @@ const manifestPath = new URL(
 );
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 const permissions = new Set(manifest.permissions ?? []);
+const hostPermissions = new Set(manifest.host_permissions ?? []);
 const optionalHosts = new Set(manifest.optional_host_permissions ?? []);
 const forbidden = ["webRequest", "<all_urls>"];
 const unexpected = forbidden.filter(
@@ -14,15 +15,21 @@ const unexpected = forbidden.filter(
 const expectedHosts = [
   "https://codeforces.com/*",
   "https://www.luogu.com.cn/*",
-  "https://qoj.ac/*",
   "https://atcoder.jp/*",
   "https://kenkoooo.com/*",
   "https://*/*",
   "http://*/*",
 ];
 
+if (!hostPermissions.has("https://qoj.ac/*")) {
+  throw new Error("QOJ must remain a fixed host permission");
+}
+
 if (unexpected.length > 0) {
   throw new Error(`Forbidden permissions found: ${unexpected.join(", ")}`);
+}
+if (permissions.has("scripting")) {
+  throw new Error("The extension must not depend on page-context scripting");
 }
 if (
   optionalHosts.size !== expectedHosts.length ||

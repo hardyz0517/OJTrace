@@ -1,0 +1,447 @@
+.date-range-trigger {
+  display: inline-flex;
+  min-width: 108px;
+  height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid #e1e5eb;
+  border-radius: 7px;
+  background: #fff;
+  color: #4b5565;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease;
+}
+.date-range-trigger:hover {
+  border-color: #bdc8da;
+  background: #fbfcfd;
+}
+.date-range-trigger[data-state="open"] {
+  border-color: #80bbff;
+  box-shadow: 0 0 0 3px rgb(184 199 232 / 28%);
+}
+.date-range-trigger .select-chevron {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-right: 1.5px solid #748096;
+  border-bottom: 1.5px solid #748096;
+  transform: translateY(-2px) rotate(45deg);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease;
+}
+.date-range-trigger[data-state="open"] .select-chevron {
+  border-color: #4f6f9f;
+  transform: translateY(2px) rotate(225deg);
+}
+.date-range-popover {
+  --picker-blue: #1687ff;
+  /* Match the compact reference proportions across text, controls and spacing. */
+  zoom: 0.666667;
+  z-index: 30;
+  box-sizing: border-box;
+  width: min(620px, calc(100vw - 24px));
+  max-height: var(--radix-popover-content-available-height);
+  overflow-y: auto;
+  border: 1px solid #e2e2e8;
+  border-radius: 9px;
+  background: #fff;
+  color: #25262c;
+  padding: 12px;
+  box-shadow:
+    0 3px 9px rgb(27 32 45 / 9%),
+    0 1px 2px rgb(27 32 45 / 4%);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-5px) scale(0.98);
+  transform-origin: var(--radix-popover-content-transform-origin);
+  transition:
+    opacity 160ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 180ms;
+}
+.date-range-popover *,
+.date-range-popover *::before,
+.date-range-popover *::after {
+  box-sizing: border-box;
+}
+.date-range-popover[data-state="open"] {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+  transition:
+    opacity 160ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0s;
+  will-change: opacity, transform;
+}
+.date-range-popover[data-state="closed"] {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-5px) scale(0.98);
+  pointer-events: none;
+}
+[data-radix-popper-content-wrapper]:has(
+  > .date-range-popover[data-state="closed"]
+) {
+  pointer-events: none;
+}
+.date-range-popover :where(button, input) {
+  font: inherit;
+}
+.date-range-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid #f0f0f3;
+  padding-bottom: 8px;
+}
+.date-range-quick-button {
+  height: 28px;
+  border: 1px solid #e1e1e8;
+  border-radius: 7px;
+  background: #fff;
+  color: #7c7d88;
+  padding: 0 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+.date-range-quick-button:hover {
+  background: #f7f7fa;
+}
+.date-range-quick-button[aria-pressed="true"] {
+  border-color: var(--picker-blue);
+  background: var(--picker-blue);
+  color: #fff;
+}
+.date-range-additional-presets {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.date-range-additional-preset {
+  border-color: transparent;
+  padding: 0 7px;
+}
+.date-range-main {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 12px;
+}
+.date-range-fields {
+  min-width: 0;
+}
+.date-range-caption {
+  height: 16px;
+  margin: 0 0 8px;
+  color: #85858f;
+  font-size: 12px;
+  line-height: 16px;
+}
+.date-range-caption.is-error {
+  color: #c23f49;
+  font-size: 11px;
+}
+.date-range-field {
+  height: 72px;
+  border: 1px solid #ececf1;
+  border-radius: 12px;
+  background: #fff;
+  padding: 9px 12px;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+.date-range-field + .date-range-field {
+  margin-top: 8px;
+}
+.date-range-field[data-active="true"] {
+  border-color: var(--picker-blue);
+  background: #f5faff;
+  box-shadow: 0 0 0 1px rgb(22 135 255 / 9%);
+}
+.date-range-field-label {
+  display: block;
+  margin-bottom: 8px;
+  color: #80818c;
+  font-size: 12px;
+  line-height: 16px;
+}
+.date-range-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px 48px 16px;
+  align-items: center;
+  gap: 10px;
+}
+.date-range-inputs input {
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #25262c;
+  padding: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  line-height: 24px;
+  outline: none;
+}
+.date-range-inputs input:focus {
+  outline: none;
+  box-shadow: none;
+}
+.date-range-inputs :is(.date-range-date-input, .date-range-time-input) {
+  appearance: none;
+}
+.date-range-inputs input::-webkit-date-and-time-value {
+  text-align: left;
+}
+.date-range-inputs input::-webkit-datetime-edit,
+.date-range-inputs input::-webkit-datetime-edit-fields-wrapper,
+.date-range-inputs input::-webkit-datetime-edit-year-field,
+.date-range-inputs input::-webkit-datetime-edit-month-field,
+.date-range-inputs input::-webkit-datetime-edit-day-field,
+.date-range-inputs input::-webkit-datetime-edit-hour-field,
+.date-range-inputs input::-webkit-datetime-edit-minute-field,
+.date-range-inputs input::-webkit-datetime-edit-text {
+  padding: 0;
+}
+.date-range-inputs input::-webkit-calendar-picker-indicator,
+.date-range-inputs input::-webkit-inner-spin-button,
+.date-range-inputs input::-webkit-clear-button {
+  display: none;
+}
+.date-range-inputs input:disabled {
+  color: #8b8d98;
+  -webkit-text-fill-color: #8b8d98;
+  opacity: 1;
+}
+.date-range-inputs svg,
+.date-range-checkbox-icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.date-range-picker-button {
+  display: inline-flex;
+  width: 18px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #25262c;
+  padding: 0;
+  cursor: pointer;
+}
+.date-range-picker-button:hover:not(:disabled) {
+  background: #e9edf3;
+}
+.date-range-calendar-button {
+  margin-left: -6px;
+  margin-right: 6px;
+}
+.date-range-picker-button:disabled {
+  color: #8b8d98;
+  cursor: default;
+}
+.date-range-date-menu {
+  zoom: 0.666667;
+  z-index: 31;
+  width: 280px;
+  border: 1px solid #e2e2e8;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  box-shadow: 0 3px 9px rgb(27 32 45 / 12%);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  transform-origin: var(--radix-popover-content-transform-origin);
+}
+.date-range-date-menu[data-state="open"] {
+  animation: date-range-date-menu-in 160ms ease-out;
+}
+.date-range-date-menu[data-state="closed"] {
+  animation: date-range-date-menu-out 120ms ease-in;
+}
+.date-range-date-menu-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+.date-range-date-menu-footer button {
+  height: 28px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #1687ff;
+  padding: 0 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.date-range-date-menu-footer button:hover:not(:disabled) {
+  background: #f0f7ff;
+}
+.date-range-date-menu-footer button:disabled {
+  color: #c6c7ce;
+  cursor: default;
+}
+@keyframes date-range-date-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes date-range-date-menu-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+.date-range-follow {
+  display: flex;
+  min-height: 16px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: #85858f;
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+  user-select: none;
+}
+.date-range-checkbox {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #a0a1ab;
+  border-radius: 2px;
+  background: #fff;
+  color: #fff;
+  padding: 0;
+  cursor: pointer;
+}
+.date-range-checkbox[data-state="checked"] {
+  border-color: var(--picker-blue);
+  background: var(--picker-blue);
+}
+.date-range-checkbox-icon svg {
+  width: 13px;
+  height: 13px;
+  stroke-width: 1.8;
+}
+.date-range-footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+.date-range-cancel,
+.date-range-confirm {
+  height: 32px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.date-range-cancel {
+  background: transparent;
+  color: #80818c;
+}
+.date-range-cancel:hover {
+  background: #f4f4f7;
+}
+.date-range-confirm {
+  background: var(--picker-blue);
+  color: #fff;
+  font-weight: 550;
+}
+.date-range-confirm:hover {
+  background: #087af2;
+}
+.date-range-confirm:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.date-range-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.date-range-calendar {
+  min-width: 0;
+  min-height: 254px;
+  border: 1px solid #ececf1;
+  border-radius: 12px;
+  background: #fafafd;
+  padding: 10px 10px 8px;
+}
+.date-range-popover button:focus-visible,
+.date-range-trigger:focus-visible {
+  outline: 2px solid #80bbff;
+  outline-offset: 2px;
+}
+@media (max-width: 600px) {
+  .date-range-popover,
+  .date-range-date-menu {
+    zoom: 1;
+  }
+  .date-range-main {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .date-range-fields {
+    display: contents;
+  }
+  .date-range-caption {
+    margin-bottom: -4px;
+  }
+  .date-range-field + .date-range-field {
+    margin-top: -4px;
+  }
+  .date-range-follow {
+    margin-top: -4px;
+  }
+  .date-range-footer {
+    grid-row: 6;
+    margin-top: 0;
+  }
+  .date-range-calendar {
+    min-height: 0;
+  }
+}

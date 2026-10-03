@@ -1,0 +1,19 @@
+.sync-diagnostics {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid #e5e8ed;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #667085;
+}
+.sync-diagnostics summary {
+  cursor: pointer;
+}
+.sync-diagnostics ul {
+  padding-left: 20px;
+  line-height: 1.8;
+}
+.sync-diagnostics .diagnostic-warning,
+.sync-diagnostics .diagnostic-error {
+  color: #9a6700;
+}

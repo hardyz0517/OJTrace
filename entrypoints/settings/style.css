@@ -57,8 +57,16 @@ input {
   width: min(520px, 100%);
 }
 .account-form {
+  min-width: 0;
   display: grid;
   gap: 22px;
+}
+.account-form-fields {
+  display: contents;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
 }
 .account-form label {
   display: grid;
@@ -177,6 +185,13 @@ input {
   color: #657083;
   font-size: 13px;
   line-height: 1.5;
+}
+.session-diagnostic {
+  margin: 0;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 .session-status strong {
   margin-left: 4px;

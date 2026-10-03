@@ -57,10 +57,11 @@ button {
 }
 .filter-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
-  min-width: 320px;
+  margin-left: auto;
 }
 .quiet-action {
   display: inline-flex;
@@ -86,9 +87,13 @@ button {
   color: #344054;
 }
 .sync-button {
+  height: 34px;
+  flex-shrink: 0;
+  padding: 0 10px;
+  white-space: nowrap;
   border-color: #e1e5eb;
-  background: #fff;
-  color: #4b5565;
+  background: #f1f5fb;
+  color: #344d74;
   font-weight: 550;
 }
 .sync-button:hover {
@@ -99,48 +104,44 @@ button {
 .sync-button:active {
   background: #f5f7fa;
 }
-.sync-split {
-  position: relative;
+.sync-option-button {
   display: inline-flex;
-  align-items: stretch;
+  min-width: 0;
+  height: 34px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #e7eaf0;
+  border-radius: 7px;
+  background: transparent;
+  color: #657083;
+  padding: 0 9px;
+  font-size: 13px;
+  font-weight: 400;
+  white-space: nowrap;
 }
-.sync-split .sync-button {
-  position: relative;
-  border-radius: 0;
+.sync-option-button:hover,
+.sync-option-button[data-state="open"] {
+  border-color: #bdc8da;
+  background: #f8fafc;
+  color: #344054;
 }
-.sync-split .sync-main-button {
-  border-radius: 7px 0 0 7px;
-}
-.sync-split .sync-menu-button {
-  min-width: 28px;
-  justify-content: center;
-  border-left-color: #d5dbe5;
-  border-radius: 0 7px 7px 0;
-  margin-left: -1px;
-  padding-left: 7px;
-  padding-right: 7px;
-}
-.sync-menu-button .select-chevron {
-  width: 7px;
-  height: 7px;
-  border-color: #748096;
-  transform: translateY(-2px) rotate(45deg);
-}
-.sync-menu-button.is-open .select-chevron,
-.sync-menu-button[data-state="open"] .select-chevron {
+.sync-option-button[data-state="open"] .select-chevron {
   border-color: #4f6f9f;
   transform: translateY(2px) rotate(225deg);
 }
-.sync-split .sync-button:disabled {
-  cursor: wait;
+.sync-button:disabled,
+.sync-option-button:disabled {
+  cursor: not-allowed;
 }
-.sync-main-button:disabled:not(:hover) {
-  border-color: #e1e5eb;
-  background: #fff;
+.sync-button[aria-busy="true"] {
+  cursor: wait;
 }
 .sync-popover {
   z-index: 25;
-  width: min(330px, calc(100vw - 32px));
+  width: max-content;
+  max-width: calc(100vw - 32px);
   border: 1px solid #e1e5eb;
   border-radius: 10px;
   background: rgb(255 255 255 / 98%);
@@ -150,6 +151,8 @@ button {
   opacity: 0;
   padding: 7px;
   pointer-events: none;
+  max-height: var(--radix-popover-content-available-height);
+  overflow-y: auto;
 }
 .sync-popover[data-state="open"] {
   opacity: 1;
@@ -198,7 +201,7 @@ button {
 .sync-account-option {
   position: relative;
   display: grid;
-  grid-template-columns: 20px minmax(62px, auto) minmax(0, 1fr) auto;
+  grid-template-columns: 20px max-content minmax(0, max-content) auto;
   align-items: center;
   gap: 9px;
   min-height: 38px;
@@ -324,15 +327,17 @@ button {
 }
 .filters {
   display: flex;
+  flex-wrap: wrap;
   min-height: 58px;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 0 24px;
+  gap: 8px 16px;
+  padding: 12px 24px;
   border-bottom: 1px solid #eef0f3;
 }
 .filter-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -476,6 +481,7 @@ select:hover {
   white-space: nowrap;
   color: #9aa3b1;
   font-size: 12px;
+  margin-right: 4px;
 }
 .notice {
   margin: 16px 24px 0;
@@ -509,6 +515,7 @@ h2 {
   letter-spacing: 0.01em;
 }
 .row {
+  position: relative;
   display: grid;
   grid-template-columns:
     64px 108px minmax(180px, 1fr) 190px minmax(190px, auto)
@@ -560,6 +567,16 @@ time {
   font-size: 11px;
   line-height: 16px;
 }
+.source-link {
+  position: relative;
+  z-index: 1;
+  color: inherit;
+  text-decoration: none;
+}
+.source-link:hover {
+  border-color: #cbd2dc;
+  color: #2563eb;
+}
 .oj-name {
   display: inline-flex;
   align-items: center;
@@ -585,6 +602,34 @@ time {
   text-overflow: ellipsis;
   white-space: nowrap;
   transition: color 120ms ease;
+}
+.activity-label {
+  display: block;
+  overflow: hidden;
+  color: #7c8796;
+  font-size: 11px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-link {
+  cursor: pointer;
+  text-decoration: none;
+}
+.row-target {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.row-target:focus-visible {
+  outline: 2px solid #2563eb;
+}
+.problem-cell a,
+.row-actions {
+  position: relative;
+}
+.activity-link:hover {
+  color: #2563eb;
 }
 .problem-cell {
   min-width: 0;

@@ -6,20 +6,18 @@
 }
 
 .oj-logo-qoj {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-family: "OJTrace QOJ Glyphicons";
-  font-style: normal;
-  font-weight: normal;
-  font-size: 18px;
-  line-height: 1;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  color: currentColor;
+  overflow: visible;
+  transform: translateY(1px);
 }
 
-.oj-logo-qoj::before {
-  content: "\e135";
+.oj-logo-qoj circle,
+.oj-logo-qoj path {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.35;
 }
 
 .oj-logo-tiny {
@@ -30,13 +28,4 @@
 .oj-logo-small {
   width: 18px;
   height: 18px;
-}
-
-@font-face {
-  /* QOJ's own Bootstrap Glyphicons globe (U+E135). */
-  font-family: "OJTrace QOJ Glyphicons";
-  font-style: normal;
-  font-weight: normal;
-  font-display: block;
-  src: url("/oj-logos/qoj-glyphicons.woff2") format("woff2");
 }

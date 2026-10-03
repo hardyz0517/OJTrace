@@ -1,0 +1,122 @@
+.oj-calendar {
+  position: relative;
+  width: 100%;
+  color: #25262c;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.oj-calendar .rdp-months,
+.oj-calendar .rdp-month {
+  width: 100%;
+}
+.oj-calendar .rdp-month_caption {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 5px;
+}
+.oj-calendar .rdp-caption_label {
+  font-size: 14px;
+  font-weight: 550;
+}
+.oj-calendar .rdp-nav {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.oj-calendar .rdp-button_previous,
+.oj-calendar .rdp-button_next {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #85858f;
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.oj-calendar .rdp-chevron {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+.oj-calendar .rdp-month_grid {
+  width: 100%;
+  border-spacing: 2px 3px;
+  border-collapse: separate;
+  table-layout: fixed;
+}
+.oj-calendar .rdp-weekday {
+  height: 26px;
+  color: #85858f;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 400;
+  text-align: center;
+}
+.oj-calendar .rdp-day {
+  position: relative;
+  height: 27px;
+  padding: 0;
+  text-align: center;
+}
+.oj-calendar .rdp-day_button {
+  display: block;
+  width: 100%;
+  height: 27px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.oj-calendar .rdp-day_button:hover,
+.oj-calendar .rdp-button_previous:hover,
+.oj-calendar .rdp-button_next:hover {
+  background: #edeef1;
+}
+.oj-calendar .rdp-outside {
+  color: #c6c7ce;
+}
+.oj-calendar .rdp-disabled {
+  color: #d2d3d8;
+}
+.oj-calendar .rdp-disabled .rdp-day_button {
+  cursor: not-allowed;
+}
+.oj-calendar .rdp-range_middle .rdp-day_button {
+  border-radius: 5px;
+  background: #e9f3ff;
+  color: #1960ab;
+}
+.oj-calendar .rdp-range_middle .rdp-day_button:hover {
+  background: #dcecff;
+}
+.oj-calendar .rdp-selected:not(.rdp-range_middle) .rdp-day_button {
+  background: #218bff;
+  color: #fff;
+  font-weight: 550;
+}
+.oj-calendar .rdp-range_start.rdp-range_end {
+  border-radius: 5px;
+  background: transparent;
+}
+.oj-calendar .rdp-day_button:focus-visible,
+.oj-calendar .rdp-button_previous:focus-visible,
+.oj-calendar .rdp-button_next:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid #80bbff;
+  outline-offset: 1px;
+}

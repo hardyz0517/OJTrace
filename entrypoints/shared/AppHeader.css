@@ -30,7 +30,7 @@
 }
 .app-nav {
   display: grid;
-  grid-template-columns: 68px 52px;
+  grid-template-columns: 68px 52px 36px;
   gap: 4px;
 }
 .app-nav a {
@@ -48,6 +48,27 @@
 .app-nav a:hover,
 .app-nav a.is-active {
   color: #344054;
+}
+.app-nav-github {
+  width: 36px;
+  min-height: 36px;
+  margin-left: 8px;
+  border-radius: 8px;
+  color: #7a8494;
+}
+.app-nav a.app-nav-github {
+  transition:
+    color 140ms ease,
+    background-color 140ms ease;
+}
+.app-nav-github:hover {
+  color: #344054;
+  background: #f2f4f7;
+}
+.app-nav-github-icon {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
 }
 .app-nav a.is-active {
   font-weight: 600;
@@ -127,6 +148,9 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .app-nav a {
+    transition: none;
+  }
+  .app-nav a.app-nav-github {
     transition: none;
   }
   .page-content-enter,

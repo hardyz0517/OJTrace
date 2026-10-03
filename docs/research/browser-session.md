@@ -9,7 +9,7 @@
 
 - 扩展 service worker/extension page 的跨域请求需要对应 host permission；
 - host permission 不能绕过站点返回的 401、403、验证码、Cloudflare 或限流；
-- QOJ 使用 `cookies` 权限仅读取 `uoj_username` 和 `uoj_remember_token`，不读取其他 Cookie。
+- QOJ 使用 `cookies` 权限在后台请求前读取 UOJ 会话 Cookie 和浏览器已有的 `cf_clearance`/`__cf_bm` 通行 Cookie，不依赖已打开的标签页，不保存也不上传这些值。
 - 第一版不保存 Cookie、token、密码和代码；
 - `credentials: include` 是否能在每个 OJ 复用现有登录态，必须在真实 Chrome/Edge 中逐站验证；
 - 如果必须读取 OJ 页面上下文，才考虑可选 content script 和 `scripting` 权限；未验证前不申请。

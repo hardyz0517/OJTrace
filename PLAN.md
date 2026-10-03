@@ -6,7 +6,7 @@
 >
 > 当前状态：已完成工具链初始化和第一轮 Gate 0 研究；已实现 Codeforces stable adapter、Luogu 正式授权与扫描链路、QOJ experimental UOJ HTML adapter、LibreOJ unsupported fallback、MV3 骨架、Timeline、Settings、本地存储和自动化测试。QOJ 已在 2026-10-01 的已登录 Codex 浏览器会话中完成人工页面验收；Chrome/Edge service worker 复用登录态仍待最小扩展验证。
 >
-> 执行规则：本文件是唯一总计划。所有 Agent、所有实现任务和所有集成决策都必须能在本文件中找到对应任务 ID、输入、输出和验收条件。
+> 执行规则：本文件保留 MVP 总体范围和历史阶段任务。账号身份、授权、消息与存储合同以 [账号系统实施 Spec](./docs/plan/account-system-refactor-spec.md) 为准；Hydro 普通/活动记录和品牌合同以 [Hydro 专项 Spec](./docs/plan/hydroj-activity-submission-sync-spec.md) 为准。下文 schema 1、UPDATE_ACCOUNT 等早期示例已被取代，不作为当前实现要求。
 
 ---
 

@@ -2,12 +2,12 @@
 
 本文件记录发布前必须完成的真实浏览器操作。命令行构建和单元测试不能替代这些验收。
 
-| 浏览器 | 版本 | OS | 构建 | 权限 | OJ 登录态 | 结果 | 证据 |
-|---|---|---|---|---|---|---|---|
-| Chrome | 待本机填写 | Windows | `.output/chrome-mv3` | 待验证 | Codeforces 匿名 | 待验证 | 待补截图/日志 |
-| Chrome | 待本机填写 | Windows | `.output/chrome-mv3` | 待验证 | Luogu 登录 | 待验证 | 待补脱敏 Network |
-| Edge | 待本机填写 | Windows | `.output/chrome-mv3` | 待验证 | Codeforces 匿名 | 待验证 | 待补截图/日志 |
-| Edge | 待本机填写 | Windows | `.output/chrome-mv3` | 待验证 | Luogu 登录 | 待验证 | 待补脱敏 Network |
+| 浏览器 | 版本       | OS      | 构建                 | 权限   | OJ 登录态       | 结果   | 证据             |
+| ------ | ---------- | ------- | -------------------- | ------ | --------------- | ------ | ---------------- |
+| Chrome | 待本机填写 | Windows | `.output/chrome-mv3` | 待验证 | Codeforces 匿名 | 待验证 | 待补截图/日志    |
+| Chrome | 待本机填写 | Windows | `.output/chrome-mv3` | 待验证 | Luogu 登录      | 待验证 | 待补脱敏 Network |
+| Edge   | 待本机填写 | Windows | `.output/chrome-mv3` | 待验证 | Codeforces 匿名 | 待验证 | 待补截图/日志    |
+| Edge   | 待本机填写 | Windows | `.output/chrome-mv3` | 待验证 | Luogu 登录      | 待验证 | 待补脱敏 Network |
 
 ## 手测步骤
 
@@ -20,8 +20,13 @@
 7. 在设置中选择 Luogu，输入测试账号 UID/用户名或留空自动识别，点击“授权并添加”。
 8. 确认授权后打开或复用洛谷标签页，能够读取最近提交并写入 Timeline。
 9. 注销洛谷后再次同步，确认提示重新登录且旧缓存仍保留。
-10. 检查扩展详情页权限，确认没有 `cookies`、`webRequest`、`scripting` 或全站访问权限。
+10. 检查扩展详情页权限，与 manifest audit 一致；Cookie 读取仅用于已授予站点，不含 `webRequest`、`scripting` 或 `<all_urls>`。
+11. 在 Hydro 测试实例输入根地址，点击“授权并重新检测”，确认只申请该实例；非法路径地址不会申请权限。
+12. 密码登录后确认站点名称/图标、普通记录、比赛/作业标签和活动链接；旧活动需选择覆盖历史的时间范围后同步。
+13. 检查同步详情中的具体活动名称和结果；单活动无权限仍保留其他记录。
+14. 同身份再次授权不产生第二个账号；两个实例的同名账号和品牌彼此隔离。
+15. 删除账号或替换认证方式时同时同步，确认旧结果不会回写；重启扩展后凭证只用于重新登录，不出现在公开状态响应。
 
 ## 当前阻塞
 
-本轮命令行验证已通过 `pnpm test`、`pnpm typecheck`、`pnpm format:check` 和 `pnpm build`。当前 Codex 浏览器控制面只能使用隔离的 in-app browser，不能加载本地 Chrome 扩展；因此上表中的真实 Chrome/Edge 行仍需人工完成。
+本轮命令行验证已通过 `pnpm test`、`pnpm typecheck`、`pnpm lint`、`pnpm format:check`、`pnpm build` 和 `pnpm audit:manifest`。真实 Hydro HTTP 集成已单独验证；上表中的 Chrome/Edge 扩展加载、权限弹窗和持久化验收仍需在本机浏览器完成。

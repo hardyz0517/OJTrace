@@ -1,8 +1,16 @@
-# AtCoder 与 HydroOJ 接入实现计划
+# AtCoder 与 HydroOJ 接入研究计划（历史记录）
 
-> 状态：部分实施，HydroOJ 保持 unsupported；AtCoder 已有匿名请求证据，但登录态与提交合同仍待真实浏览器验证。
+> 状态：已被当前实现和专项 Spec 取代，不作为当前开发合同。
 >
-> 目标：在确认各站点真实接口和登录态行为后，为 AtCoder 与 HydroOJ 增加提交记录适配；优先通过当前浏览器已有登录状态授权，手动 UID / Cookie 仅在站点确实需要且浏览器态链路可行性不足时作为备用。
+> 用途：保留早期取样、风险和证据门槛，方便追溯当时为什么选择这些边界。
+
+> **阅读须知**：本文后续内容可能包含“HydroOJ unsupported”“不保存密码”“UID 与 Cookie 必须分开”等历史决策，均不再代表当前实现。当前开发只遵循：
+>
+> - [账号系统重构 Spec](./account-system-refactor-spec.md)：认证模式、凭证边界、权限、存储与迁移；
+> - [HydroOJ 活动与品牌 Spec](./hydroj-activity-submission-sync-spec.md)：Hydro 普通/活动提交、主域品牌和诊断；
+> - 当前代码中的 `AdapterMetadata.authModes`、`credentials` 和精确 origin 权限合同。
+>
+> 若历史研究与上述合同冲突，以专项 Spec 和已通过测试的代码为准；新的研究结果应更新专项 Spec，不要直接恢复本文中的旧实现建议。
 
 ## 1. 目标与边界
 
@@ -382,7 +390,7 @@ HydroOJ  alice
 | Cookie 更新和删除边界不清         | 账号更新、重复添加和删除可能遗留旧秘密             | 实例身份唯一键明确；替换凭证需显式操作；账号删除/清除完整删除凭证；不回显已存 Cookie                                 |
 | HydroOJ 部署差异过大              | 只验证一个实例不足以支持广泛声明                   | 最小验证官方 + 一个自定义实例；支持范围按协议/版本收敛，其他实例默认 unsupported                                     |
 
-实施结果采用证据门槛：AtCoder 的匿名登录页已验证，但登录态请求与用户提交历史 JSON 合同尚无真实登录样本，因此暂时不注册为产品 Adapter。HydroOJ 官方域名首页返回 Cerberus challenge，项目源码只提供候选 route/model，尚无运行实例级认证与 JSON 证据；官方和自定义 HydroOJ 均保持 unsupported。自定义 origin 校验和研究工具可以保留，但不得触发权限或认证请求，直到浏览器精确 origin 授权与真实实例能力验证完成。
+以下结论是本研究计划创建时的历史快照，不应覆盖当前实现：AtCoder 的匿名登录页已验证，但登录态请求与用户提交历史 JSON 合同尚无真实登录样本；当时 HydroOJ 官方域名首页返回 Cerberus challenge，因此曾暂时保持 unsupported。当前 HydroOJ 已有独立 Adapter、账号密码/手动 Cookie/浏览器会话路径和精确 origin 权限；后续活动提交与品牌工作以专项 Spec 为准。
 
 ## 13. 完成门槛
 

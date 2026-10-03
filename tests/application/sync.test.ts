@@ -4,10 +4,20 @@ import {
   createStoragePort,
   defaultStoredData,
 } from "../../src/application/storage/store";
-import type { HttpClient, StoredData } from "../../src/domain";
+import type { HttpClient, StoredData, AccountConfig } from "../../src/domain";
+import { accountRecord } from "../account-fixture";
 
-function area(initial: StoredData = defaultStoredData()) {
-  let value: Record<string, unknown> = { "ojtrace:data": initial };
+function area(
+  initial: Omit<StoredData, "accounts"> & {
+    accounts: AccountConfig[];
+  } = defaultStoredData(),
+) {
+  let value: Record<string, unknown> = {
+    "ojtrace:data": {
+      ...initial,
+      accounts: initial.accounts.map(accountRecord),
+    },
+  };
   return {
     get: async () => value,
     set: async (items: Record<string, unknown>) => {
@@ -21,17 +31,59 @@ const codeforcesAccount = {
   source: "codeforces" as const,
   identifier: "tourist",
   enabled: true,
-  authMode: "public" as const,
+  authMode: "public-handle" as const,
 };
 
 describe("sync application", () => {
+  it("collects only the requested window and retains cached records outside it", async () => {
+    const storage = createStoragePort(
+      area({ ...defaultStoredData(), accounts: [codeforcesAccount] }),
+    );
+    const http: HttpClient = {
+      async request() {
+        return {
+          status: 200,
+          url: "https://codeforces.com/api/user.status",
+          contentType: "application/json",
+          headers: new Headers(),
+          text: JSON.stringify({
+            status: "OK",
+            result: [0, 1, 2, 3].map((offset) => ({
+              id: 42 + offset,
+              contestId: 1,
+              creationTimeSeconds: 1_700_000_000 - offset,
+              problem: { contestId: 1, index: "A", name: "A+B" },
+              verdict: "OK",
+            })),
+          }),
+        };
+      },
+    };
+    const now = 1_700_000_001_000;
+    const initial = await syncEnabledAccounts(storage, http, {
+      force: true,
+      now,
+    });
+    expect(initial.data.submissions).toHaveLength(4);
+    const result = await syncEnabledAccounts(storage, http, {
+      force: true,
+      now,
+      since: 1_699_999_998_000,
+      until: 1_699_999_999_000,
+    });
+    expect(
+      result.sources[0]?.records.map((record) => record.submissionId),
+    ).toEqual(["43", "44"]);
+    expect(result.data.submissions).toHaveLength(4);
+  });
+
   it("syncs only the persisted account selection", async () => {
     const otherAccount = {
       accountId: "luogu-account",
       source: "luogu" as const,
       identifier: "10001",
       enabled: true,
-      authMode: "browser_session" as const,
+      authMode: "browser-session" as const,
     };
     const storage = createStoragePort(
       area({
@@ -124,7 +176,7 @@ describe("sync application", () => {
       source: "luogu" as const,
       identifier: "10001",
       enabled: true,
-      authMode: "browser_session" as const,
+      authMode: "browser-session" as const,
     };
     const storage = createStoragePort(
       area({
@@ -169,7 +221,7 @@ describe("sync application", () => {
           source: "luogu" as const,
           identifier: "123",
           enabled: true,
-          authMode: "browser_session" as const,
+          authMode: "browser-session" as const,
         },
       ],
     };

@@ -5,6 +5,34 @@ import {
 } from "../../src/platform/network/http-client";
 
 describe("HttpClient", () => {
+  it("cancels an oversized binary stream without buffering its entire body", async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(16));
+      },
+      cancel,
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(stream));
+    try {
+      await expect(
+        createHttpClient().request(
+          "hydroj",
+          "https://binary.example.org/favicon.ico",
+          {
+            hydroOrigin: "https://binary.example.org",
+            maxBytes: 8,
+            responseType: "bytes",
+          },
+        ),
+      ).rejects.toMatchObject({ code: "response_too_large" });
+      expect(cancel).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
   it("rejects URLs outside the source allowlist", async () => {
     await expect(
       createHttpClient().request("codeforces", "https://example.com/data"),

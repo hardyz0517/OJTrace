@@ -5,8 +5,14 @@ export function atcoderHomeUrl(): string {
   return `${ATCODER_ORIGIN}/`;
 }
 
-export function atcoderUserSubmissionsUrl(handle: string): string {
-  return `${ATCODER_PROBLEMS_ORIGIN}/atcoder/atcoder-api/v3/user/submissions?user=${encodeURIComponent(handle)}&from_second=0`;
+export function atcoderUserSubmissionsUrl(
+  handle: string,
+  fromSecond = 0,
+): string {
+  const since = Number.isFinite(fromSecond)
+    ? Math.max(0, Math.floor(fromSecond))
+    : 0;
+  return `${ATCODER_PROBLEMS_ORIGIN}/atcoder/atcoder-api/v3/user/submissions?user=${encodeURIComponent(handle)}&from_second=${since}`;
 }
 
 export function atcoderUserUrl(handle: string): string {

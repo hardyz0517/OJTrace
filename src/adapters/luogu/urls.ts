@@ -1,7 +1,10 @@
 export const LUOGU_ORIGIN = "https://www.luogu.com.cn";
 
-export function luoguRecordListUrl(identifier: string): string {
-  return `${LUOGU_ORIGIN}/record/list?user=${encodeURIComponent(identifier)}&page=1&_contentOnly=1`;
+export function luoguRecordListUrl(identifier: string, page = 1): string {
+  if (!Number.isSafeInteger(page) || page < 1) {
+    throw new Error("Luogu page is invalid");
+  }
+  return `${LUOGU_ORIGIN}/record/list?user=${encodeURIComponent(identifier)}&page=${page}&_contentOnly=1`;
 }
 
 export function luoguRecordListBaseUrl(): string {

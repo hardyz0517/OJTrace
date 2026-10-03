@@ -90,6 +90,25 @@ describe("HydroOJ research utilities", () => {
     });
   });
 
+  it("enriches JSON records from Hydro's pdict and keeps activity links", () => {
+    const page = parseHydroOJRecordPage(
+      JSON.stringify({
+        page: 1,
+        rdocs: [{ _id: "6831d68a5546fddf447ad313", pid: 1382, status: 1 }],
+        pdict: {
+          "1382": { docId: 1382, title: "WL22 T3 闯关游戏" },
+        },
+      }),
+      "http://hydro.example.org/record?uidOrName=1100&page=1&tid=6940ba67fb0f033a69e00504",
+    );
+    expect(page.rdocs[0]).toMatchObject({
+      pid: 1382,
+      problemName: "WL22 T3 闯关游戏",
+      problemUrl: "/p/1382?tid=6940ba67fb0f033a69e00504",
+      submissionUrl: "/record/6831d68a5546fddf447ad313",
+    });
+  });
+
   it("normalizes HTML statuses that include a score before the label", () => {
     const page = parseHydroOJRecordPage(`
       <html data-page="record_main"><tr data-rid="6831d6555546fddf447ad2d9">
@@ -103,6 +122,53 @@ describe("HydroOJ research utilities", () => {
       verdict: { code: "compilation_error", raw: "Compile Error" },
       score: 0,
     });
+  });
+
+  it("uses Hydro's current status codes and resolves language display names", () => {
+    expect(
+      normalizeHydroOJSubmission({
+        _id: "6831d6555546fddf447ad2d9",
+        pid: "P1130",
+        status: 7,
+        lang: "cc.cc20o2",
+        submitAt: "2026-01-02T00:00:00Z",
+      }),
+    ).toMatchObject({
+      verdict: { code: "compilation_error", raw: "7" },
+      language: "C++20(O2)",
+    });
+    expect(
+      normalizeHydroOJSubmission({
+        _id: "6831d6555546fddf447ad2da",
+        status: 5,
+        submitAt: "2026-01-02T00:00:00Z",
+      }).verdict.code,
+    ).toBe("rejected");
+  });
+
+  it.each([
+    ["764 KiB", 764],
+    ["1.5 MiB", 1536],
+    ["1024 B", 1],
+    ["-", undefined],
+  ])("converts HTML memory %s to KiB", (memory, expected) => {
+    const page = parseHydroOJRecordPage(
+      `<html data-page="record_main"><tr data-rid="6831d6555546fddf447ad2d9"><td class="col--memory">${memory}</td></tr></html>`,
+    );
+    expect(normalizeHydroOJSubmission(page.rdocs[0]!).memoryKb).toBe(expected);
+  });
+
+  it("uses submission time rather than rejudge time", () => {
+    const raw = {
+      _id: "6831d68a5546fddf447ad313",
+      status: 1,
+      judgeAt: "2026-01-01T00:00:00Z",
+    };
+    const timestamp = parseInt(raw._id.slice(0, 8), 16) * 1000;
+    expect(normalizeHydroOJSubmission(raw).submittedAt).toBe(timestamp);
+    expect(
+      normalizeHydroOJSubmission({ ...raw, submitAt: 1748096600 }).submittedAt,
+    ).toBe(1748096600000);
   });
 
   it("never treats challenge HTML or an unknown body as an empty page", () => {
@@ -154,7 +220,11 @@ describe("HydroOJ research utilities", () => {
           status: 200,
           url,
           contentType: "application/json",
-          text: fixture("record-page-contract.json"),
+          text: url.includes("page=2")
+            ? '{"page":2,"rdocs":[]}'
+            : url.includes("/user/")
+              ? '{"tdocs":[]}'
+              : fixture("record-page-contract.json"),
           headers: new Headers(),
         };
       }),
@@ -168,8 +238,8 @@ describe("HydroOJ research utilities", () => {
         enabled: true,
         authMode: "password",
         origin: "http://hydro.example.org",
-        credentials: { username: "test-user", password: "test-password" },
       },
+      credentials: { username: "test-user", password: "test-password" },
       limit: 100,
       signal: new AbortController().signal,
       now: Date.now(),
@@ -177,7 +247,7 @@ describe("HydroOJ research utilities", () => {
       http,
     });
 
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(5);
     expect(requests[1]?.options).toMatchObject({
       method: "POST",
       credentials: "include",
@@ -185,12 +255,80 @@ describe("HydroOJ research utilities", () => {
     });
     expect(requests[1]?.options?.body).toContain("uname=test-user");
     expect(requests[1]?.options?.body).toContain("password=test-password");
-    expect(requests[2]?.url).toContain("uidOrName=test-user");
+    expect(requests[2]?.url).toContain("uidOrName=42");
+    expect(requests[4]?.url).toContain("/user/42");
     expect(result.account).toMatchObject({
-      providerAccountKey: "test-user",
+      providerAccountKey: "42",
       displayName: "test-user",
     });
     expect(result.records).toHaveLength(1);
+  });
+
+  it("continues JSON record pages until the requested time window is covered", async () => {
+    const requests: string[] = [];
+    const page = (number: number, judgeAt: string) =>
+      JSON.stringify({
+        page: number,
+        rdocs: [
+          {
+            _id: `00000000000000000000000${number}`,
+            uid: 42,
+            pid: `P${number}`,
+            status: 1,
+            submitAt: judgeAt,
+          },
+        ],
+      });
+    const result = await hydroOJAdapter.fetchRecent({
+      account: {
+        accountId: "account-1",
+        source: "hydroj",
+        identifier: "tester",
+        enabled: true,
+        authMode: "browser-session",
+        origin: "http://hydro.example.org",
+      },
+      limit: 1_000,
+      since: Date.parse("2026-01-01T00:00:00.000Z"),
+      signal: new AbortController().signal,
+      now: Date.parse("2026-01-03T00:00:00.000Z"),
+      requestId: "request-3",
+      http: {
+        async request(_source, url) {
+          requests.push(url);
+          if (new URL(url).pathname === "/")
+            return {
+              status: 200,
+              url,
+              contentType: "text/html",
+              text: `<script>window.UserContext = '{"_id":42,"uname":"tester"}';</script>`,
+              headers: new Headers(),
+            };
+          if (url.includes("/user/"))
+            return {
+              status: 200,
+              url,
+              contentType: "application/json",
+              text: '{"tdocs":[]}',
+              headers: new Headers(),
+            };
+          return {
+            status: 200,
+            url,
+            contentType: "application/json",
+            text: url.includes("page=2")
+              ? page(2, "2025-12-31T00:00:00.000Z")
+              : page(1, "2026-01-02T00:00:00.000Z"),
+            headers: new Headers(),
+          };
+        },
+      },
+    });
+
+    expect(requests).toHaveLength(4);
+    expect(requests[2]).toContain("page=2");
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0]?.problemId).toBe("P1");
   });
 
   it("reports a clear error when password login is rejected", async () => {
@@ -215,8 +353,8 @@ describe("HydroOJ research utilities", () => {
           enabled: true,
           authMode: "password",
           origin: "http://hydro.example.org",
-          credentials: { username: "test-user", password: "test-password" },
         },
+        credentials: { username: "test-user", password: "test-password" },
         limit: 100,
         signal: new AbortController().signal,
         now: Date.now(),

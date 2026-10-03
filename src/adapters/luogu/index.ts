@@ -1,6 +1,12 @@
-import type { BrowserSessionInput, FetchInput, OJAdapter } from "../../domain";
+import { authorizeFromRecent } from "../authorization";
+import {
+  cookieHeaderFromCredentials,
+  type BrowserSessionInput,
+  type FetchInput,
+  type OJAdapter,
+  type Submission,
+} from "../../domain";
 import { AdapterFailure } from "../../domain/errors";
-import { normalizeAuthMode } from "../../domain";
 import { normalizeLuoguRecord } from "./normalizer";
 import { parseLuoguDocument, parseLuoguIdentityDocument } from "./parser";
 import { luoguRecordListUrl, luoguUserSettingUrl } from "./urls";
@@ -28,20 +34,10 @@ function requestOptions(
   };
 }
 
-function manualLuoguCookie(account: FetchInput["account"]): string | undefined {
-  if (account.cookie?.trim()) return account.cookie.trim();
-  const credentials = account.credentials;
-  if (!credentials) return undefined;
-  if (credentials.cookie?.trim()) return credentials.cookie.trim();
-  return (
-    ["__client_id", "_uid"]
-      .map((name) => {
-        const value = credentials[name]?.trim();
-        return value ? `${name}=${value}` : undefined;
-      })
-      .filter((value): value is string => Boolean(value))
-      .join("; ") || undefined
-  );
+function manualLuoguCookie(
+  credentials: Record<string, string> | undefined,
+): string | undefined {
+  return cookieHeaderFromCredentials(credentials, ["__client_id", "_uid"]);
 }
 
 async function requestLuogu(
@@ -124,6 +120,9 @@ async function currentLuoguUser(input: BrowserSessionInput) {
 }
 
 export const luoguAdapter: OJAdapter = {
+  authorize(input) {
+    return authorizeFromRecent(this, input);
+  },
   metadata: {
     id: "luogu",
     displayName: "洛谷",
@@ -139,13 +138,24 @@ export const luoguAdapter: OJAdapter = {
       {
         type: "manual-cookie",
         label: "手动配置",
-        description: "自动检测失败时，只需粘贴洛谷登录 Cookie。",
+        description:
+          "自动检测失败时，分别填写洛谷的 __client_id 和 _uid Cookie 值。",
         credentialFields: [
           {
-            key: "cookie",
-            label: "Cookie",
+            key: "__client_id",
+            label: "__client_id",
             type: "password",
-            placeholder: "粘贴洛谷 Cookie（如 __client_id=...; _uid=...）",
+            credentialType: "cookie",
+            placeholder: "粘贴 __client_id 的值",
+            required: true,
+          },
+          {
+            key: "_uid",
+            label: "_uid",
+            type: "password",
+            credentialType: "cookie",
+            placeholder: "粘贴 _uid 的值",
+            required: true,
           },
         ],
         identifierRequired: false,
@@ -187,7 +197,7 @@ export const luoguAdapter: OJAdapter = {
   },
 
   async fetchRecent(input) {
-    const authMode = normalizeAuthMode(input.account.authMode);
+    const authMode = input.account.authMode;
     if (authMode !== "browser-session" && authMode !== "manual-cookie") {
       throw new AdapterFailure({
         kind: "invalid_response",
@@ -199,7 +209,7 @@ export const luoguAdapter: OJAdapter = {
         requestId: input.requestId,
       });
     }
-    const manualCookie = manualLuoguCookie(input.account);
+    const manualCookie = manualLuoguCookie(input.credentials);
     if (authMode === "manual-cookie" && !manualCookie) {
       throw new AdapterFailure({
         kind: "invalid_response",
@@ -211,7 +221,11 @@ export const luoguAdapter: OJAdapter = {
         requestId: input.requestId,
       });
     }
-    let identifier = input.account.identifier.trim();
+    let identifier = (
+      input.account.providerAccountKey ??
+      input.account.identifier ??
+      ""
+    ).trim();
     if (!identifier && manualCookie) {
       const uid = manualCookie.match(/(?:^|;\s*)_uid=([^;]+)/)?.[1]?.trim();
       if (uid) identifier = decodeURIComponent(uid);
@@ -234,78 +248,92 @@ export const luoguAdapter: OJAdapter = {
         requestId: input.requestId,
       });
     }
-    const response = await requestLuogu(
-      input,
-      luoguRecordListUrl(identifier),
-      authMode,
-      manualCookie,
-    );
-    if (isAuthResponse(response)) {
-      throw new AdapterFailure({
-        kind: "auth_required",
-        source: "luogu",
-        stage: "request",
-        messageKey: "source.authRequired",
-        retryable: false,
-        userAction: "open_site_login",
-        httpStatus: response.status,
-        requestId: input.requestId,
-      });
-    }
-    if (response.status === 403) {
-      throw new AdapterFailure({
-        kind: "blocked",
-        source: "luogu",
-        stage: "request",
-        messageKey: "source.blocked",
-        retryable: false,
-        userAction: "retry_later",
-        httpStatus: response.status,
-        requestId: input.requestId,
-      });
-    }
-    if (response.status === 429) {
-      throw new AdapterFailure({
-        kind: "rate_limited",
-        source: "luogu",
-        stage: "request",
-        messageKey: "source.rateLimited",
-        retryable: false,
-        userAction: "retry_later",
-        httpStatus: response.status,
-        requestId: input.requestId,
-      });
-    }
-    if (response.status < 200 || response.status >= 300) {
-      throw new AdapterFailure({
-        kind: "network",
-        source: "luogu",
-        stage: "request",
-        messageKey: "source.httpError",
-        retryable: response.status >= 500,
-        httpStatus: response.status,
-        requestId: input.requestId,
-      });
-    }
-    let parsed;
-    try {
-      parsed = parseLuoguDocument(response.text, response.contentType);
-    } catch {
-      throw new AdapterFailure({
-        kind: "parse_failed",
-        source: "luogu",
-        stage: "parse",
-        messageKey: "source.invalidResponse",
-        retryable: false,
-        requestId: input.requestId,
-      });
-    }
-    const providerUser = parsed.user ?? parsed.currentUser ?? identity;
-    let records;
-    try {
-      records = parsed.records
-        .slice(0, input.limit)
-        .map((record) =>
+    const maxRecords = Math.max(1, Math.min(input.limit, 1_000));
+    const shouldPage = input.since !== undefined;
+    const maxPages = 100;
+    const records: Submission[] = [];
+    let providerUser = identity;
+    let page = 1;
+    let hasMore = false;
+    let reachedSince = false;
+    const seenPageKeys = new Set<string>();
+
+    while (true) {
+      const response = await requestLuogu(
+        input,
+        luoguRecordListUrl(identifier, page),
+        authMode,
+        manualCookie,
+      );
+      if (isAuthResponse(response)) {
+        throw new AdapterFailure({
+          kind: "auth_required",
+          source: "luogu",
+          stage: "request",
+          messageKey: "source.authRequired",
+          retryable: false,
+          userAction: "open_site_login",
+          httpStatus: response.status,
+          requestId: input.requestId,
+        });
+      }
+      if (response.status === 403) {
+        throw new AdapterFailure({
+          kind: "blocked",
+          source: "luogu",
+          stage: "request",
+          messageKey: "source.blocked",
+          retryable: false,
+          userAction: "retry_later",
+          httpStatus: response.status,
+          requestId: input.requestId,
+        });
+      }
+      if (response.status === 429) {
+        throw new AdapterFailure({
+          kind: "rate_limited",
+          source: "luogu",
+          stage: "request",
+          messageKey: "source.rateLimited",
+          retryable: false,
+          userAction: "retry_later",
+          httpStatus: response.status,
+          requestId: input.requestId,
+        });
+      }
+      if (response.status < 200 || response.status >= 300) {
+        throw new AdapterFailure({
+          kind: "network",
+          source: "luogu",
+          stage: "request",
+          messageKey: "source.httpError",
+          retryable: response.status >= 500,
+          httpStatus: response.status,
+          requestId: input.requestId,
+        });
+      }
+      let parsed;
+      try {
+        parsed = parseLuoguDocument(response.text, response.contentType);
+      } catch {
+        throw new AdapterFailure({
+          kind: "parse_failed",
+          source: "luogu",
+          stage: "parse",
+          messageKey: "source.invalidResponse",
+          retryable: false,
+          requestId: input.requestId,
+        });
+      }
+      const pageKey = parsed.records
+        .map((record) => String(record.id))
+        .join(",");
+      if (pageKey && seenPageKeys.has(pageKey)) break;
+      if (pageKey) seenPageKeys.add(pageKey);
+      providerUser = parsed.user ?? parsed.currentUser ?? providerUser;
+      let pageRecords: Submission[];
+      try {
+        pageRecords = parsed.records.map((record) =>
           normalizeLuoguRecord(
             record,
             input.account.accountId,
@@ -313,15 +341,42 @@ export const luoguAdapter: OJAdapter = {
             input.now,
           ),
         );
-    } catch {
-      throw new AdapterFailure({
-        kind: "parse_failed",
-        source: "luogu",
-        stage: "normalize",
-        messageKey: "source.invalidRecord",
-        retryable: false,
-        requestId: input.requestId,
-      });
+      } catch {
+        throw new AdapterFailure({
+          kind: "parse_failed",
+          source: "luogu",
+          stage: "normalize",
+          messageKey: "source.invalidRecord",
+          retryable: false,
+          requestId: input.requestId,
+        });
+      }
+      reachedSince =
+        input.since !== undefined &&
+        pageRecords.some((record) => record.submittedAt < input.since!);
+      records.push(
+        ...pageRecords
+          .filter(
+            (record) =>
+              input.since === undefined || record.submittedAt >= input.since,
+          )
+          .slice(0, maxRecords - records.length),
+      );
+      hasMore =
+        (typeof parsed.count === "number" &&
+          parsed.count > pageRecords.length) ||
+        parsed.records.length > 0;
+      if (
+        !shouldPage ||
+        !hasMore ||
+        pageRecords.length === 0 ||
+        reachedSince ||
+        records.length >= maxRecords ||
+        page >= maxPages
+      ) {
+        break;
+      }
+      page += 1;
     }
     return {
       account: {
@@ -334,9 +389,7 @@ export const luoguAdapter: OJAdapter = {
       },
       records,
       diagnostics: [],
-      hasMore:
-        (typeof parsed.count === "number" && parsed.count > records.length) ||
-        parsed.records.length > records.length,
+      hasMore: hasMore && !reachedSince,
     };
   },
 };

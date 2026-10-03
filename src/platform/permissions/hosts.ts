@@ -56,6 +56,34 @@ export async function ensureSourcePermission(
   return requestSourcePermission(source);
 }
 
+/** The same permission plan is used by user-gesture requests and background checks. */
+export function authorizationOrigins(
+  source: SourceId,
+  origin?: string,
+): string[] {
+  return [
+    ...new Set([
+      ...(source === "hydroj" && origin
+        ? [exactOriginPermissionPattern(origin, { allowHttp: true })]
+        : SOURCE_ORIGINS[source]),
+      ...(adapterBySource.get(source)?.metadata.dataOrigins ?? []),
+    ]),
+  ];
+}
+
+export async function ensureAuthorizationPermission(
+  source: SourceId,
+  origin?: string,
+  request = false,
+): Promise<boolean> {
+  const origins = authorizationOrigins(source, origin);
+  // Request directly inside the UI click stack; requesting an already granted
+  // pattern succeeds without showing another prompt.
+  if (request) return browser.permissions.request({ origins });
+  if (await browser.permissions.contains({ origins })) return true;
+  return false;
+}
+
 /** Request the source host plus any adapter-owned public data origins. */
 export async function ensureAdapterDataPermission(
   source: SourceId,

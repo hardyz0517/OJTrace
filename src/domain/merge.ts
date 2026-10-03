@@ -11,10 +11,38 @@ function prefer<T>(
   return incoming ?? current;
 }
 
+function mergeActivity(
+  current: Submission,
+  incoming: Submission,
+): Pick<
+  Submission,
+  "activityId" | "activityName" | "activityType" | "activityUrl"
+> {
+  if (
+    current.activityId &&
+    incoming.activityId &&
+    current.activityId !== incoming.activityId
+  ) {
+    return {
+      activityId: current.activityId,
+      activityName: current.activityName,
+      activityType: current.activityType,
+      activityUrl: current.activityUrl,
+    };
+  }
+  return {
+    activityId: prefer(current.activityId, incoming.activityId),
+    activityName: prefer(current.activityName, incoming.activityName),
+    activityType: prefer(current.activityType, incoming.activityType),
+    activityUrl: prefer(current.activityUrl, incoming.activityUrl),
+  };
+}
+
 export function mergeSubmission(
   current: Submission,
   incoming: Submission,
 ): Submission {
+  const activity = mergeActivity(current, incoming);
   return {
     ...current,
     ...incoming,
@@ -32,6 +60,7 @@ export function mergeSubmission(
     memoryKb: prefer(current.memoryKb, incoming.memoryKb),
     codeLength: prefer(current.codeLength, incoming.codeLength),
     fallbackListUrl: prefer(current.fallbackListUrl, incoming.fallbackListUrl),
+    ...activity,
     fetchedAt: Math.max(current.fetchedAt, incoming.fetchedAt),
   };
 }

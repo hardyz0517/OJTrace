@@ -1,3 +1,6 @@
 export * from "./adapter";
+export * from "./account-identity";
+export * from "./credentials";
 export * from "./errors";
 export * from "./types";
+export * from "./sync-range";

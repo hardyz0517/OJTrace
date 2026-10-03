@@ -3,6 +3,8 @@ import type {
   AccountAuthMode,
   Availability,
   Diagnostic,
+  AccountCredentials,
+  InstanceBrandingRecord,
   SourceId,
   Submission,
 } from "./types";
@@ -40,6 +42,8 @@ export interface AuthCredentialField {
   key: string;
   label: string;
   type?: "text" | "password";
+  /** Marks a field as a Cookie value for adapters and future UI affordances. */
+  credentialType?: "cookie" | "text";
   placeholder?: string;
   required?: boolean;
 }
@@ -50,7 +54,6 @@ export type BrowserSessionStatus =
   | "network-error"
   | "permission-denied"
   | "site-error"
-  | "browser-cookie-unavailable"
   | "unsupported";
 
 export interface BrowserSessionAccount {
@@ -70,7 +73,11 @@ export interface CanonicalAccount {
 
 export interface FetchInput {
   account: AccountConfig;
+  /** Credentials are injected by the application for this request only. */
+  credentials?: AccountCredentials;
   limit: number;
+  /** Only fetch submissions at or after this timestamp when provided. */
+  since?: number;
   signal: AbortSignal;
   now: number;
   requestId: string;
@@ -81,6 +88,9 @@ export interface FetchResult {
   account: CanonicalAccount;
   records: Submission[];
   diagnostics: Diagnostic[];
+  instanceMetadata?: {
+    branding?: InstanceBrandingRecord;
+  };
   hasMore: boolean;
 }
 
@@ -94,11 +104,25 @@ export interface BrowserSessionInput {
 
 export interface OJAdapter {
   readonly metadata: AdapterMetadata;
+  authorize(input: FetchInput): Promise<CanonicalAccount>;
   detectBrowserSession?(
     input: BrowserSessionInput,
   ): Promise<BrowserSessionAccount>;
   validateAccount?(input: FetchInput): Promise<CanonicalAccount>;
   fetchRecent(input: FetchInput): Promise<FetchResult>;
+  fetchInstanceBranding?(input: InstanceMetadataInput): Promise<{
+    branding?: InstanceBrandingRecord;
+    diagnostics: Diagnostic[];
+  }>;
+}
+
+export interface InstanceMetadataInput {
+  account: AccountConfig;
+  credentials?: AccountCredentials;
+  signal: AbortSignal;
+  now: number;
+  requestId: string;
+  http: HttpClient;
 }
 
 export interface HttpRequestOptions {
@@ -118,8 +142,13 @@ export interface HttpRequestOptions {
   atcoderSubmissionPage?: boolean;
   /** Temporarily use this AtCoder session for an official-site request. */
   atcoderSessionCookie?: string;
+  /** Temporarily use this QOJ Cookie through the browser cookie store. */
+  qojCookie?: string;
+  /** Temporarily use this Codeforces Cookie through the browser cookie store. */
+  codeforcesCookie?: string;
   /** Allow a same-origin login POST to follow its redirect. */
   followRedirects?: boolean;
+  responseType?: "text" | "bytes";
 }
 
 export interface HttpResponse {
@@ -127,6 +156,7 @@ export interface HttpResponse {
   url: string;
   contentType: string;
   text: string;
+  bytes?: Uint8Array;
   headers: Headers;
 }
 
@@ -136,4 +166,12 @@ export interface HttpClient {
     url: string,
     options?: HttpRequestOptions,
   ): Promise<HttpResponse>;
+  /** Read one browser-managed cookie without exposing its value to UI/logs. */
+  getCookie?(
+    source: SourceId,
+    url: string,
+    name: string,
+  ): Promise<string | undefined>;
+  /** Read the small, source-scoped set of browser cookies needed for auth fallback. */
+  getCookies?(source: SourceId, url: string): Promise<Record<string, string>>;
 }

@@ -2,50 +2,56 @@ import {
   MESSAGE_SCHEMA_VERSION,
   type AccountAuthMode,
   type AccountConfig,
+  type AccountRecord,
   type BrowserSessionAccount,
   type SourceId,
-  type StoredData,
+  type Diagnostic,
+  type SyncRangePreference,
+  isSyncRangePreference,
 } from "../../domain";
+import type { PublicStoredData } from "../accounts/account-queries";
 import type { SyncResult } from "../sync/sync-service";
 
 export type RuntimeMessage =
-  | { schemaVersion: 1; type: "GET_STATE"; requestId: string }
+  | { schemaVersion: 2; type: "GET_STATE"; requestId: string }
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       type: "SYNC_REQUEST";
       requestId: string;
       force: boolean;
       accountIds?: string[];
+      since?: number;
+      until?: number;
     }
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       type: "UPDATE_SYNC_ACCOUNTS";
       requestId: string;
       accountIds: string[];
     }
   | {
-      schemaVersion: 1;
-      type: "UPDATE_ACCOUNT";
+      schemaVersion: 2;
+      type: "UPDATE_SYNC_RANGE";
       requestId: string;
-      account: AccountConfig;
+      range: SyncRangePreference;
     }
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       type: "DELETE_ACCOUNT";
       requestId: string;
       accountId: string;
     }
-  | { schemaVersion: 1; type: "CLEAR_DATA"; requestId: string }
-  | { schemaVersion: 1; type: "CLEAR_ACCOUNTS"; requestId: string }
-  | { schemaVersion: 1; type: "CLEAR_SUBMISSIONS"; requestId: string }
+  | { schemaVersion: 2; type: "CLEAR_DATA"; requestId: string }
+  | { schemaVersion: 2; type: "CLEAR_ACCOUNTS"; requestId: string }
+  | { schemaVersion: 2; type: "CLEAR_SUBMISSIONS"; requestId: string }
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       type: "REQUEST_HOST_PERMISSION";
       requestId: string;
       source: AccountConfig["source"];
     }
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       type: "DETECT_BROWSER_SESSION";
       requestId: string;
       source: SourceId;
@@ -53,63 +59,63 @@ export type RuntimeMessage =
       pageIdentity?: string;
     }
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       type: "AUTHORIZE_ACCOUNT";
       requestId: string;
       source: SourceId;
       authMode: AccountAuthMode;
       identifier?: string;
       credentials?: Record<string, string>;
-      cookie?: string;
       origin?: string;
-      permissionsGranted?: boolean;
     };
 
 export type RuntimeResponse =
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       requestId: string;
       ok: true;
       type: "STATE";
-      data: StoredData;
+      data: PublicStoredData;
     }
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       requestId: string;
       ok: true;
       type: "SYNC_RESULT";
-      result: SyncResult;
+      result: Omit<SyncResult, "data"> & { data: PublicStoredData };
     }
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       requestId: string;
       ok: true;
       type: "CLEARED";
     }
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       requestId: string;
       ok: true;
       type: "UPDATED";
-      data: StoredData;
+      data: PublicStoredData;
     }
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       requestId: string;
       ok: true;
       type: "PERMISSION";
       granted: boolean;
     }
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       requestId: string;
       ok: true;
       type: "AUTHORIZED";
-      data: StoredData;
-      account: AccountConfig;
+      data: PublicStoredData;
+      account: AccountRecord;
+      diagnostics: Diagnostic[];
+      superseded: boolean;
     }
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       requestId: string;
       ok: true;
       type: "BROWSER_SESSION";
@@ -117,7 +123,7 @@ export type RuntimeResponse =
       account: BrowserSessionAccount;
     }
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       requestId: string;
       ok: false;
       error: { code: string; message: string };
@@ -135,7 +141,7 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
       "GET_STATE",
       "SYNC_REQUEST",
       "UPDATE_SYNC_ACCOUNTS",
-      "UPDATE_ACCOUNT",
+      "UPDATE_SYNC_RANGE",
       "DELETE_ACCOUNT",
       "CLEAR_DATA",
       "CLEAR_ACCOUNTS",
@@ -145,6 +151,16 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
       "AUTHORIZE_ACCOUNT",
     ].includes(item.type)
   ) {
+    if (item.type === "DELETE_ACCOUNT") {
+      return (
+        typeof item.accountId === "string" && item.accountId.trim().length > 0
+      );
+    }
+    if (item.type === "REQUEST_HOST_PERMISSION") {
+      return ["codeforces", "luogu", "qoj", "atcoder", "hydroj"].includes(
+        item.source ?? "",
+      );
+    }
     if (item.type === "UPDATE_SYNC_ACCOUNTS") {
       const accountIds = (item as { accountIds?: unknown }).accountIds;
       return (
@@ -154,10 +170,25 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
         )
       );
     }
+    if (item.type === "UPDATE_SYNC_RANGE") {
+      return isSyncRangePreference((item as { range?: unknown }).range);
+    }
     if (item.type === "SYNC_REQUEST") {
       const accountIds = (item as { accountIds?: unknown }).accountIds;
+      const since = (item as { since?: unknown }).since;
+      const until = (item as { until?: unknown }).until;
       return (
         typeof (item as { force?: unknown }).force === "boolean" &&
+        (since === undefined ||
+          (typeof since === "number" &&
+            Number.isFinite(since) &&
+            since >= 0)) &&
+        (until === undefined ||
+          (typeof until === "number" &&
+            Number.isFinite(until) &&
+            until >= 0 &&
+            (since === undefined ||
+              (typeof since === "number" && until >= since)))) &&
         (accountIds === undefined ||
           (Array.isArray(accountIds) &&
             accountIds.every(
@@ -171,8 +202,9 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
         ["codeforces", "luogu", "qoj", "atcoder", "hydroj"].includes(
           (item as { source?: unknown }).source as string,
         ) &&
-        ((item as { pageIdentity?: unknown }).pageIdentity === undefined ||
-          typeof (item as { pageIdentity?: unknown }).pageIdentity === "string")
+        (item.origin === undefined || typeof item.origin === "string") &&
+        (item.pageIdentity === undefined ||
+          typeof item.pageIdentity === "string")
       );
     }
     if (item.type === "AUTHORIZE_ACCOUNT") {
@@ -181,9 +213,9 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
         authMode?: unknown;
         identifier?: unknown;
         credentials?: unknown;
-        cookie?: unknown;
         origin?: unknown;
       };
+      if ("cookie" in account) return false;
       const credentialsValid =
         account.credentials === undefined ||
         (typeof account.credentials === "object" &&
@@ -208,7 +240,6 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
         (account.identifier === undefined ||
           typeof account.identifier === "string") &&
         credentialsValid &&
-        (account.cookie === undefined || typeof account.cookie === "string") &&
         (account.origin === undefined || typeof account.origin === "string") &&
         (account.authMode === "browser-session" ||
           account.authMode === "manual-cookie" ||
@@ -217,8 +248,6 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
             account.identifier.trim().length > 0)) &&
         ((account.authMode !== "manual-cookie" &&
           account.authMode !== "password") ||
-          (typeof account.cookie === "string" &&
-            account.cookie.trim().length > 0) ||
           (credentialsValid &&
             Object.values(
               (account.credentials ?? {}) as Record<string, string>,
@@ -230,6 +259,6 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
   return false;
 }
 
-export function isSchemaVersionSupported(value: unknown): value is 1 {
+export function isSchemaVersionSupported(value: unknown): value is 2 {
   return value === MESSAGE_SCHEMA_VERSION;
 }

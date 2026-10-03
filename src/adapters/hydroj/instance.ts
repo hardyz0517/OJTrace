@@ -38,6 +38,19 @@ export function hydroOJRecordsUrl(
   return url.href;
 }
 
+export function hydroOJActivityRecordsUrl(
+  origin: string,
+  activityId: string,
+  uidOrName: string,
+  page = 1,
+): string {
+  if (!/^[0-9a-f]{24}$/i.test(activityId))
+    throw new Error("HydroOJ activity id is invalid");
+  const url = new URL(hydroOJRecordsUrl(origin, uidOrName, page));
+  url.searchParams.set("tid", activityId);
+  return url.href;
+}
+
 export function hydroOJUserUrl(origin: string, uid: string): string {
   const normalizedOrigin = normalizeCustomHttpsOrigin(origin, {
     allowHttp: true,

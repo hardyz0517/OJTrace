@@ -1,110 +1,20 @@
-import type { OJAdapter } from "../../domain";
-import { AdapterFailure } from "../../domain/errors";
-import { createHydroOJInstance, hydroOJRecordsUrl } from "./instance";
-import { isHydroOJLoginPage, parseHydroOJRecordPage } from "./parser";
-import { normalizeHydroOJSubmission } from "./normalizer";
+import { cookieHeaderFromCredentials, type OJAdapter } from "../../domain";
+import { mergeSubmissions, submissionKey } from "../../domain/merge";
+import { fetchHydroBranding } from "./branding";
+import { isHydroOJLoginPage } from "./parser";
+import { collectActivityRecords } from "./activities";
+import { fetchRecordPages } from "./records";
+import {
+  originFor,
+  parseHydroUser,
+  failure,
+  assertRecordResponse,
+  loginHydroOJ,
+  requestPage,
+  withInstanceSession,
+} from "./session";
 
-function originFor(account: { origin?: string }): string {
-  return createHydroOJInstance(account.origin).origin;
-}
-
-function hydroCookie(account: {
-  credentials?: Record<string, string>;
-  cookie?: string;
-}): string | undefined {
-  return (
-    account.credentials?.cookie?.trim() || account.cookie?.trim() || undefined
-  );
-}
-
-function parseHydroUser(text: string): { uid?: string; username?: string } {
-  const raw = text.match(/window\.UserContext\s*=\s*'([\s\S]*?)';/i)?.[1];
-  if (!raw) return {};
-  try {
-    const user = JSON.parse(raw) as { _id?: number; uname?: string };
-    return {
-      uid: Number.isFinite(user._id) ? String(user._id) : undefined,
-      username: user.uname && user.uname !== "Guest" ? user.uname : undefined,
-    };
-  } catch {
-    return {};
-  }
-}
-
-async function loginHydroOJ(
-  input: Parameters<NonNullable<OJAdapter["fetchRecent"]>>[0],
-  origin: string,
-): Promise<{ uid?: string; username?: string }> {
-  const username = input.account.credentials?.username?.trim();
-  const password = input.account.credentials?.password ?? "";
-  if (!username || !password) {
-    throw new AdapterFailure({
-      kind: "invalid_response",
-      source: "hydroj",
-      stage: "identity",
-      messageKey: "account.loginCredentialsRequired",
-      retryable: false,
-      userAction: "edit_account",
-      requestId: input.requestId,
-    });
-  }
-  let response;
-  try {
-    response = await input.http.request(
-      "hydroj",
-      new URL("/login", origin).href,
-      {
-        method: "POST",
-        body: new URLSearchParams({
-          uname: username,
-          password,
-          rememberme: "on",
-          tfa: "",
-          authnChallenge: "",
-          login_submit: "登录",
-        }).toString(),
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "text/html",
-        },
-        credentials: "include",
-        followRedirects: true,
-        signal: input.signal,
-        hydroOrigin: origin,
-      },
-    );
-  } catch (error) {
-    throw AdapterFailure.fromTransport(error, "hydroj", input.requestId);
-  }
-  const identity = parseHydroUser(response.text);
-  if (
-    response.status < 200 ||
-    response.status >= 300 ||
-    isHydroOJLoginPage(response.text) ||
-    !identity.username
-  ) {
-    throw new AdapterFailure({
-      kind: "auth_required",
-      source: "hydroj",
-      stage: "identity",
-      messageKey: "source.loginFailed",
-      retryable: false,
-      userAction: "edit_account",
-      httpStatus: response.status,
-      requestId: input.requestId,
-    });
-  }
-  return identity;
-}
-
-function resolvePath(
-  origin: string,
-  path: string | undefined,
-): string | undefined {
-  return path ? new URL(path, origin).href : undefined;
-}
-
-export const hydroOJAdapter: OJAdapter = {
+const implementation: OJAdapter = {
   metadata: {
     id: "hydroj",
     displayName: "HydroOJ",
@@ -119,19 +29,20 @@ export const hydroOJAdapter: OJAdapter = {
       {
         type: "manual-cookie",
         label: "手动配置",
-        description: "只需粘贴当前实例的 sid 和 sid.sig Cookie，无需填写 UID。",
         identifierRequired: false,
         credentialFields: [
           {
             key: "sid",
             label: "sid",
             type: "password",
+            credentialType: "cookie",
             placeholder: "粘贴 sid 值",
           },
           {
             key: "sid.sig",
             label: "sid.sig",
             type: "password",
+            credentialType: "cookie",
             placeholder: "粘贴 sid.sig 值",
           },
         ],
@@ -168,6 +79,41 @@ export const hydroOJAdapter: OJAdapter = {
     dataOrigins: [],
   },
 
+  async authorize(input) {
+    const origin = originFor(input.account);
+    const cookie =
+      input.account.authMode === "manual-cookie"
+        ? cookieHeaderFromCredentials(input.credentials, ["sid", "sid.sig"])
+        : undefined;
+    if (input.account.authMode === "manual-cookie" && !cookie)
+      throw failure(
+        input,
+        "invalid_response",
+        "identity",
+        "account.cookieRequired",
+      );
+    const identity =
+      input.account.authMode === "password"
+        ? await loginHydroOJ(input, origin)
+        : parseHydroUser(
+            (
+              await requestPage(
+                input,
+                new URL("/", origin).href,
+                origin,
+                cookie,
+              )
+            ).text,
+          );
+    if (!identity.uid || !identity.username)
+      throw failure(input, "auth_required", "identity", "source.authRequired");
+    return {
+      accountId: input.account.accountId,
+      source: "hydroj",
+      providerAccountKey: identity.uid,
+      displayName: identity.username,
+    };
+  },
   async detectBrowserSession(input) {
     const origin =
       input.origin ??
@@ -186,18 +132,13 @@ export const hydroOJAdapter: OJAdapter = {
       );
       if (isHydroOJLoginPage(response.text))
         return { authenticated: false, status: "unauthenticated" };
-      const user = response.text.match(
-        /window\.UserContext\s*=\s*'([\s\S]*?)';/i,
-      )?.[1];
-      const parsed = user
-        ? (JSON.parse(user) as { _id?: number; uname?: string })
-        : undefined;
-      if (parsed?.uname && parsed.uname !== "Guest")
+      const parsed = parseHydroUser(response.text);
+      if (parsed.username)
         return {
           authenticated: true,
           status: "authenticated",
-          username: parsed.uname,
-          uid: parsed._id ? String(parsed._id) : undefined,
+          username: parsed.username,
+          uid: parsed.uid,
         };
       return { authenticated: false, status: "unauthenticated" };
     } catch {
@@ -205,158 +146,189 @@ export const hydroOJAdapter: OJAdapter = {
     }
   },
 
+  async fetchInstanceBranding(input) {
+    const origin = originFor(input.account);
+    const cookie = cookieHeaderFromCredentials(input.credentials, [
+      "sid",
+      "sid.sig",
+    ]);
+    try {
+      const branding = await fetchHydroBranding(input.http, {
+        origin,
+        source: "hydroj",
+        credentials:
+          input.account.authMode === "manual-cookie" ? "omit" : "include",
+        cookie,
+        signal: input.signal,
+        now: input.now,
+      });
+      return { branding, diagnostics: [] };
+    } catch {
+      return {
+        diagnostics: [
+          {
+            source: "hydroj",
+            code: "branding-unavailable",
+            severity: "warning",
+            messageKey: "source.brandingUnavailable",
+            retryable: true,
+          },
+        ],
+      };
+    }
+  },
+
   async fetchRecent(input) {
     const origin = originFor(input.account);
-    let identifier = input.account.identifier.trim();
+    const cookie =
+      input.account.authMode === "manual-cookie"
+        ? cookieHeaderFromCredentials(input.credentials, ["sid", "sid.sig"])
+        : undefined;
+    if (input.account.authMode === "manual-cookie" && !cookie)
+      throw failure(
+        input,
+        "invalid_response",
+        "identity",
+        "account.cookieRequired",
+      );
     if (
       !["browser-session", "manual-cookie", "password"].includes(
         input.account.authMode,
       )
     )
-      throw new AdapterFailure({
-        kind: "unsupported",
-        source: "hydroj",
-        stage: "identity",
-        messageKey: "account.authModeUnsupported",
-        retryable: false,
-        userAction: "edit_account",
-        requestId: input.requestId,
-      });
-    const manualCookie =
-      input.account.credentials?.sid && input.account.credentials?.["sid.sig"]
-        ? `sid=${input.account.credentials.sid}; sid.sig=${input.account.credentials["sid.sig"]}`
-        : hydroCookie(input.account);
-    if (input.account.authMode === "manual-cookie" && !manualCookie)
-      throw new AdapterFailure({
-        kind: "invalid_response",
-        source: "hydroj",
-        stage: "identity",
-        messageKey: "account.cookieRequired",
-        retryable: false,
-        userAction: "edit_account",
-        requestId: input.requestId,
-      });
-    let loginIdentity: { uid?: string; username?: string } = {};
-    let response;
-    try {
-      response = await input.http.request(
-        "hydroj",
-        hydroOJRecordsUrl(origin, identifier || "0"),
-        {
-          credentials:
-            input.account.authMode === "manual-cookie" ? "omit" : "include",
-          ...(manualCookie ? { headers: { Cookie: manualCookie } } : {}),
-          signal: input.signal,
-          hydroOrigin: origin,
-        },
+      throw failure(
+        input,
+        "unsupported",
+        "identity",
+        "account.authModeUnsupported",
       );
-    } catch (error) {
-      throw AdapterFailure.fromTransport(error, "hydroj", input.requestId);
-    }
+
+    // Always verify the active session, including when records are requested as JSON.
+    const home = await requestPage(
+      input,
+      new URL("/", origin).href,
+      origin,
+      cookie,
+    );
+    let identity = parseHydroUser(home.text);
     if (
       input.account.authMode === "password" &&
-      (response.status === 401 || isHydroOJLoginPage(response.text))
-    ) {
-      loginIdentity = await loginHydroOJ(input, origin);
-      try {
-        response = await input.http.request(
-          "hydroj",
-          hydroOJRecordsUrl(origin, loginIdentity.username ?? "0"),
-          {
-            credentials: "include",
-            signal: input.signal,
-            hydroOrigin: origin,
-          },
-        );
-      } catch (error) {
-        throw AdapterFailure.fromTransport(error, "hydroj", input.requestId);
-      }
+      (!identity.uid ||
+        (input.account.providerAccountKey &&
+          identity.uid !== input.account.providerAccountKey))
+    )
+      identity = await loginHydroOJ(input, origin);
+    else assertRecordResponse(input, home);
+    if (!identity.uid)
+      throw failure(input, "auth_required", "identity", "source.authRequired");
+    if (
+      input.account.providerAccountKey &&
+      identity.uid !== input.account.providerAccountKey
+    )
+      throw failure(
+        input,
+        "auth_required",
+        "identity",
+        "account.identityChanged",
+      );
+    const uid = identity.uid;
+    const refreshSession =
+      input.account.authMode === "password"
+        ? async () => {
+            const refreshed = await loginHydroOJ(input, origin);
+            if (refreshed.uid !== uid)
+              throw failure(
+                input,
+                "auth_required",
+                "identity",
+                "account.identityChanged",
+              );
+          }
+        : undefined;
+    const ordinary = await fetchRecordPages(
+      input,
+      origin,
+      uid,
+      cookie,
+      undefined,
+      undefined,
+      100,
+      input.limit,
+      refreshSession,
+    );
+    const activities = await collectActivityRecords(
+      input,
+      origin,
+      uid,
+      cookie,
+      refreshSession,
+    );
+    const allRecords = ordinary.records.concat(activities.records);
+    const diagnostics = ordinary.diagnostics.concat(activities.diagnostics);
+    if (ordinary.hasMore)
+      diagnostics.push({
+        source: "hydroj",
+        code: "record-limit",
+        severity: "warning",
+        messageKey: "source.recordLimit",
+        retryable: false,
+      });
+    const activityIds = new Map<string, string>();
+    for (const record of allRecords) {
+      if (!record.activityId) continue;
+      const key = submissionKey(record);
+      const previous = activityIds.get(key);
+      if (previous && previous !== record.activityId)
+        diagnostics.push({
+          source: "hydroj",
+          code: "activity-conflict",
+          severity: "warning",
+          messageKey: "source.activityConflict",
+          retryable: false,
+        });
+      else activityIds.set(key, record.activityId);
     }
-    if (response.status === 401 || isHydroOJLoginPage(response.text))
-      throw new AdapterFailure({
-        kind: "auth_required",
+    const limit = Math.min(input.limit, 1000);
+    const merged = mergeSubmissions([], allRecords, Number.MAX_SAFE_INTEGER);
+    if (merged.length > limit)
+      diagnostics.push({
         source: "hydroj",
-        stage: "request",
-        messageKey: "source.authRequired",
+        code: "output-limit",
+        severity: "warning",
+        messageKey: "source.outputLimit",
         retryable: false,
-        userAction: "open_site_login",
-        httpStatus: response.status,
-        requestId: input.requestId,
-      });
-    if (response.status === 429)
-      throw new AdapterFailure({
-        kind: "rate_limited",
-        source: "hydroj",
-        stage: "request",
-        messageKey: "source.rateLimited",
-        retryable: false,
-        userAction: "retry_later",
-        httpStatus: response.status,
-        requestId: input.requestId,
-      });
-    if (response.status < 200 || response.status >= 300)
-      throw new AdapterFailure({
-        kind: response.status === 403 ? "blocked" : "network",
-        source: "hydroj",
-        stage: "request",
-        messageKey: "source.httpError",
-        retryable: response.status >= 500,
-        httpStatus: response.status,
-        requestId: input.requestId,
-      });
-    let page;
-    try {
-      page = parseHydroOJRecordPage(response.text);
-    } catch {
-      throw new AdapterFailure({
-        kind: "parse_failed",
-        source: "hydroj",
-        stage: "parse",
-        messageKey: "source.invalidResponse",
-        retryable: false,
-        requestId: input.requestId,
-      });
-    }
-    const responseIdentity = parseHydroUser(response.text);
-    if (!identifier)
-      identifier =
-        loginIdentity.username ?? responseIdentity.username ?? "hydroj-user";
-    const listIdentifier = identifier || "0";
-    const records = page.rdocs
-      .slice(0, Math.min(input.limit, 100))
-      .map((raw) => {
-        const item = normalizeHydroOJSubmission(raw);
-        return {
-          source: "hydroj" as const,
-          accountId: input.account.accountId,
-          providerAccountKey: listIdentifier,
-          origin,
-          submissionId: item.submissionId,
-          identityQuality: "stable" as const,
-          problemId: item.problemId,
-          problemName: item.problemName,
-          submittedAt: item.submittedAt,
-          verdict: item.verdict,
-          score: item.score,
-          timeMs: item.timeMs,
-          memoryKb: item.memoryKb,
-          language: item.language,
-          submissionUrl: resolvePath(origin, item.submissionPath),
-          problemUrl: resolvePath(origin, item.problemPath),
-          fallbackListUrl: hydroOJRecordsUrl(origin, listIdentifier),
-          fetchedAt: input.now,
-        };
       });
     return {
       account: {
         accountId: input.account.accountId,
         source: "hydroj",
-        providerAccountKey: listIdentifier,
-        displayName: listIdentifier,
+        providerAccountKey: uid,
+        displayName:
+          identity.username ?? input.account.providerDisplayName ?? uid,
       },
-      records,
-      diagnostics: [],
-      hasMore: page.hasMore,
+      records: merged.slice(0, limit),
+      diagnostics,
+      hasMore: ordinary.hasMore || activities.hasMore || merged.length > limit,
     };
   },
+};
+
+export const hydroOJAdapter: OJAdapter = {
+  ...implementation,
+  authorize: (input) =>
+    withInstanceSession(originFor(input.account), () =>
+      implementation.authorize(input),
+    ),
+  fetchRecent: (input) =>
+    withInstanceSession(originFor(input.account), () =>
+      implementation.fetchRecent(input),
+    ),
+  fetchInstanceBranding: (input) =>
+    withInstanceSession(originFor(input.account), () =>
+      implementation.fetchInstanceBranding!(input),
+    ),
+  detectBrowserSession: (input) =>
+    withInstanceSession(originFor({ origin: input.origin }), () =>
+      implementation.detectBrowserSession!(input),
+    ),
 };

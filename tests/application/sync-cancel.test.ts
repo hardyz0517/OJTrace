@@ -5,19 +5,20 @@ import {
   defaultStoredData,
 } from "../../src/application/storage/store";
 import type { HttpClient } from "../../src/domain";
+import { accountRecord } from "../account-fixture";
 
 function createFixture() {
   let value: Record<string, unknown> = {
     "ojtrace:data": {
       ...defaultStoredData(),
       accounts: [
-        {
+        accountRecord({
           accountId: "account",
           source: "codeforces" as const,
           identifier: "tourist",
           enabled: true,
-          authMode: "public" as const,
-        },
+          authMode: "public-handle" as const,
+        }),
       ],
     },
   };

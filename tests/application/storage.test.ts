@@ -1,3 +1,4 @@
+import { accountRecord } from "../account-fixture";
 import { describe, expect, it } from "vitest";
 import {
   createStoragePort,
@@ -15,16 +16,72 @@ function fakeArea() {
 }
 
 describe("storage port", () => {
+  it("persists the manual sync range across unrelated preference writes", async () => {
+    const store = createStoragePort(fakeArea());
+    const syncRange = {
+      from: 1_800_000_000_000,
+      to: 1_800_600_000_000,
+      followNow: false,
+    };
+    await store.transact((current) => ({
+      ...current,
+      preferences: { ...current.preferences, syncRange },
+    }));
+    await store.transact((current) => ({
+      ...current,
+      preferences: { ...current.preferences, syncAccountIds: [] },
+    }));
+    expect((await store.load()).preferences.syncRange).toEqual(syncRange);
+  });
+
+  it("drops an invalid sync range without losing other preferences", async () => {
+    const area = fakeArea();
+    await area.set({
+      "ojtrace:data": {
+        ...defaultStoredData(),
+        preferences: {
+          ...defaultStoredData().preferences,
+          syncAccountIds: [],
+          syncRange: { from: 100, to: 90, followNow: false },
+        },
+      },
+    });
+    const preferences = (await createStoragePort(area).load()).preferences;
+    expect(preferences.syncRange).toBeUndefined();
+    expect(preferences.syncAccountIds).toEqual([]);
+  });
+
+  it("drops a corrupt optional branding cache without losing canonical accounts", async () => {
+    const area = fakeArea();
+    const account = accountRecord({
+      accountId: "a",
+      source: "hydroj",
+      origin: "https://school.example.org",
+      providerAccountKey: "42",
+      authMode: "browser-session",
+      enabled: true,
+    });
+    await area.set({
+      "ojtrace:data": {
+        ...defaultStoredData(),
+        accounts: [account],
+        instanceBranding: null,
+      },
+    });
+    const loaded = await createStoragePort(area).load();
+    expect(loaded.accounts).toEqual([account]);
+    expect(loaded.instanceBranding).toEqual({});
+  });
   it("initializes defaults and serializes revisioned writes", async () => {
     const area = fakeArea();
     const store = createStoragePort(area);
     expect((await store.load()).revision).toBe(0);
-    const first = await store.update((current) => ({
+    const first = await store.transact((current) => ({
       ...current,
       preferences: { ...current.preferences, retentionPerAccount: 10 },
     }));
     expect(first.revision).toBe(1);
-    const second = await store.update((current) => ({
+    const second = await store.transact((current) => ({
       ...current,
       accounts: [],
     }));
@@ -46,13 +103,13 @@ describe("storage port", () => {
       "ojtrace:data": {
         ...valid,
         accounts: [
-          {
+          accountRecord({
             accountId: "ok",
             source: "codeforces",
             identifier: "u",
             enabled: true,
-            authMode: "public",
-          },
+            authMode: "public-handle",
+          }),
           { bad: true },
         ],
         submissions: [
@@ -72,7 +129,7 @@ describe("storage port", () => {
     expect(loaded.submissions).toHaveLength(1);
   });
 
-  it("migrates legacy auth mode values without exposing a cookie in UI data", async () => {
+  it("drops accounts that use removed legacy auth mode values", async () => {
     const area = fakeArea();
     const valid = defaultStoredData();
     await area.set({
@@ -84,14 +141,36 @@ describe("storage port", () => {
             source: "luogu",
             identifier: "99",
             enabled: true,
-            authMode: "browser_session",
+            authMode: "browser_session" as never,
           },
         ],
       },
     });
     const loaded = await createStoragePort(area).load();
-    expect(loaded.accounts[0]?.authMode).toBe("browser-session");
-    expect(loaded.accounts[0]?.cookie).toBeUndefined();
+    expect(loaded.accounts).toEqual([]);
+  });
+
+  it("rejects stored accounts that still use the removed top-level Cookie", async () => {
+    const area = fakeArea();
+    const valid = defaultStoredData();
+    await area.set({
+      "ojtrace:data": {
+        ...valid,
+        accounts: [
+          {
+            accountId: "account",
+            source: "luogu",
+            identifier: "99",
+            enabled: true,
+            authMode: "manual-cookie",
+            credentials: { __client_id: "client", _uid: "99" },
+            cookie: "must-not-survive",
+          },
+        ],
+      },
+    });
+    const loaded = await createStoragePort(area).load();
+    expect(loaded.accounts).toEqual([]);
   });
 
   it("keeps only valid persisted sync account ids", async () => {
@@ -101,13 +180,13 @@ describe("storage port", () => {
       "ojtrace:data": {
         ...valid,
         accounts: [
-          {
+          accountRecord({
             accountId: "account",
             source: "codeforces",
             identifier: "user",
             enabled: true,
-            authMode: "public",
-          },
+            authMode: "public-handle",
+          }),
         ],
         preferences: {
           ...valid.preferences,
@@ -123,75 +202,44 @@ describe("storage port", () => {
   it("clears all local data through the serialized storage port", async () => {
     const area = fakeArea();
     const store = createStoragePort(area);
-    await store.update((current) => ({
+    await store.transact((current) => ({
       ...current,
       accounts: [
-        {
+        accountRecord({
           accountId: "a",
           source: "codeforces",
           identifier: "u",
           enabled: true,
-          authMode: "public",
-        },
+          authMode: "public-handle",
+        }),
       ],
     }));
     await store.clear();
     expect(await store.load()).toEqual(defaultStoredData());
   });
 
-  it("preserves a concurrent account write when a stale mutator commits", async () => {
-    let value: Record<string, unknown> = {
-      "ojtrace:data": defaultStoredData(),
-    };
-    let reads = 0;
-    const area = {
-      get: async () => {
-        reads += 1;
-        return value;
-      },
-      set: async (next: Record<string, unknown>) => {
-        value = { ...value, ...next };
-      },
-    };
-    const storeA = createStoragePort(area);
-    const storeB = createStoragePort(area);
-    let releaseA!: () => void;
-    const gateA = new Promise<void>((resolve) => {
-      releaseA = resolve;
-    });
-    const a = storeA.update(async (current) => {
-      await gateA;
-      return {
-        ...current,
-        accounts: [
-          {
-            accountId: "a",
-            source: "codeforces",
-            identifier: "a",
-            enabled: true,
-            authMode: "public",
-          },
-        ],
-      };
-    });
-    const b = storeB.update((current) => ({
-      ...current,
+  it("serializes concurrent mutations without resurrecting a deleted account", async () => {
+    const store = createStoragePort(fakeArea());
+    await store.transact((data) => ({
+      ...data,
       accounts: [
-        {
-          accountId: "b",
+        accountRecord({
+          accountId: "a",
           source: "codeforces",
-          identifier: "b",
+          identifier: "a",
           enabled: true,
-          authMode: "public",
-        },
+          authMode: "public-handle",
+        }),
       ],
     }));
-    await b;
-    releaseA();
-    await a;
-    expect(
-      (await storeA.load()).accounts.map((account) => account.accountId).sort(),
-    ).toEqual(["a", "b"]);
-    expect(reads).toBeGreaterThan(2);
+    await Promise.all([
+      store.transact((data) => ({ ...data, accounts: [] })),
+      store.transact((data) => ({
+        ...data,
+        preferences: { ...data.preferences, retentionPerAccount: 20 },
+      })),
+    ]);
+    expect((await store.load()).accounts).toEqual([]);
+    expect((await store.load()).revision).toBe(3);
   });
 });

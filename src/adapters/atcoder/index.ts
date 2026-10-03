@@ -1,4 +1,5 @@
-import type { FetchInput, OJAdapter } from "../../domain";
+import { authorizeFromRecent } from "../authorization";
+import { credentialValue, type OJAdapter } from "../../domain";
 import { AdapterFailure } from "../../domain/errors";
 import { normalizeAtCoderSubmission } from "./normalizer";
 import {
@@ -22,10 +23,9 @@ function atcoderSessionCookie(raw: string): string {
 }
 
 function manualAtCoderCookie(
-  account: FetchInput["account"],
+  credentials: Record<string, string> | undefined,
 ): string | undefined {
-  const value =
-    account.credentials?.REVEL_SESSION?.trim() ?? account.cookie?.trim();
+  const value = credentialValue(credentials, "REVEL_SESSION");
   return value ? atcoderSessionCookie(value) : undefined;
 }
 
@@ -63,6 +63,9 @@ async function mapConcurrent<T, R>(
 }
 
 export const atcoderAdapter: OJAdapter = {
+  authorize(input) {
+    return authorizeFromRecent(this, input);
+  },
   metadata: {
     id: "atcoder",
     displayName: "AtCoder",
@@ -86,6 +89,7 @@ export const atcoderAdapter: OJAdapter = {
             key: "REVEL_SESSION",
             label: "REVEL_SESSION",
             type: "password",
+            credentialType: "cookie",
             placeholder: "粘贴 REVEL_SESSION 值",
           },
         ],
@@ -163,7 +167,7 @@ export const atcoderAdapter: OJAdapter = {
         requestId: input.requestId,
       });
     }
-    const manualCookie = manualAtCoderCookie(input.account);
+    const manualCookie = manualAtCoderCookie(input.credentials);
     if (authMode === "manual-cookie" && !manualCookie) {
       throw new AdapterFailure({
         kind: "invalid_response",
@@ -175,7 +179,11 @@ export const atcoderAdapter: OJAdapter = {
         requestId: input.requestId,
       });
     }
-    let handle = input.account.identifier.trim();
+    let handle = (
+      input.account.providerAccountKey ??
+      input.account.identifier ??
+      ""
+    ).trim();
     if (authMode === "manual-cookie" && !handle && manualCookie) {
       try {
         const identityResponse = await input.http.request(
@@ -224,7 +232,10 @@ export const atcoderAdapter: OJAdapter = {
     try {
       response = await input.http.request(
         "atcoder",
-        atcoderUserSubmissionsUrl(handle),
+        atcoderUserSubmissionsUrl(
+          handle,
+          input.since === undefined ? 0 : input.since / 1_000,
+        ),
         {
           // AtCoder Problems is a public cross-origin API. Sending browser
           // credentials here triggers CORS failures because it uses a
@@ -313,7 +324,13 @@ export const atcoderAdapter: OJAdapter = {
     } catch {
       // Metadata is optional; records remain usable with problem IDs.
     }
-    const rows = raw.slice(0, Math.min(input.limit, 100));
+    const rows = raw
+      .filter(
+        (item) =>
+          input.since === undefined || item.epochSecond * 1_000 >= input.since,
+      )
+      .sort((left, right) => right.epochSecond - left.epochSecond)
+      .slice(0, Math.min(input.limit, 1_000));
     const details = await mapConcurrent(rows, 4, async (item) => {
       try {
         const page = await input.http.request(

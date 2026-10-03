@@ -24,6 +24,13 @@ export interface HydroOJRecordPage {
   authenticated: boolean;
 }
 
+export interface HydroActivity {
+  id: string;
+  title: string;
+  type: "contest" | "homework" | "other";
+  url?: string;
+}
+
 function decodeHtml(value: string): string {
   return value
     .replace(/&amp;/g, "&")
@@ -47,17 +54,127 @@ function textOf(value: string | undefined): string {
   );
 }
 
+function activityTitle(value: string | undefined): string {
+  const withoutBadges = (value ?? "").replace(
+    /<[^>]*class=["'][^"']*(?:badge|label|contest-type|activity-type)[^"']*["'][^>]*>[\s\S]*?<\/[^>]+>/gi,
+    " ",
+  );
+  return textOf(withoutBadges);
+}
+
+function isObjectId(value: string): boolean {
+  return /^[0-9a-f]{24}$/i.test(value);
+}
+
+function memoryInKiB(text: string): number | undefined {
+  const match = text.match(/^([\d.]+)\s*(B|KiB|MiB|GiB|KB|MB|GB)$/i);
+  if (!match) return undefined;
+  const units: Record<string, number> = {
+    b: 1 / 1024,
+    kib: 1,
+    kb: 1,
+    mib: 1024,
+    mb: 1024,
+    gib: 1024 * 1024,
+    gb: 1024 * 1024,
+  };
+  const value = Number(match[1]) * units[match[2]!.toLowerCase()]!;
+  return Number.isFinite(value) ? value : undefined;
+}
+
+export function parseHydroUserActivities(
+  text: string,
+  responseUrl: string,
+): HydroActivity[] {
+  const origin = new URL(responseUrl).origin;
+  const result = new Map<string, HydroActivity>();
+  const linkPattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  for (const match of text.matchAll(linkPattern)) {
+    const href = match[1];
+    if (!href) continue;
+    let url: URL;
+    try {
+      url = new URL(href, responseUrl);
+    } catch {
+      continue;
+    }
+    if (url.origin !== origin) continue;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length !== 2 || !["contest", "homework"].includes(parts[0]!))
+      continue;
+    const id = parts[1]!;
+    if (!isObjectId(id) || result.has(id)) continue;
+    const title = activityTitle(match[2]);
+    if (!title) continue;
+    result.set(id, {
+      id,
+      title,
+      type: parts[0] === "homework" ? "homework" : "contest",
+      url: new URL(`/${parts[0]}/${id}`, origin).href,
+    });
+  }
+  return [...result.values()];
+}
+
+export function parseHydroUserActivitiesJson(
+  value: unknown,
+  responseUrl: string,
+): { activities: HydroActivity[]; invalidCount: number } {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("Unsupported user page");
+  const tdocs = (value as { tdocs?: unknown }).tdocs;
+  if (!Array.isArray(tdocs)) throw new Error("Unsupported user page");
+  const origin = new URL(responseUrl).origin;
+  const activities = new Map<string, HydroActivity>();
+  let invalidCount = 0;
+  for (const raw of tdocs) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      invalidCount += 1;
+      continue;
+    }
+    const item = raw as Record<string, unknown>;
+    const id = typeof item.docId === "string" ? item.docId : "";
+    const title =
+      typeof item.title === "string" ? activityTitle(item.title) : "";
+    const rule = typeof item.rule === "string" ? item.rule : "";
+    if (!isObjectId(id) || !title) {
+      invalidCount += 1;
+      continue;
+    }
+    if (activities.has(id)) continue;
+    const normalizedRule = rule.toLowerCase();
+    const type =
+      normalizedRule === "homework"
+        ? "homework"
+        : ["oi", "ioi", "acm", "noi", "codeforces"].includes(normalizedRule)
+          ? "contest"
+          : "other";
+    activities.set(id, {
+      id,
+      title,
+      type,
+      ...(type === "other"
+        ? {}
+        : { url: new URL(`/${type}/${id}`, origin).href }),
+    });
+  }
+  return { activities: [...activities.values()], invalidCount };
+}
+
 function parseStatus(cell: string): { status?: string; score?: number } {
-  const scoreText = textOf(cell.match(/<span[^>]*>([^<]+)<\/span>/i)?.[1]);
-  const score = /^\d+(?:\.\d+)?$/.test(scoreText)
-    ? Number(scoreText)
-    : undefined;
   const statusText = textOf(
-    cell.match(/record-status--text[^>]*>([\s\S]*?)<\/a>/i)?.[1],
-  )
+    cell.match(/record-status--text[^>]*>([\s\S]*?)<\/a>/i)?.[1] ?? cell,
+  );
+  const scoreText = textOf(cell.match(/<span[^>]*>([^<]+)<\/span>/i)?.[1]);
+  const scoreToken =
+    scoreText || statusText.match(/^[-+]?\d+(?:\.\d+)?/)?.[0] || "";
+  const score = /^[-+]?\d+(?:\.\d+)?$/.test(scoreToken)
+    ? Number(scoreToken)
+    : undefined;
+  const normalizedStatus = statusText
     .replace(/^[-+]?\d+(?:\.\d+)?\s*/, "")
     .trim();
-  return { status: statusText || undefined, score };
+  return { status: normalizedStatus || undefined, score };
 }
 
 export function isHydroOJLoginPage(text: string): boolean {
@@ -67,8 +184,11 @@ export function isHydroOJLoginPage(text: string): boolean {
   );
 }
 
-export function parseHydroOJRecordPage(text: string): HydroOJRecordPage {
-  if (/^\s*\{/.test(text)) return parseHydroOJJsonRecordPage(text);
+export function parseHydroOJRecordPage(
+  text: string,
+  responseUrl?: string,
+): HydroOJRecordPage {
+  if (/^\s*\{/.test(text)) return parseHydroOJJsonRecordPage(text, responseUrl);
   if (isHydroOJLoginPage(text))
     return { page: 1, rdocs: [], hasMore: false, authenticated: false };
   if (!/data-page=["']record_main["']/i.test(text))
@@ -104,11 +224,11 @@ export function parseHydroOJRecordPage(text: string): HydroOJRecordPage {
       statusText: status.status,
       score: status.score,
       time: Number(timeText.match(/[\d.]+/)?.[0] ?? NaN),
-      memory: Number(memoryText.match(/[\d.]+/)?.[0] ?? NaN),
+      memory: memoryInKiB(memoryText),
       lang: lang || undefined,
       submitAt: timestamp,
       submissionUrl: `/record/${encodeURIComponent(rid)}`,
-      problemUrl: problem?.[1],
+      problemUrl: problem?.[1] ? decodeHtml(problem[1]) : undefined,
     } satisfies HydroOJRawRecord;
   });
   return {
@@ -121,7 +241,10 @@ export function parseHydroOJRecordPage(text: string): HydroOJRecordPage {
   };
 }
 
-export function parseHydroOJJsonRecordPage(text: string): HydroOJRecordPage {
+export function parseHydroOJJsonRecordPage(
+  text: string,
+  responseUrl?: string,
+): HydroOJRecordPage {
   let value: unknown;
   try {
     value = JSON.parse(text);
@@ -150,13 +273,48 @@ export function parseHydroOJJsonRecordPage(text: string): HydroOJRecordPage {
   }
   return {
     page: response.page,
-    rdocs: response.rdocs as HydroOJRawRecord[],
+    rdocs: (response.rdocs as HydroOJRawRecord[]).map((raw) => {
+      const pdict = response.pdict as
+        Record<string, Record<string, unknown>> | undefined;
+      const problem = pdict?.[String(raw.pid)];
+      const responseTid = responseUrl
+        ? new URL(responseUrl).searchParams.get("tid")
+        : undefined;
+      const tid =
+        typeof raw.contest === "string" && isObjectId(raw.contest)
+          ? raw.contest
+          : responseTid && isObjectId(responseTid)
+            ? responseTid
+            : typeof (response.tdoc as { docId?: unknown } | undefined)
+                  ?.docId === "string"
+              ? (response.tdoc as { docId: string }).docId
+              : undefined;
+      const displayPid = problem?.pid ?? problem?.docId ?? raw.pid;
+      const routePid = problem?.docId ?? raw.pid;
+      const problemPath =
+        routePid === undefined
+          ? undefined
+          : `/p/${encodeURIComponent(String(routePid))}${tid && isObjectId(tid) ? `?tid=${encodeURIComponent(tid)}` : ""}`;
+      return {
+        ...raw,
+        pid:
+          typeof displayPid === "string" || typeof displayPid === "number"
+            ? displayPid
+            : raw.pid,
+        problemName:
+          typeof problem?.title === "string"
+            ? textOf(problem.title)
+            : raw.problemName,
+        problemUrl: problemPath ?? raw.problemUrl,
+        submissionUrl: `/record/${encodeURIComponent(String(raw._id ?? raw.rid))}`,
+      };
+    }),
     hasMore: false,
     authenticated: true,
   };
 }
 
-/** HTML fallback is deliberately not parsed until a real deployment is sampled. */
+/** JSON contract assertion for callers that explicitly require JSON. */
 export function assertHydroOJJsonResponse(contentType: string): void {
   if (!/\bjson\b/i.test(contentType)) {
     throw new Error("HydroOJ response is not a supported JSON API response");

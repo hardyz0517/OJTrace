@@ -13,7 +13,13 @@ describe("Codeforces parser and normalizer", () => {
       expect.objectContaining({
         type: "manual-cookie",
         identifierRequired: false,
-        credentialFields: [expect.objectContaining({ key: "cookie" })],
+        credentialFields: [
+          expect.objectContaining({
+            key: "cookie",
+            label: "JSESSIONID",
+            placeholder: "粘贴 JSESSIONID 的值",
+          }),
+        ],
       }),
       expect.objectContaining({
         type: "public-handle",
@@ -70,6 +76,7 @@ describe("Codeforces parser and normalizer", () => {
     const requests: Array<{
       url: string;
       headers?: Record<string, string>;
+      codeforcesCookie?: string;
     }> = [];
     const result = await codeforcesAdapter.fetchRecent({
       account: {
@@ -78,15 +85,19 @@ describe("Codeforces parser and normalizer", () => {
         identifier: "",
         enabled: true,
         authMode: "manual-cookie",
-        credentials: { cookie: "JSESSIONID=session" },
       },
+      credentials: { cookie: "session" },
       limit: 10,
       signal: new AbortController().signal,
       now: 100,
       requestId: "request",
       http: {
         async request(_source, url, options) {
-          requests.push({ url, headers: options?.headers });
+          requests.push({
+            url,
+            headers: options?.headers,
+            codeforcesCookie: options?.codeforcesCookie,
+          });
           return {
             status: 200,
             url,
@@ -101,8 +112,8 @@ describe("Codeforces parser and normalizer", () => {
     });
     expect(result.account.providerAccountKey).toBe("tester");
     expect(requests).toHaveLength(2);
-    expect(requests[0]?.headers?.Cookie).toBe("JSESSIONID=session");
-    expect(requests[1]?.headers?.Cookie).toBe("JSESSIONID=session");
+    expect(requests[0]?.codeforcesCookie).toBe("JSESSIONID=session");
+    expect(requests[1]?.codeforcesCookie).toBeUndefined();
   });
 
   it("parses a successful response and normalizes epoch seconds", () => {
@@ -185,7 +196,7 @@ describe("Codeforces parser and normalizer", () => {
         source: "codeforces",
         identifier: "tourist",
         enabled: true,
-        authMode: "public",
+        authMode: "public-handle",
       },
       limit: 10,
       signal: new AbortController().signal,

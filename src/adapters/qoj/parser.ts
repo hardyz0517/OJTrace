@@ -50,6 +50,83 @@ function attr(tag: string, name: string): string | undefined {
   return match?.[2] ? decodeHtml(match[2]) : undefined;
 }
 
+function ulBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  const tags = /<\/?ul\b[^>]*>/gi;
+  let depth = 0;
+  let start = -1;
+  for (const match of text.matchAll(tags)) {
+    const tag = match[0] ?? "";
+    const offset = match.index ?? 0;
+    if (/^<ul\b/i.test(tag)) {
+      if (depth === 0) start = offset;
+      depth += 1;
+    } else if (depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        blocks.push(text.slice(start, offset + tag.length));
+        start = -1;
+      }
+    }
+  }
+  return blocks;
+}
+
+function profileIdentity(value: string): string | undefined {
+  const match = value.match(
+    /<a\b(?=[^>]*class=["'][^"']*\buoj-username\b[^"']*["'])(?=[^>]*href=["'](?:(?:https?:)?\/\/qoj\.ac)?\/user\/profile\/([^"'/?#]+)["'])[^>]*>([\s\S]*?)<\/a>/i,
+  );
+  if (!match?.[1] || !match[2]) return undefined;
+  let username: string;
+  try {
+    username = decodeURIComponent(match[1]);
+  } catch {
+    return undefined;
+  }
+  const label = textOf(match[2]);
+  const labelMatches =
+    label === username ||
+    (label.startsWith(username) &&
+      !/[\p{L}\p{N}_]/u.test(label.slice(username.length)));
+  return username && label && labelMatches && !/^guest$/i.test(username)
+    ? username
+    : undefined;
+}
+
+function profileLinkIdentity(value: string): string | undefined {
+  const match = value.match(
+    /<a\b(?=[^>]*href=["'](?:(?:https?:)?\/\/qoj\.ac)?\/user\/profile\/([^"'/?#]+)["'])[^>]*>([\s\S]*?)<\/a>/i,
+  );
+  if (!match?.[1] || !match[2]) return undefined;
+  let username: string;
+  try {
+    username = decodeURIComponent(match[1]);
+  } catch {
+    return undefined;
+  }
+  const label = textOf(match[2]);
+  return username && label && username === label && !/^guest$/i.test(username)
+    ? username
+    : undefined;
+}
+
+function usernameSpanIdentity(value: string): string | undefined {
+  const span = value.match(
+    /<span\b(?=[^>]*class\s*=["'][^"']*\buoj-username\b[^"']*["'])[^>]*>([\s\S]*?)<\/span>/i,
+  )?.[1];
+  if (span) {
+    const username = textOf(span);
+    if (username && !/^guest$/i.test(username)) return username;
+  }
+  return undefined;
+}
+
+function dropdownIdentity(value: string): string | undefined {
+  // Background fetches see the server's span, before uoj_highlight() turns it
+  // into a profile link. data-link controls rendering, not authentication.
+  return usernameSpanIdentity(value) ?? profileIdentity(value);
+}
+
 function cell(row: string, className: string): string {
   return (
     row.match(
@@ -182,20 +259,72 @@ export function isQOJLoginPage(text: string, url?: string): boolean {
   );
 }
 
+/**
+ * QOJ is currently behind Cloudflare. A service-worker request can receive
+ * the challenge document even when it reuses the browser cookie store.
+ * Only challenge documents should be treated as site errors.
+ */
+export function isQOJCloudflarePage(text: string): boolean {
+  // Cloudflare also injects /challenge-platform/scripts/jsd/main.js into
+  // ordinary, authenticated QOJ HTML. That URL alone is not a challenge.
+  const visibleHtml = text
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ");
+  return (
+    /<title\b[^>]*>\s*(?:just a moment(?:\.{3}|…)?|attention required!?(?:\s*\|\s*cloudflare)?)\s*<\/title>/i.test(
+      visibleHtml,
+    ) ||
+    /enable javascript and cookies to continue/i.test(textOf(visibleHtml)) ||
+    /(?:window\.)?_cf_chl_opt\s*=/.test(text)
+  );
+}
+
 export function parseQOJIdentity(text: string): string | undefined {
-  const legacy = text.match(
-    /<span\b(?=[^>]*class=["'][^"']*\buoj-username\b[^"']*["'])(?=[^>]*data-link=["']0["'])[^>]*>([^<]+)<\/span>/i,
-  )?.[1];
-  if (legacy && !/^guest$/i.test(textOf(legacy))) return textOf(legacy);
-  if (!/<a\b[^>]*href=["'][^"']*\/logout(?:[?"'])/i.test(text)) {
-    return undefined;
+  // Never take an account identity from submissions or embedded JS examples.
+  const identityHtml = text
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<table\b[\s\S]*?<\/table>/gi, " ");
+  for (const navigation of ulBlocks(identityHtml)) {
+    if (!/<a\b[^>]*href=["'][^"']*\/logout(?:[?"'])/i.test(navigation)) {
+      continue;
+    }
+    const identity = dropdownIdentity(navigation);
+    if (identity) return identity;
   }
-  const username = text.match(
-    /<a\b(?=[^>]*class=["'][^"']*\buoj-username\b[^"']*["'])[^>]*>([^<]+)<\/a>/i,
-  )?.[1];
-  if (!username) return undefined;
-  const value = textOf(username);
-  return value && !/^guest$/i.test(value) ? value : undefined;
+
+  // Some QOJ deployments omit the outer nav <ul> in the server-rendered
+  // fragment but keep the authenticated dropdown marker. Restrict this
+  // fallback to the username marker; table usernames have been removed.
+  if (/<a\b[^>]*href=["'][^"']*\/logout(?:[?"'])/i.test(identityHtml)) {
+    const dropdown = identityHtml.match(
+      /<a\b(?=[^>]*data-toggle=["']dropdown["'])[^>]*>[\s\S]{0,2000}?<\/a>/i,
+    )?.[0];
+    const identity = dropdown ? dropdownIdentity(dropdown) : undefined;
+    if (identity) return identity;
+
+    // QOJ themes can put the same authenticated marker in a div/header.
+    const navigation = identityHtml.slice(
+      0,
+      identityHtml.search(/<a\b[^>]*href=["'][^"']*\/logout(?:[?"'])/i),
+    );
+    const span = usernameSpanIdentity(navigation);
+    if (span) return span;
+    const profile =
+      profileIdentity(navigation) ?? profileLinkIdentity(navigation);
+    if (profile) return profile;
+    const anchor = navigation.match(
+      /<a\b(?=[^>]*class=["'][^"']*\buoj-username\b[^"']*["'])[^>]*>([\s\S]*?)<\/a>/i,
+    );
+    const anchorHref = anchor ? attr(anchor[0], "href") : undefined;
+    if (anchor && (!anchorHref || anchorHref === "#")) {
+      const value = textOf(anchor[1]);
+      if (value && !/^guest$/i.test(value)) return value;
+    }
+  }
+  return undefined;
 }
 
 export function parseQOJRecordPage(text: string, url = ""): QOJRecordPage {

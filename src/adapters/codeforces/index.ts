@@ -1,9 +1,14 @@
-import type { BrowserSessionInput, FetchInput, OJAdapter } from "../../domain";
+import { authorizeFromRecent } from "../authorization";
+import {
+  cookieHeaderFromCredentials,
+  credentialValue,
+  type BrowserSessionInput,
+  type FetchInput,
+  type OJAdapter,
+} from "../../domain";
 import { AdapterFailure } from "../../domain/errors";
-import { normalizeAuthMode } from "../../domain";
 import { normalizeCodeforcesSubmission } from "./normalizer";
 import { parseCodeforcesResponse } from "./parser";
-import { codeforcesListUrl } from "./urls";
 
 const CODEFORCES_HOME_URL = "https://codeforces.com/";
 
@@ -51,10 +56,10 @@ async function currentCodeforcesUser(
   let response;
   try {
     response = await input.http.request("codeforces", CODEFORCES_HOME_URL, {
-      credentials: cookie ? "omit" : "include",
-      ...(cookie
-        ? { headers: { Accept: "text/html", Cookie: cookie } }
-        : { headers: { Accept: "text/html" } }),
+      credentials: "include",
+      headers: { Accept: "text/html" },
+      ...(cookie ? { codeforcesCookie: cookie } : {}),
+      followRedirects: true,
       signal: input.signal,
     });
   } catch (error) {
@@ -124,19 +129,22 @@ async function currentCodeforcesUser(
 }
 
 function manualCodeforcesCookie(
-  account: FetchInput["account"],
+  credentials: Record<string, string> | undefined,
 ): string | undefined {
-  const cookie = account.cookie?.trim() || account.credentials?.cookie?.trim();
-  return cookie && !/[\r\n]/.test(cookie) ? cookie : undefined;
+  const raw = credentialValue(credentials, "cookie");
+  if (!raw) return undefined;
+  const cookie = cookieHeaderFromCredentials(credentials, ["cookie"]);
+  if (cookie) return cookie;
+  // DevTools often exposes the JSESSIONID value separately from its name.
+  // Accept that value as a convenience while still rejecting header-like data.
+  return !/[;=\s\r\n]/.test(raw) ? `JSESSIONID=${raw}` : undefined;
 }
 
 function codeforcesRequestOptions(
   authMode: "browser-session" | "manual-cookie" | "public-handle",
-  cookie: string | undefined,
   signal: AbortSignal,
 ) {
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (cookie) headers.Cookie = cookie;
   return {
     credentials:
       authMode === "browser-session" ? ("include" as const) : ("omit" as const),
@@ -146,6 +154,9 @@ function codeforcesRequestOptions(
 }
 
 export const codeforcesAdapter: OJAdapter = {
+  authorize(input) {
+    return authorizeFromRecent(this, input);
+  },
   metadata: {
     id: "codeforces",
     displayName: "Codeforces",
@@ -159,14 +170,16 @@ export const codeforcesAdapter: OJAdapter = {
       },
       {
         type: "manual-cookie",
-        label: "Cookie 登录",
-        description: "粘贴 Codeforces Cookie，自动识别当前账号。",
+        label: "手动配置",
+        description:
+          "粘贴 Codeforces Cookie（至少包含 JSESSIONID，建议完整复制），自动识别当前账号。也可只填 JSESSIONID 的值。",
         credentialFields: [
           {
             key: "cookie",
-            label: "Cookie",
+            label: "JSESSIONID",
             type: "password",
-            placeholder: "粘贴 Codeforces Cookie",
+            credentialType: "cookie",
+            placeholder: "粘贴 JSESSIONID 的值",
           },
         ],
         identifierRequired: false,
@@ -214,7 +227,7 @@ export const codeforcesAdapter: OJAdapter = {
   },
 
   async fetchRecent(input: FetchInput) {
-    const authMode = normalizeAuthMode(input.account.authMode);
+    const authMode = input.account.authMode;
     if (
       authMode !== "public-handle" &&
       authMode !== "browser-session" &&
@@ -232,7 +245,7 @@ export const codeforcesAdapter: OJAdapter = {
     }
     const cookie =
       authMode === "manual-cookie"
-        ? manualCodeforcesCookie(input.account)
+        ? manualCodeforcesCookie(input.credentials)
         : undefined;
     if (authMode === "manual-cookie" && !cookie) {
       throw new AdapterFailure({
@@ -245,7 +258,11 @@ export const codeforcesAdapter: OJAdapter = {
         requestId: input.requestId,
       });
     }
-    const handle = input.account.identifier.trim();
+    const handle = (
+      input.account.providerAccountKey ??
+      input.account.identifier ??
+      ""
+    ).trim();
     let resolvedHandle = handle;
     if (!resolvedHandle && authMode !== "public-handle") {
       try {
@@ -275,7 +292,7 @@ export const codeforcesAdapter: OJAdapter = {
       response = await input.http.request(
         "codeforces",
         `https://codeforces.com/api/user.status?handle=${encodeURIComponent(resolvedHandle)}&from=1&count=${Math.min(input.limit, 1000)}`,
-        codeforcesRequestOptions(authMode, cookie, input.signal),
+        codeforcesRequestOptions(authMode, input.signal),
       );
     } catch (error) {
       throw AdapterFailure.fromTransport(error, "codeforces", input.requestId);
@@ -347,14 +364,19 @@ export const codeforcesAdapter: OJAdapter = {
     }
     let records;
     try {
-      records = (parsed.result ?? []).map((item) =>
-        normalizeCodeforcesSubmission(
-          item,
-          input.account.accountId,
-          resolvedHandle,
-          input.now,
-        ),
-      );
+      records = (parsed.result ?? [])
+        .map((item) =>
+          normalizeCodeforcesSubmission(
+            item,
+            input.account.accountId,
+            resolvedHandle,
+            input.now,
+          ),
+        )
+        .filter(
+          (item) =>
+            input.since === undefined || item.submittedAt >= input.since,
+        );
     } catch {
       throw new AdapterFailure({
         kind: "parse_failed",

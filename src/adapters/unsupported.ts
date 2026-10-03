@@ -6,6 +6,9 @@ export function createUnsupportedAdapter(
   displayName: string,
 ): OJAdapter {
   return {
+    async authorize(input) {
+      return (await this.fetchRecent(input)).account;
+    },
     metadata: {
       id: source,
       displayName,

@@ -1,150 +1,112 @@
-import { createHttpClient } from "./http-client";
-import type { HttpRequestOptions, SourceId } from "../../domain";
+import { createHttpClient, HttpClientError } from "./http-client";
+import { withCookieScope, withTemporaryCookies } from "./temporary-cookies";
+import {
+  normalizeCookieHeader,
+  type HttpRequestOptions,
+  type SourceId,
+} from "../../domain";
 
-const ATCODER_ORIGIN = "https://atcoder.jp/";
-const QOJ_ORIGIN = "https://qoj.ac/";
-let cookieOperation = Promise.resolve();
+const FIXED_ORIGINS: Partial<Record<SourceId, string>> = {
+  atcoder: "https://atcoder.jp",
+  qoj: "https://qoj.ac",
+  codeforces: "https://codeforces.com",
+  luogu: "https://www.luogu.com.cn",
+};
 
-function isAtCoderOfficialUrl(rawUrl: string): boolean {
-  try {
-    const url = new URL(rawUrl);
-    return url.origin === new URL(ATCODER_ORIGIN).origin;
-  } catch {
-    return false;
-  }
-}
-
-function isQOJUrl(rawUrl: string): boolean {
-  try {
-    return new URL(rawUrl).origin === new URL(QOJ_ORIGIN).origin;
-  } catch {
-    return false;
-  }
-}
-
-async function qojBrowserCookie(): Promise<string | undefined> {
-  try {
-    const cookie = await browser.cookies.get({
-      url: QOJ_ORIGIN,
-      name: "UOJSESSIONID",
-    });
-    if (cookie?.value && !/[\r\n;]/.test(cookie.value)) {
-      return `${cookie.name}=${cookie.value}`;
-    }
-    const all = await browser.cookies.getAll({ domain: ".qoj.ac" });
-    const fallback = all.find(
-      (item) => item.name.toUpperCase() === "UOJSESSIONID",
-    );
-    return fallback?.value && !/[\r\n;]/.test(fallback.value)
-      ? `${fallback.name}=${fallback.value}`
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function sessionValue(raw: string): string {
-  const value = raw.trim().replace(/^REVEL_SESSION=/i, "");
-  if (!value || /[\r\n]/.test(value)) {
-    throw new Error("AtCoder session credential is invalid");
-  }
-  return value;
-}
-
-async function withTemporaryAtCoderCookie<T>(
-  rawCookie: string,
-  task: () => Promise<T>,
-): Promise<T> {
-  const operation = cookieOperation.then(async () => {
-    const value = sessionValue(rawCookie);
-    const previous = await browser.cookies.get({
-      url: ATCODER_ORIGIN,
-      name: "REVEL_SESSION",
-    });
-    let injected = false;
-    try {
-      await browser.cookies.set({
-        url: ATCODER_ORIGIN,
-        name: "REVEL_SESSION",
-        value,
-        path: "/",
-        secure: true,
-      });
-      injected = true;
-      return await task();
-    } finally {
-      // Do not overwrite the user's cookie unless this invocation actually
-      // replaced it. This also keeps a failed cookies.set from deleting the
-      // user's existing session.
-      if (injected && previous) {
-        await browser.cookies.set({
-          url: ATCODER_ORIGIN,
-          name: previous.name,
-          value: previous.value,
-          domain: previous.domain,
-          path: previous.path,
-          secure: previous.secure,
-          httpOnly: previous.httpOnly,
-          sameSite: previous.sameSite,
-          expirationDate: previous.expirationDate,
-        });
-      } else if (injected) {
-        await browser.cookies.remove({
-          url: ATCODER_ORIGIN,
-          name: "REVEL_SESSION",
-        });
-      }
-    }
-  });
-  cookieOperation = operation.then(
-    () => undefined,
-    () => undefined,
+function temporaryCredential(
+  source: SourceId,
+  url: string,
+  options: HttpRequestOptions,
+) {
+  const origin = new URL(url).origin;
+  const suppliedHeader = Object.entries(options.headers ?? {}).find(
+    ([name]) => name.toLowerCase() === "cookie",
   );
-  return operation;
+  const raw = options.atcoderSessionCookie
+    ? `REVEL_SESSION=${options.atcoderSessionCookie.trim().replace(/^REVEL_SESSION=/i, "")}`
+    : (options.qojCookie ?? options.codeforcesCookie ?? suppliedHeader?.[1]);
+  if (!raw) return undefined;
+  const expected =
+    source === "hydroj" ? options.hydroOrigin : FIXED_ORIGINS[source];
+  if (
+    !expected ||
+    origin !== new URL(expected).origin ||
+    (options.atcoderSessionCookie && source !== "atcoder") ||
+    (options.qojCookie && source !== "qoj") ||
+    (options.codeforcesCookie && source !== "codeforces")
+  )
+    throw new HttpClientError(
+      "invalid_url",
+      "Credential scope does not match request origin",
+    );
+  const normalized = normalizeCookieHeader(raw);
+  if (!normalized)
+    throw new Error(
+      `${{ qoj: "QOJ", codeforces: "Codeforces", atcoder: "AtCoder", luogu: "Luogu", hydroj: "HydroOJ" }[source]} Cookie is invalid`,
+    );
+  const clean = { ...options };
+  delete clean.atcoderSessionCookie;
+  delete clean.qojCookie;
+  delete clean.codeforcesCookie;
+  if (suppliedHeader) {
+    clean.headers = Object.fromEntries(
+      Object.entries(options.headers!).filter(
+        ([name]) => name.toLowerCase() !== "cookie",
+      ),
+    );
+  }
+  return {
+    cookie: normalized,
+    options: { ...clean, credentials: "include" as const },
+  };
 }
 
-/**
- * HTTP client used by the extension service worker.
- *
- * Requests intentionally stay in the extension context. In particular, this
- * client never opens or reuses a website tab to obtain a page session.
- */
+/** Browser-only credential transport; adapters never call browser.cookies. */
 export function createBrowserHttpClient() {
   const client = createHttpClient();
   return {
-    request(source: SourceId, url: string, options: HttpRequestOptions = {}) {
-      const cookie = options.atcoderSessionCookie;
-      if (source === "atcoder" && cookie && isAtCoderOfficialUrl(url)) {
-        const cleanOptions = { ...options };
-        delete cleanOptions.atcoderSessionCookie;
-        return withTemporaryAtCoderCookie(cookie, () =>
-          client.request(source, url, cleanOptions),
-        );
-      }
-      if (
-        source === "qoj" &&
-        options.credentials === "include" &&
-        isQOJUrl(url) &&
-        !Object.keys(options.headers ?? {}).some(
-          (name) => name.toLowerCase() === "cookie",
-        )
-      ) {
-        return qojBrowserCookie().then((qojCookie) => {
-          if (!qojCookie) return client.request(source, url, options);
-          const headers = {
-            ...(options.headers ?? {}),
-            Cookie: qojCookie,
-          };
-          return client.request(source, url, {
-            ...options,
-            credentials: "omit",
-            headers,
-          });
-        });
-      }
-      if (cookie && source !== "atcoder")
-        return client.request(source, url, options);
-      return client.request(source, url, options);
+    async request(
+      source: SourceId,
+      url: string,
+      options: HttpRequestOptions = {},
+    ) {
+      const temporary = temporaryCredential(source, url, options);
+      const origin = new URL(url).origin;
+      return withCookieScope(origin, () =>
+        temporary
+          ? withTemporaryCookies(origin, temporary.cookie, () =>
+              client.request(source, url, temporary.options),
+            )
+          : client.request(source, url, options),
+      );
+    },
+    async getCookie(source: SourceId, url: string, name: string) {
+      if (source !== "qoj" || new URL(url).origin !== FIXED_ORIGINS.qoj)
+        return undefined;
+      return withCookieScope(new URL(url).origin, async () => {
+        const cookie = await browser.cookies.get({ url, name });
+        return cookie?.value || undefined;
+      });
+    },
+    async getCookies(source: SourceId, url: string) {
+      if (source !== "qoj" || new URL(url).origin !== FIXED_ORIGINS.qoj)
+        return {};
+      return withCookieScope(new URL(url).origin, async () => {
+        const cookies = await browser.cookies.getAll({ url });
+        const result: Record<string, string> = {};
+        for (const cookie of cookies) {
+          // Keep unrelated tracking cookies out; these two Cloudflare cookies
+          // are explicitly needed to reuse a completed QOJ challenge.
+          if (
+            !/^(?:(?:__Host-)?(?:UOJSESSID|UOJSESSIONID|UOJREMEMBER.*|uoj_username(?:_checksum)?|uoj_remember_token(?:_checksum)?)|(?:cf_clearance|__cf_bm))$/i.test(
+              cookie.name,
+            )
+          )
+            continue;
+          if (cookie.value) result[cookie.name] = cookie.value;
+        }
+        return result;
+      });
     },
   };
 }

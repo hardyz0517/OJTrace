@@ -58,7 +58,7 @@ function isAllowed(
 async function readLimited(
   response: Response,
   maxBytes: number,
-): Promise<string> {
+): Promise<Uint8Array> {
   const declared = response.headers.get("content-length");
   if (declared && Number(declared) > maxBytes) {
     throw new HttpClientError(
@@ -66,14 +66,34 @@ async function readLimited(
       "Response exceeds size limit",
     );
   }
-  const buffer = await response.arrayBuffer();
-  if (buffer.byteLength > maxBytes) {
-    throw new HttpClientError(
-      "response_too_large",
-      "Response exceeds size limit",
-    );
+  if (!response.body) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      length += chunk.value.byteLength;
+      if (length > maxBytes) {
+        await reader.cancel();
+        throw new HttpClientError(
+          "response_too_large",
+          "Response exceeds size limit",
+        );
+      }
+      chunks.push(chunk.value);
+    }
+  } finally {
+    reader.releaseLock();
   }
-  return new TextDecoder().decode(buffer);
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }
 
 function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
@@ -161,8 +181,8 @@ export function createHttpClient(): HttpClient {
                 ? "omit"
                 : (options.credentials ?? "omit"),
               signal: controller.signal,
-              // Prevent fetch from forwarding credentials through an
-              // automatic redirect before the final origin is inspected.
+              // Follow only where the adapter needs redirects; followed
+              // requests are checked again against the final response origin.
               redirect:
                 options.followRedirects || source === "qoj"
                   ? "follow"
@@ -227,7 +247,7 @@ export function createHttpClient(): HttpClient {
             }
             continue;
           }
-          const text = await readLimited(
+          const bytes = await readLimited(
             response,
             options.maxBytes ?? DEFAULT_MAX_BYTES,
           );
@@ -235,7 +255,11 @@ export function createHttpClient(): HttpClient {
             status: response.status,
             url: response.url || url,
             contentType: response.headers.get("content-type") ?? "",
-            text,
+            text:
+              options.responseType === "bytes"
+                ? ""
+                : new TextDecoder().decode(bytes),
+            ...(options.responseType === "bytes" ? { bytes } : {}),
             headers: response.headers,
           };
         } finally {

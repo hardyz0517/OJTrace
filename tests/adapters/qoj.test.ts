@@ -5,6 +5,7 @@ import { AdapterFailure } from "../../src/domain/errors";
 import { qojAdapter, qojCookieFromCredentials } from "../../src/adapters/qoj";
 import { normalizeQOJRecord } from "../../src/adapters/qoj/normalizer";
 import {
+  isQOJCloudflarePage,
   isQOJLoginPage,
   parseQOJIdentity,
   parseQOJRecordPage,
@@ -25,8 +26,93 @@ const liveFixture = readFileSync(
   ),
   "utf8",
 );
+const serverFixture = readFileSync(
+  new URL(
+    "../../docs/fixtures/qoj/server-submissions-page.html",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 describe("QOJ adapter", () => {
+  it.each([undefined, "0", "1"])(
+    "reads the server-rendered navbar username with data-link=%s before JS runs",
+    (link) => {
+      const page =
+        link === undefined
+          ? serverFixture
+          : serverFixture.replace(
+              'data-rating="1000"',
+              `data-rating="1000" data-link="${link}"`,
+            );
+      expect(parseQOJIdentity(page)).toBe("Hardy");
+      expect(
+        parseQOJRecordPage(page, "https://qoj.ac/submissions").username,
+      ).toBe("Hardy");
+    },
+  );
+
+  it("continues past a logout list with no identity to the account navigation", () => {
+    expect(
+      parseQOJIdentity(
+        `<ul><li><a href="/logout">Logout</a></li></ul>${liveFixture}`,
+      ),
+    ).toBe("Hardy");
+  });
+
+  it("rejects table usernames and script markup as a logged-in identity", () => {
+    const page =
+      '<ul class="nav"><a href="/logout">Logout</a></ul>' +
+      "<script>const example = '<span class=\"uoj-username\">ScriptUser</span>';</script>" +
+      '<table><tr><td><span class="uoj-username">TableUser</span></td></tr></table>';
+    expect(parseQOJIdentity(page)).toBeUndefined();
+    expect(
+      parseQOJIdentity(serverFixture.replaceAll("/logout", "/login")),
+    ).toBeUndefined();
+  });
+
+  it("detects and fetches the current account from HTML before QOJ executes JavaScript", async () => {
+    const http: HttpClient = {
+      request: vi.fn(async (_source, url) => ({
+        status: 200,
+        url,
+        contentType: "text/html",
+        text: serverFixture,
+        headers: new Headers(),
+      })),
+      getCookies: vi.fn(async () => ({
+        "__Host-UOJSESSID": "test-session",
+        "__Host-UOJREMEMBER": "test-remember",
+      })),
+    };
+    const input = {
+      signal: new AbortController().signal,
+      requestId: "raw-server-html",
+      http,
+    };
+    expect(await qojAdapter.detectBrowserSession!(input)).toEqual({
+      authenticated: true,
+      status: "authenticated",
+      username: "Hardy",
+    });
+    const recent = await qojAdapter.fetchRecent({
+      ...input,
+      account: {
+        accountId: "account-1",
+        source: "qoj",
+        enabled: true,
+        authMode: "browser-session",
+      },
+      limit: 2,
+      now: 1,
+    });
+    expect(recent.account.providerAccountKey).toBe("Hardy");
+    expect(recent.records).toHaveLength(2);
+    expect(
+      recent.records.every((row) => row.providerAccountKey === "Hardy"),
+    ).toBe(true);
+  });
+
   it("builds the UOJ list and detail routes", () => {
     expect(qojSubmissionListUrl("sample_user")).toBe(
       "https://qoj.ac/submissions?submitter=sample_user",
@@ -63,12 +149,57 @@ describe("QOJ adapter", () => {
     ).toBeUndefined();
     expect(
       parseQOJIdentity(
-        '<a class="uoj-username" href="//qoj.ac/user/profile/Hardy">Hardy</a><a href="//qoj.ac/logout?_token=test">Logout</a>',
+        '<ul class="nav"><li><a class="uoj-username" href="//qoj.ac/user/profile/Hardy">Hardy</a><ul class="dropdown-menu"><li>menu</li></ul></li><li><a href="//qoj.ac/logout?_token=test">Logout</a></li></ul>',
       ),
     ).toBe("Hardy");
     expect(
       parseQOJIdentity(
         '<a class="uoj-username" href="//qoj.ac/user/profile/top_user">top_user</a>',
+      ),
+    ).toBeUndefined();
+    expect(
+      parseQOJIdentity(
+        '<table><tr><td><a class="uoj-username" href="//qoj.ac/user/profile/Qingyu">Qingyu</a></td></tr></table><ul class="nav"><li><a class="uoj-username" href="//qoj.ac/user/profile/Hardy">Hardy</a></li><li><a href="//qoj.ac/logout?_token=test">Logout</a></li></ul>',
+      ),
+    ).toBe("Hardy");
+    expect(
+      parseQOJIdentity(
+        '<table><tr><td><span class="uoj-username" data-link="0">Qingyu</span></td></tr></table><ul class="nav"><li><span class="uoj-username" data-link="0">Hardy</span></li><li><a href="//qoj.ac/logout?_token=test">Logout</a></li></ul>',
+      ),
+    ).toBe("Hardy");
+    expect(
+      parseQOJIdentity(
+        '<table><tr><td><a class="uoj-username" href="//qoj.ac/user/profile/Qingyu">Qingyu</a></td></tr></table><a class="nav-link dropdown-toggle" data-toggle="dropdown" href="#"><a class="uoj-username" href="//qoj.ac/user/profile/Hardy">Hardy</a></a><a href="//qoj.ac/logout?_token=test">Logout</a>',
+      ),
+    ).toBe("Hardy");
+    expect(
+      parseQOJIdentity(
+        '<table><tr><td><span class="uoj-username" data-link="0">Qingyu</span></td></tr></table><a class="nav-link dropdown-toggle" data-toggle="dropdown" href="#"><span class="uoj-username" data-link="0">Hardy</span></a><a href="//qoj.ac/logout?_token=test">Logout</a>',
+      ),
+    ).toBe("Hardy");
+    expect(
+      parseQOJIdentity(
+        '<a class="nav-link dropdown-toggle" data-toggle="dropdown" href="#"><a class="uoj-username" href="/user/profile/Hardy">Hardy</a></a><a href="/logout?_token=test">Logout</a>',
+      ),
+    ).toBe("Hardy");
+    expect(
+      parseQOJIdentity(
+        '<div class="site-header"><span class="uoj-username">Hardy</span><a href="/logout">Logout</a></div><table><tr><td><a class="uoj-username" href="/user/profile/Qingyu">Qingyu</a></td></tr></table>',
+      ),
+    ).toBe("Hardy");
+    expect(
+      parseQOJIdentity(
+        '<div class="site-header"><a class="uoj-username" href="#">Hardy</a><a href="/logout">Logout</a></div>',
+      ),
+    ).toBe("Hardy");
+    expect(
+      parseQOJIdentity(
+        '<table><tr><td><a class="uoj-username" href="//qoj.ac/user/profile/Qingyu">Qingyu</a></td></tr></table><a href="//qoj.ac/logout?_token=test">Logout</a>',
+      ),
+    ).toBeUndefined();
+    expect(
+      parseQOJIdentity(
+        '<ul class="nav"><a class="uoj-username" href="//qoj.ac/user/profile/Hardy">Qingyu</a><a href="//qoj.ac/logout?_token=test">Logout</a></ul>',
       ),
     ).toBeUndefined();
   });
@@ -137,7 +268,7 @@ describe("QOJ adapter", () => {
         async request() {
           return {
             status: 200,
-            url: "https://qoj.ac/",
+            url: "https://qoj.ac/submissions",
             contentType: "text/html",
             text: liveFixture,
             headers: new Headers(),
@@ -150,6 +281,222 @@ describe("QOJ adapter", () => {
       status: "authenticated",
       username: "Hardy",
     });
+  });
+
+  it("recognizes the Cloudflare challenge returned before the QOJ page", () => {
+    expect(
+      isQOJCloudflarePage(
+        "<title>Just a moment...</title> Enable JavaScript and cookies to continue",
+      ),
+    ).toBe(true);
+    expect(isQOJCloudflarePage(liveFixture)).toBe(false);
+  });
+
+  it("accepts an authenticated QOJ page with Cloudflare's ordinary JS detection script", async () => {
+    const page = `${liveFixture}<script>(function(){var s=document.createElement('script');s.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';})();</script>`;
+    expect(isQOJCloudflarePage(page)).toBe(false);
+    const result = await qojAdapter.detectBrowserSession!({
+      signal: new AbortController().signal,
+      requestId: "normal-cloudflare-script",
+      http: {
+        async request() {
+          return {
+            status: 200,
+            url: "https://qoj.ac/submissions",
+            contentType: "text/html",
+            text: page,
+            headers: new Headers(),
+          };
+        },
+      },
+    });
+    expect(result).toEqual({
+      authenticated: true,
+      status: "authenticated",
+      username: "Hardy",
+    });
+  });
+
+  it("recognizes a managed challenge and ignores challenge words inside normal scripts", () => {
+    expect(
+      isQOJCloudflarePage(
+        '<html><script>window._cf_chl_opt = { cType: "managed" };</script></html>',
+      ),
+    ).toBe(true);
+    expect(
+      isQOJCloudflarePage(
+        `${liveFixture}<script>const messages = ['Just a moment', 'Enable JavaScript and cookies to continue'];</script>`,
+      ),
+    ).toBe(false);
+  });
+
+  it("uses UOJSESSID as the session check even without a username cookie", async () => {
+    const result = await qojAdapter.detectBrowserSession!({
+      signal: new AbortController().signal,
+      requestId: "request",
+      http: {
+        async request() {
+          return {
+            status: 200,
+            url: "https://qoj.ac/submissions",
+            contentType: "text/html",
+            text: liveFixture,
+            headers: new Headers(),
+          };
+        },
+        async getCookie(_source, _url, name) {
+          return name === "UOJSESSID" ? "session-value" : undefined;
+        },
+      },
+    });
+    expect(result).toEqual({
+      authenticated: true,
+      status: "authenticated",
+      username: "Hardy",
+    });
+  });
+
+  it("accepts an authenticated response even when the cookie API has no session value", async () => {
+    const result = await qojAdapter.detectBrowserSession!({
+      signal: new AbortController().signal,
+      requestId: "request",
+      http: {
+        async request() {
+          return {
+            status: 200,
+            url: "https://qoj.ac/submissions",
+            contentType: "text/html",
+            text: liveFixture,
+            headers: new Headers(),
+          };
+        },
+        async getCookie() {
+          return undefined;
+        },
+      },
+    });
+    expect(result).toEqual({
+      authenticated: true,
+      status: "authenticated",
+      username: "Hardy",
+    });
+  });
+
+  it("reports the response stage and cookie names when detection fails", async () => {
+    const result = await qojAdapter.detectBrowserSession!({
+      signal: new AbortController().signal,
+      requestId: "request",
+      http: {
+        async request() {
+          return {
+            status: 200,
+            url: "https://qoj.ac/login",
+            contentType: "text/html",
+            text: readFileSync(
+              new URL("../../docs/fixtures/qoj/login.html", import.meta.url),
+              "utf8",
+            ),
+            headers: new Headers(),
+          };
+        },
+        async getCookies() {
+          return { "__Host-UOJSESSID": "session-value" };
+        },
+      },
+    });
+    expect(result.status).toBe("unauthenticated");
+    expect(result.diagnostic).toContain("qoj-login-page");
+    expect(result.diagnostic).toContain("cookies=__Host-UOJSESSID");
+    expect(result.diagnostic).not.toContain("session-value");
+  });
+
+  it("uses the new __Host-UOJSESSID cookie on the first background request", async () => {
+    const requests: Array<Parameters<HttpClient["request"]>[2]> = [];
+    const http: HttpClient = {
+      request: vi.fn(async (_source, _url, options) => {
+        requests.push(options);
+        if (options?.qojCookie) {
+          return {
+            status: 200,
+            url: "https://qoj.ac/submissions",
+            contentType: "text/html",
+            text: liveFixture,
+            headers: new Headers(),
+          };
+        }
+        return {
+          status: 200,
+          url: "https://qoj.ac/login",
+          contentType: "text/html",
+          text: readFileSync(
+            new URL("../../docs/fixtures/qoj/login.html", import.meta.url),
+            "utf8",
+          ),
+          headers: new Headers(),
+        };
+      }),
+      getCookie: vi.fn(async (_source, _url, name) =>
+        name === "__Host-UOJSESSID" ? "session-value" : undefined,
+      ),
+    };
+    const result = await qojAdapter.detectBrowserSession!({
+      signal: new AbortController().signal,
+      requestId: "request",
+      http,
+    });
+    expect(result).toEqual({
+      authenticated: true,
+      status: "authenticated",
+      username: "Hardy",
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      qojCookie: "__Host-UOJSESSID=session-value",
+    });
+  });
+
+  it("includes QOJ and clearance cookies before any Cloudflare response", async () => {
+    const requests: Array<Parameters<HttpClient["request"]>[2]> = [];
+    const http: HttpClient = {
+      request: vi.fn(async (_source, _url, options) => {
+        requests.push(options);
+        if (options?.qojCookie?.includes("cf_clearance=clearance")) {
+          return {
+            status: 200,
+            url: "https://qoj.ac/submissions",
+            contentType: "text/html",
+            text: liveFixture,
+            headers: new Headers(),
+          };
+        }
+        return {
+          status: 403,
+          url: "https://qoj.ac/submissions",
+          contentType: "text/html",
+          text: "<title>Just a moment...</title> Enable JavaScript and cookies to continue",
+          headers: new Headers(),
+        };
+      }),
+      async getCookies() {
+        return {
+          "__Host-UOJSESSID": "session-value",
+          cf_clearance: "clearance",
+        };
+      },
+    };
+    const result = await qojAdapter.detectBrowserSession!({
+      signal: new AbortController().signal,
+      requestId: "request",
+      http,
+    });
+    expect(result).toEqual({
+      authenticated: true,
+      status: "authenticated",
+      username: "Hardy",
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.qojCookie).toContain("__Host-UOJSESSID=session-value");
+    expect(requests[0]?.qojCookie).toContain("cf_clearance=clearance");
   });
 
   it("advertises manual Cookie fallback and reads QOJ cookies", () => {
@@ -170,6 +517,12 @@ describe("QOJ adapter", () => {
     expect(qojCookieFromCredentials({ UOJSESSIONID: "session-value" })).toBe(
       "UOJSESSIONID=session-value",
     );
+    expect(qojCookieFromCredentials({ UOJSESSID: "session-value" })).toBe(
+      "UOJSESSID=session-value",
+    );
+    expect(
+      qojCookieFromCredentials({ "__Host-UOJSESSID": "session-value" }),
+    ).toBe("__Host-UOJSESSID=session-value");
     expect(qojCookieFromCredentials({ uoj_username: "Hardy" })).toBeUndefined();
   });
 
@@ -197,8 +550,8 @@ describe("QOJ adapter", () => {
         identifier: "",
         enabled: true,
         authMode: "manual-cookie",
-        credentials: { cookie: "uoj_username=Hardy; uoj_remember_token=token" },
       },
+      credentials: { cookie: "uoj_username=Hardy; uoj_remember_token=token" },
       limit: 2,
       signal: new AbortController().signal,
       now: 1,
@@ -208,10 +561,11 @@ describe("QOJ adapter", () => {
     expect(result.account.providerAccountKey).toBe("Hardy");
     expect(result.records).toHaveLength(2);
     expect(requests[0]?.options).toMatchObject({
-      credentials: "omit",
+      credentials: "include",
       headers: {
-        Cookie: "uoj_username=Hardy; uoj_remember_token=token",
+        Accept: "text/html,application/xhtml+xml",
       },
+      qojCookie: "uoj_username=Hardy; uoj_remember_token=token",
     });
   });
 
@@ -336,6 +690,98 @@ describe("QOJ adapter", () => {
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AdapterFailure && error.error.kind === "auth_required",
+    );
+  });
+
+  it("rejects records when the authenticated navbar belongs to another account", async () => {
+    const http: HttpClient = {
+      request: vi.fn(async (_source, url) => ({
+        status: 200,
+        url,
+        contentType: "text/html",
+        text: liveFixture.replaceAll("Hardy", "Qingyu"),
+        headers: new Headers(),
+      })),
+    };
+    await expect(
+      qojAdapter.fetchRecent({
+        account: {
+          accountId: "account-1",
+          source: "qoj",
+          identifier: "Hardy",
+          enabled: true,
+          authMode: "browser-session",
+        },
+        limit: 10,
+        signal: new AbortController().signal,
+        now: 1,
+        requestId: "request-1",
+        http,
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AdapterFailure && error.error.kind === "auth_required",
+    );
+  });
+
+  it("uses the browser username cookie when submission rows contain other users", async () => {
+    const http: HttpClient = {
+      request: vi.fn(async (_source, url) => ({
+        status: 200,
+        url,
+        contentType: "text/html",
+        text: liveFixture.replaceAll("Hardy", "Qingyu"),
+        headers: new Headers(),
+      })),
+      getCookie: vi.fn(async (_source, _url, name) =>
+        name === "uoj_username" ? "Hardy" : undefined,
+      ),
+    };
+    const result = await qojAdapter.fetchRecent({
+      account: {
+        accountId: "account-1",
+        source: "qoj",
+        identifier: "Hardy",
+        enabled: true,
+        authMode: "browser-session",
+      },
+      limit: 2,
+      signal: new AbortController().signal,
+      now: 1,
+      requestId: "request-1",
+      http,
+    });
+    expect(result.account.providerAccountKey).toBe("Hardy");
+  });
+
+  it("rejects an unfiltered submissions response", async () => {
+    const http: HttpClient = {
+      request: vi.fn(async (_source, url) => ({
+        status: 200,
+        url: "https://qoj.ac/submissions",
+        contentType: "text/html",
+        text: liveFixture,
+        headers: new Headers(),
+      })),
+    };
+    await expect(
+      qojAdapter.fetchRecent({
+        account: {
+          accountId: "account-1",
+          source: "qoj",
+          identifier: "Hardy",
+          enabled: true,
+          authMode: "browser-session",
+        },
+        limit: 2,
+        signal: new AbortController().signal,
+        now: 1,
+        requestId: "request-1",
+        http,
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AdapterFailure && error.error.kind === "parse_failed",
     );
   });
 });

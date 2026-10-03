@@ -1,23 +1,11 @@
-export const STORAGE_SCHEMA_VERSION = 1 as const;
-export const MESSAGE_SCHEMA_VERSION = 1 as const;
+export const STORAGE_SCHEMA_VERSION = 2 as const;
+export const MESSAGE_SCHEMA_VERSION = 2 as const;
 
 export type SourceId = "codeforces" | "luogu" | "qoj" | "atcoder" | "hydroj";
 export type Availability = "stable" | "experimental" | "unsupported";
 export type AccountAuthMode =
   "public-handle" | "browser-session" | "manual-cookie" | "password";
-
-/**
- * Legacy values are accepted while loading existing local data. New account
- * records are always written with AccountAuthMode values.
- */
-export type AuthMode = AccountAuthMode | "public" | "browser_session";
 export type AccountCredentials = Record<string, string>;
-
-export function normalizeAuthMode(mode: AuthMode): AccountAuthMode {
-  if (mode === "public") return "public-handle";
-  if (mode === "browser_session") return "browser-session";
-  return mode;
-}
 export type IdentityQuality = "stable" | "composite";
 
 export type VerdictCode =
@@ -36,19 +24,46 @@ export type VerdictCode =
 export interface AccountConfig {
   accountId: string;
   source: SourceId;
-  identifier: string;
+  /** Authorization input only; persisted identity uses providerAccountKey. */
+  identifier?: string;
   label?: string;
   enabled: boolean;
-  authMode: AuthMode;
-  /** Structured user-provided credentials for the explicit manual fallback. */
-  credentials?: AccountCredentials;
-  /** Legacy full Cookie value kept for migration compatibility. */
-  cookie?: string;
+  authMode: AccountAuthMode;
   /** Exact HydroOJ instance origin, required for HydroOJ accounts. */
   origin?: string;
   providerAccountKey?: string;
   providerDisplayName?: string;
+  identityKey?: string;
   verifiedAt?: number;
+  createdAt?: number;
+  updatedAt?: number;
+  credentialRevision?: number;
+}
+
+/** Canonical persisted account model contains neither form input nor credentials. */
+export interface AccountRecord extends Omit<
+  AccountConfig,
+  | "identifier"
+  | "providerAccountKey"
+  | "identityKey"
+  | "verifiedAt"
+  | "createdAt"
+  | "updatedAt"
+  | "credentialRevision"
+> {
+  providerAccountKey: string;
+  identityKey: string;
+  verifiedAt: number;
+  createdAt: number;
+  updatedAt: number;
+  credentialRevision: number;
+}
+
+/** Credentials are persisted separately from account summaries. */
+export interface CredentialRecord {
+  accountId: string;
+  credentials: AccountCredentials;
+  updatedAt: number;
 }
 
 export interface Submission {
@@ -76,6 +91,10 @@ export interface Submission {
   submissionUrl?: string;
   problemUrl?: string;
   fallbackListUrl?: string;
+  activityId?: string;
+  activityName?: string;
+  activityType?: "contest" | "homework" | "other";
+  activityUrl?: string;
   fetchedAt: number;
 }
 
@@ -85,6 +104,11 @@ export interface Diagnostic {
   severity: "info" | "warning" | "error";
   messageKey: string;
   retryable: boolean;
+  context?: {
+    activityId?: string;
+    activityName?: string;
+    status?: string;
+  };
 }
 
 export type AdapterErrorKind =
@@ -124,19 +148,41 @@ export interface Preferences {
   freshnessCooldownMs: number;
   /**
    * Accounts selected for manual and automatic sync. An omitted value keeps
-   * the legacy/default behavior of syncing every enabled account; an empty
+   * the default behavior of syncing every enabled account; an empty
    * array is an intentional "sync nothing" choice.
    */
   syncAccountIds?: string[];
+  /** The date/time window used by the Timeline's manual sync action. */
+  syncRange?: SyncRangePreference;
+}
+
+export type SyncRangePreset = "today" | 1 | 7 | 14 | 30;
+
+export interface SyncRangePreference {
+  from: number;
+  to: number;
+  followNow: boolean;
+  preset?: SyncRangePreset;
 }
 
 export interface StoredData {
   schemaVersion: typeof STORAGE_SCHEMA_VERSION;
   revision: number;
-  accounts: AccountConfig[];
+  accounts: AccountRecord[];
+  credentials: CredentialRecord[];
+  instanceBranding: Record<string, InstanceBrandingRecord>;
   submissions: Submission[];
   syncStates: Record<string, SyncState>;
   preferences: Preferences;
+}
+
+export interface InstanceBrandingRecord {
+  source: SourceId;
+  origin: string;
+  name: string;
+  iconDataUrl?: string;
+  fetchedAt: number;
+  iconFetchedAt?: number;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {

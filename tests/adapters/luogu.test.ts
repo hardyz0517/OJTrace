@@ -22,6 +22,24 @@ describe("Luogu parser and normalizer", () => {
     ]);
   });
 
+  it("declares the two named Luogu cookies instead of one ambiguous field", () => {
+    const fields = luoguAdapter.metadata.authModes.find(
+      (mode) => mode.type === "manual-cookie",
+    )?.credentialFields;
+    expect(fields).toEqual([
+      expect.objectContaining({
+        key: "__client_id",
+        credentialType: "cookie",
+        required: true,
+      }),
+      expect.objectContaining({
+        key: "_uid",
+        credentialType: "cookie",
+        required: true,
+      }),
+    ]);
+  });
+
   it("detects the current browser session without returning credentials", async () => {
     const result = await luoguAdapter.detectBrowserSession!({
       signal: new AbortController().signal,
@@ -55,8 +73,8 @@ describe("Luogu parser and normalizer", () => {
         identifier: "",
         enabled: true,
         authMode: "manual-cookie",
-        credentials: { cookie: "__client_id=redacted; _uid=99" },
       },
+      credentials: { __client_id: "redacted", _uid: "99" },
       limit: 10,
       signal: new AbortController().signal,
       now: 1_700_000_001_000,
@@ -331,7 +349,7 @@ describe("Luogu parser and normalizer", () => {
           source: "luogu",
           identifier: "99",
           enabled: true,
-          authMode: "browser_session",
+          authMode: "browser-session",
         },
         limit: 100,
         signal: new AbortController().signal,
@@ -362,7 +380,7 @@ describe("Luogu parser and normalizer", () => {
           source: "luogu",
           identifier: "99",
           enabled: true,
-          authMode: "browser_session",
+          authMode: "browser-session",
         },
         limit: 100,
         signal: new AbortController().signal,
@@ -394,7 +412,7 @@ describe("Luogu parser and normalizer", () => {
           source: "luogu",
           identifier: "99",
           enabled: true,
-          authMode: "browser_session",
+          authMode: "browser-session",
         },
         limit: 100,
         signal: new AbortController().signal,
@@ -413,6 +431,59 @@ describe("Luogu parser and normalizer", () => {
         },
       }),
     ).rejects.toMatchObject({ error: { kind: "rate_limited" } });
+  });
+
+  it("continues through record pages until the requested time window is covered", async () => {
+    const requests: string[] = [];
+    const page = (id: number, submitTime: number) =>
+      JSON.stringify({
+        data: {
+          user: { uid: 123456, name: "tester" },
+          records: {
+            count: 2,
+            result: [
+              {
+                id,
+                submitTime,
+                status: 12,
+                problem: { pid: `P${id}`, title: `Problem ${id}` },
+              },
+            ],
+          },
+        },
+      });
+    const http = {
+      async request(_source: string, url: string) {
+        requests.push(url);
+        const isFirstPage = url.includes("page=1");
+        return {
+          status: 200,
+          url,
+          contentType: "application/json",
+          text: isFirstPage ? page(2, 1_700_000_000) : page(1, 1_699_000_000),
+          headers: new Headers(),
+        };
+      },
+    };
+    const result = await luoguAdapter.fetchRecent({
+      account: {
+        accountId: "account",
+        source: "luogu",
+        identifier: "123456",
+        enabled: true,
+        authMode: "browser-session",
+      },
+      limit: 1_000,
+      since: 1_699_500_000_000,
+      signal: new AbortController().signal,
+      now: 1_700_000_001_000,
+      requestId: "request",
+      http,
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toContain("page=2");
+    expect(result.records.map((record) => record.submissionId)).toEqual(["2"]);
   });
 
   it("can discover the current account when the identifier is blank", async () => {
@@ -452,7 +523,7 @@ describe("Luogu parser and normalizer", () => {
         source: "luogu",
         identifier: "",
         enabled: true,
-        authMode: "browser_session",
+        authMode: "browser-session",
       },
       limit: 100,
       signal: new AbortController().signal,

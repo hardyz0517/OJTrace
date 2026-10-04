@@ -29,7 +29,7 @@ const statusLabels: Record<string, string> = {
   "auth-required": "需要重新登录",
   unavailable: "暂时无法读取",
   truncated: "已同步部分记录，达到本次上限",
-  "cached-outside-window": "根据缓存的结束时间跳过，未实时复查",
+  "cached-outside-window": "已跳过范围外历史活动",
 };
 
 export function SyncDiagnostics({

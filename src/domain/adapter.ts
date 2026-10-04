@@ -103,7 +103,6 @@ export type PartialReason =
   | "unverified-coverage"
   | "invalid-record"
   | "rate-limited"
-  | "activity-cache"
   | "unavailable";
 
 export type CoverageOutcome =

@@ -6,6 +6,53 @@ import { SyncDiagnostics } from "../../entrypoints/shared/SyncDiagnostics";
 
 describe("sync coverage UI", () => {
   afterEach(() => vi.unstubAllGlobals());
+  it("keeps cached historical exclusions informational without flagging the account", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const element = document.createElement("div");
+    const root = createRoot(element);
+    await act(async () =>
+      root.render(
+        createElement(SyncDiagnostics, {
+          data: null,
+          sources: [
+            {
+              accountId: "hydro",
+              source: "hydroj",
+              diagnostics: [
+                {
+                  source: "hydroj",
+                  code: "activity-old",
+                  severity: "info",
+                  messageKey: "source.activityCachedOutsideWindow",
+                  retryable: false,
+                  context: {
+                    activityId: "old",
+                    activityName: "Old homework",
+                    status: "cached-outside-window",
+                  },
+                },
+              ],
+              coverage: {
+                window: { since: 0, until: 10 },
+                pagesFetched: 2,
+                acceptedRecords: 0,
+                outcome: { status: "complete", evidence: "all-streams" },
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    expect(element.querySelector("summary")?.textContent).toBe(
+      "本次同步 · 活动详情 · 1 个活动",
+    );
+    expect(element.textContent).toContain("已跳过范围外历史活动");
+    expect(element.textContent).not.toContain("未完整同步");
+    expect(element.textContent).not.toContain("未实时复查");
+    expect(element.querySelector(".diagnostic-warning")).toBeNull();
+    expect(element.querySelector(".sync-diagnostics-note")).toBeNull();
+    await act(async () => root.unmount());
+  });
   it("shows partial coverage with records, missing coverage, and explained skips", async () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     const element = document.createElement("div");

@@ -211,7 +211,6 @@ export async function collectActivityRecords(
       !input.recheckActivities &&
       isActivityOutsideWindow(schedule, input, input.now)
     ) {
-      reasons.add("activity-cache");
       diagnostics.push({
         source: "hydroj",
         code: "activity-" + activity.id,

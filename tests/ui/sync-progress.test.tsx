@@ -147,6 +147,44 @@ afterEach(async () => {
 });
 
 describe("inline sync progress", () => {
+  it("shows cached historical activity exclusions as normal success without warnings or recheck notices", async () => {
+    const run = fixture();
+    run.running = false;
+    run.accounts = [
+      progress(3, {
+        status: "complete",
+        phase: "done",
+        pagesFetched: 6,
+        recordsFetched: 0,
+        activitiesCompleted: 17,
+        activitiesTotal: 17,
+        diagnostics: [
+          {
+            source: "hydroj",
+            code: "activity-old",
+            severity: "info",
+            messageKey: "source.activityCachedOutsideWindow",
+            retryable: false,
+            context: { status: "cached-outside-window" },
+          },
+        ],
+      }),
+    ];
+    await mount(run);
+    expect(container.textContent).toContain("同步完成 · 新增 0 条记录");
+    expect(container.querySelector(".has-warning")).toBeNull();
+    expect(container.querySelector(".lucide-triangle-alert")).toBeNull();
+    await expand();
+    expect(container.textContent).toContain("已完成 · 0 条");
+    expect(container.textContent).toContain("活动 17 / 17");
+    expect(container.textContent).not.toContain("未实时复查");
+    expect(container.textContent).not.toContain("延期");
+    expect(container.querySelector(".sync-progress-reasons")).toBeNull();
+    expect(container.querySelector(".sync-progress-coverage-note")).toBeNull();
+    await expand();
+    await act(async () => vi.advanceTimersByTime(3_500));
+    expect(dismiss).toHaveBeenCalledWith("run-1");
+  });
   it("distinguishes unverified coverage from confirmed incomplete collection", async () => {
     const run = fixture();
     run.running = false;

@@ -148,13 +148,13 @@ HTML 使用明确 next 链接，JSON 使用明确分页信息或继续至有效�
 
 缓存寿命固定 24 小时，自上次真实成功读取第一页算起；命中不刷新 checkedAt，系统时间回退或未来检查时间不算新鲜。每轮先发现所有已参加活动，逐项按本轮窗口排除新鲜历史缓存，再以 50 个实际探测、100 张共享逻辑页和 deadline 限制请求；缓存排除不占请求/探测名额。命中计为已处理活动，预算未访问项不计已完成。
 
-缓存命中表示非实时排除，coverage 必须为 partial，增加 activity-cache 原因及 info 诊断 cached-outside-window；不以缓存结果更新 lastSuccessAt。UI 区分“历史活动未实时复查”和真实采集失败，并说明延期/重新开放最多延迟缓存有效期被发现。不能把缓存判断宣称为实时完整核查。
+缓存命中属于正常的范围外活动排除，不构成覆盖缺口，不增加 partial 原因；没有其他缺口时 coverage 为 complete（all-streams），正常更新 lastSuccessAt/stale。保留 info 诊断 cached-outside-window 供活动详情和测试查看，但不显示黄色警告、“历史活动未实时复查”或延期提醒。同步完成表示按当前窗口及有效缓存策略完成，不承诺实时核查每个历史活动；用户接受缓存有效期内不关注旧活动延期/重新开放，原有 24 小时寿命、域隔离、时间验证和窗口扩大重算保持不变。
 
 Timeline 只提供普通同步，不提供忽略活动缓存的按钮或菜单入口。普通 force 同步不忽略活动缓存；缓存过期后的下一次同步重新探测活动。内部 SYNC_REQUEST 的 recheckActivities 可选布尔值仍透传到 FetchInput，用于诊断和测试：忽略本轮活动缓存并绕过账号 freshness，但不绕过预算、域隔离、分页节奏、429 或权限，依然可能返回 partial。collector 的在途合并 key 包含复查模式，内部完整复查不得附着到使用缓存的任务。
 
 HttpClient 对每次真实尝试检查同一份 origin 冷却，429 响应头立即登记 Retry-After（无效时默认两分钟），不同实例隔离。非敏感 `{origin, blockedUntil}` 使用 storage.session，在 service worker 重启后恢复；写失败保留内存保护并报告降级。手动 force 不能绕过分页节奏、冷却和预算。
 
-FetchResult.coverage 是唯一覆盖事实：普通列表与所有可读取的发现活动均有结束证据、发现完整且无失败/预算/丢失时才为 complete（all-streams），否则 partial 并给出非空原因。单活动记录页明确返回 403 的活动排除于本轮可读取范围，不因此标 partial；complete 不声称拥有该账号无权读取的记录。不保留冗余的 FetchResult.hasMore；分页解析器的 hasMore 仍用于判断下一页。已验证记录可在后续网络、解析、限流或 deadline 问题时保留；身份不符和用户取消仍丢弃本轮新增记录。只有 complete 更新 lastSuccessAt，品牌补全失败独立诊断。
+FetchResult.coverage 是唯一覆盖事实：普通列表与所有可读取、未被有效历史缓存排除的发现活动均有结束证据、发现完整且无失败/预算/丢失时才为 complete（all-streams），否则 partial 并给出非空原因。单活动记录页明确返回 403 的活动排除于本轮可读取范围，不因此标 partial；complete 不声称拥有该账号无权读取的记录或已实时复查范围外活动。不保留冗余的 FetchResult.hasMore；分页解析器的 hasMore 仍用于判断下一页。已验证记录可在后续网络、解析、限流或 deadline 问题时保留；身份不符和用户取消仍丢弃本轮新增记录。只有 complete 更新 lastSuccessAt，品牌补全失败独立诊断。
 
 ## 7. 活动元数据和合并
 
@@ -184,7 +184,7 @@ Diagnostic 包含 source、code、severity、messageKey、retryable，以及可�
 - auth-required：会话失效；
 - unavailable：404、网络或解析失败；
 - truncated：本次预算已用完。
-- cached-outside-window：根据 24 小时内缓存的最终结束时间排除，未实时复查；
+- cached-outside-window：根据 24 小时内缓存的最终结束时间排除，正常 info 状态；
 - unvisited：受预算/限流/时限影响，本轮尚未探测。
 
 无活动发现权限、未知用户页或单活动失败保留普通记录及其他成功活动。身份失败或首个有效普通记录页之前失败产生账号级 AdapterError；后续页面的已分类失败可以保留已有验证记录并返回 partial。
@@ -230,7 +230,7 @@ InstanceBrandingRecord 为 source、origin、domainId?、name、iconDataUrl?、f
 
 活动权限回归覆盖单个/全部活动 403 静默排除、首/后续页拒绝、已验证记录和真实错误保留、已处理进度、不缓存权限；401/登录页/404/429/500 仍报告错误，429 停止后续请求，活动发现与普通列表 403 不静默排除。
 
-活动缓存回归覆盖首次复用第一页、24 小时过期/未来时间、最终作业 endAt、延期与记录矛盾、窗口扩大/相等边界、未知规则/缺失日期/不同域元数据、缓存名额与共享预算、缓存缺失降级、内部完整复查模式隔离、取消/账号替换/删除、跨重启加载、损坏与容量失败降级。活动缓存命中不能伪装 all-streams；UI 不提供活动复查入口，普通同步继续请求全部所选账号且不绕过活动缓存。live 测试可用 OJTRACE_HYDRO_TEST_ACTIVITY_CACHE=1 比较两轮实际页数，要求至少一个真实历史活动缓存命中，不用零活动冒充优化成功。
+活动缓存回归覆盖首次复用第一页、24 小时过期/未来时间、最终作业 endAt、延期与记录矛盾、窗口扩大/相等边界、未知规则/缺失日期/不同域元数据、缓存名额与共享预算、缓存缺失降级、内部完整复查模式隔离、取消/账号替换/删除、跨重启加载、损坏与容量失败降级。只有正常缓存排除时应为 complete 并更新 lastSuccessAt，缓存 checkedAt 不延长；混合真实错误时保留对应 partial 原因。UI 不因缓存排除标黄或提示复查、不提供活动复查入口，普通同步继续请求全部所选账号且不绕过活动缓存。live 测试可用 OJTRACE_HYDRO_TEST_ACTIVITY_CACHE=1 比较两轮实际页数，要求至少一个真实历史活动缓存命中，不用零活动冒充优化成功。
 
 指定域回归额外覆盖输入歧义和 runtime 域 ID 校验、普通/比赛/作业分页前缀、登录 redirect、跨域响应拒绝、403/404、同网站不同域密码会话串行、同 UID 分域绑定和删除隔离、提交 guard/存储隔离、图标缓存与在途刷新隔离、UI 权限仅申请纯 origin。
 

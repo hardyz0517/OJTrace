@@ -42,7 +42,7 @@ const http: HttpClient = {
     throw new Error("unexpected HTTP");
   },
 };
-function fixture() {
+function fixture(client: HttpClient = http) {
   let state: Record<string, unknown> = {
     "ojtrace:data": { ...defaultStoredData(), accounts: [account] },
   };
@@ -53,7 +53,7 @@ function fixture() {
     },
   };
   const storage = createStoragePort(area);
-  const collector = createAccountCollector(storage, http, {
+  const collector = createAccountCollector(storage, client, {
     pagination: immediate,
   });
   return { area, storage, collector };
@@ -79,34 +79,62 @@ function fetched(input: FetchInput): FetchResult {
 afterEach(() => vi.restoreAllMocks());
 
 describe("activity schedule application lifecycle", () => {
-  it("does not advance cache freshness or lastSuccessAt for a cached exclusion", async () => {
-    const f = fixture();
+  it("advances lastSuccessAt without refreshing cache checkedAt for a cached exclusion", async () => {
+    const requests: string[] = [];
+    const client: HttpClient = {
+      async request(_source, url) {
+        requests.push(url);
+        const path = new URL(url).pathname;
+        const text = path.endsWith("/user/42")
+          ? JSON.stringify({
+              tdocs: [
+                {
+                  docId: schedule.activityId,
+                  title: "Old homework",
+                  rule: "homework",
+                },
+              ],
+            })
+          : path.endsWith("/record")
+            ? JSON.stringify({
+                page: 1,
+                rdocs: [],
+                hasMore: false,
+                tdoc: {
+                  docId: schedule.activityId,
+                  domainId: "student",
+                  rule: "homework",
+                  beginAt: new Date(schedule.beginAt).toISOString(),
+                  endAt: new Date(schedule.endAt).toISOString(),
+                },
+              })
+            : `<script>window.UserContext = '{"_id":42,"uname":"tester"}';</script>`;
+        return {
+          url,
+          text,
+          status: 200,
+          contentType: text.startsWith("{") ? "application/json" : "text/html",
+          headers: new Headers(),
+        };
+      },
+    };
+    const f = fixture(client);
     vi.spyOn(hydroOJAdapter, "fetchInstanceBranding").mockResolvedValue({
       diagnostics: [],
     });
-    const fetch = vi
-      .spyOn(hydroOJAdapter, "fetchRecent")
-      .mockImplementation(async (input) => fetched(input));
     await syncEnabledAccounts(
       f.storage,
-      http,
+      client,
       { force: true, now, ...window },
       f.collector,
     );
-    fetch.mockImplementation(async (input) => {
-      const result = fetched(input);
-      return {
-        ...result,
-        activitySchedules: [],
-        coverage: {
-          ...result.coverage,
-          outcome: { status: "partial", reasons: ["activity-cache"] },
-        },
-      };
-    });
+    expect(
+      requests.filter((url) => new URL(url).searchParams.has("tid")),
+    ).toHaveLength(1);
+    requests.length = 0;
     const result = await syncEnabledAccounts(
       f.storage,
-      http,
+      client,
       { force: true, now: now + 100, ...window },
       f.collector,
     );
@@ -115,9 +143,18 @@ describe("activity schedule application lifecycle", () => {
     ).toBe(now);
     expect(result.data.syncStates[account.accountId]).toMatchObject({
       lastAttemptAt: now + 100,
-      lastSuccessAt: now,
-      stale: true,
+      lastSuccessAt: now + 100,
+      stale: false,
     });
+    expect(requests.some((url) => new URL(url).searchParams.has("tid"))).toBe(
+      false,
+    );
+    expect(result.sources[0]?.coverage?.outcome).toEqual({
+      status: "complete",
+      evidence: "all-streams",
+    });
+    expect(result.progress[0]?.status).toBe("complete");
+    expect(result.progress[0]?.reasons).toBeUndefined();
   });
   it("persists and reloads observations, injects only the selected scope and keeps caches out of the UI state", async () => {
     const f = fixture();

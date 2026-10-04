@@ -59,7 +59,6 @@ export const syncReasonLabels: Record<string, string> = {
   "unverified-coverage": "所选范围的记录完整性尚未验证",
   "invalid-record": "部分记录无法验证",
   "rate-limited": "站点限流",
-  "activity-cache": "范围外活动使用缓存判断",
   unavailable: "部分页面暂时不可读",
 };
 
@@ -67,8 +66,6 @@ export function syncCoverageNote(
   source: SourceId,
   reasons: readonly PartialReason[],
 ): string | undefined {
-  if (reasons.includes("activity-cache"))
-    return "部分历史活动根据 24 小时内缓存的结束时间跳过，未实时核查是否延期或重新开放。";
   if (!reasons.includes("unverified-coverage")) return undefined;
   return source === "atcoder"
     ? "AtCoder 返回的列表顺序异常，或同一秒的记录达到 500 条使时间游标无法继续；已保存当前记录。"

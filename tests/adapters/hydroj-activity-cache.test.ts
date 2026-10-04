@@ -133,7 +133,7 @@ describe("Hydro activity schedule optimization", () => {
     expect(result.activitySchedules).toEqual([schedule]);
     expect(result.coverage.outcome.status).toBe("complete");
   });
-  it("skips fresh historical schedules without HTTP or refreshing their checkedAt, with honest coverage", async () => {
+  it("completes normally when skipping fresh historical schedules without HTTP or refreshing their checkedAt", async () => {
     const f = fixture();
     f.input.activitySchedules = [schedule];
     const result = await hydroOJAdapter.fetchRecent(f.input);
@@ -141,7 +141,7 @@ describe("Hydro activity schedule optimization", () => {
     expect(result.activitySchedules).toEqual([]);
     expect(result.coverage).toMatchObject({
       pagesFetched: 2,
-      outcome: { status: "partial", reasons: ["activity-cache"] },
+      outcome: { status: "complete", evidence: "all-streams" },
     });
     expect(f.updates.at(-1)).toMatchObject({
       activitiesCompleted: 1,
@@ -149,6 +149,9 @@ describe("Hydro activity schedule optimization", () => {
     });
     expect(result.diagnostics.at(-1)?.context?.status).toBe(
       "cached-outside-window",
+    );
+    expect(result.diagnostics.every((item) => item.severity === "info")).toBe(
+      true,
     );
   });
   it.each([
@@ -287,10 +290,36 @@ describe("Hydro activity schedule optimization", () => {
     expect(f.probes()).toHaveLength(1);
     expect(new URL(f.probes()[0]!).searchParams.get("tid")).toBe(ids[50]);
     expect(result.coverage.outcome).toEqual({
-      status: "partial",
-      reasons: ["activity-cache"],
+      status: "complete",
+      evidence: "all-streams",
     });
   });
+  it.each([403, 404, 429, 500])(
+    "keeps HTTP %s semantics when another activity is excluded by cache",
+    async (status) => {
+      const nextId = "000000000000000000000020";
+      const f = fixture({ ids: [activityId, nextId], status });
+      f.input.activitySchedules = [schedule];
+      const result = await hydroOJAdapter.fetchRecent(f.input);
+      expect(f.probes()).toHaveLength(1);
+      expect(new URL(f.probes()[0]!).searchParams.get("tid")).toBe(nextId);
+      expect(result.coverage.outcome).toEqual(
+        status === 403
+          ? { status: "complete", evidence: "all-streams" }
+          : {
+              status: "partial",
+              reasons: [status === 429 ? "rate-limited" : "unavailable"],
+            },
+      );
+      expect(f.updates.at(-1)).toMatchObject({
+        activitiesCompleted: 2,
+        activitiesTotal: 2,
+      });
+      expect(
+        result.diagnostics.filter((item) => item.severity === "warning"),
+      ).toHaveLength(status === 403 ? 0 : 1);
+    },
+  );
   it("still caps unknown activity probes at 50 and reports the remaining activities unvisited", async () => {
     const ids = Array.from({ length: 51 }, (_, n) =>
       n.toString(16).padStart(24, "0"),

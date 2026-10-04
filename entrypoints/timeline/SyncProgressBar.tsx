@@ -14,12 +14,6 @@ function stageLabel(account: AccountSyncProgress): string {
     if (
       account.status === "partial" &&
       account.reasons?.length === 1 &&
-      account.reasons[0] === "activity-cache"
-    )
-      return `历史活动未实时复查 · ${account.recordsFetched} 条`;
-    if (
-      account.status === "partial" &&
-      account.reasons?.length === 1 &&
       account.reasons[0] === "unverified-coverage"
     )
       return `完整性未验证 · ${account.recordsFetched} 条`;
@@ -115,12 +109,6 @@ export function SyncProgressBar({
   const incomplete = run.accounts.filter(
     (account) => account.status !== "running" && account.status !== "complete",
   ).length;
-  const cached = run.accounts.filter(
-    (account) =>
-      account.status === "partial" &&
-      account.reasons?.length === 1 &&
-      account.reasons[0] === "activity-cache",
-  ).length;
   const records = run.accounts.reduce(
     (sum, account) => sum + account.recordsFetched,
     0,
@@ -134,11 +122,9 @@ export function SyncProgressBar({
       ]
     : run.interruption
       ? ["同步中断 ·", `${incomplete} 个账号未完整同步`]
-      : cached > 0 && incomplete === cached
-        ? ["同步完成 ·", `${cached} 个账号的历史活动未实时复查`]
-        : warning
-          ? ["同步完成 ·", `${incomplete} 个账号未完整同步`]
-          : ["同步完成 ·", `新增 ${run.addedRecords} 条记录`];
+      : warning
+        ? ["同步完成 ·", `${incomplete} 个账号未完整同步`]
+        : ["同步完成 ·", `新增 ${run.addedRecords} 条记录`];
 
   useEffect(() => {
     if (run.running || warning || expanded) return;

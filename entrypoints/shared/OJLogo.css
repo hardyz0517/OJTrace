@@ -5,21 +5,6 @@
   vertical-align: middle;
 }
 
-.oj-logo-qoj {
-  color: currentColor;
-  overflow: visible;
-  transform: translateY(1px);
-}
-
-.oj-logo-qoj circle,
-.oj-logo-qoj path {
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.35;
-}
-
 .oj-logo-tiny {
   width: 15px;
   height: 15px;

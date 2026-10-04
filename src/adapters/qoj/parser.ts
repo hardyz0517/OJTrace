@@ -170,7 +170,8 @@ function problemFromCell(
   if (!path && !contestPath) return undefined;
   const problemUrl = new URL(link.href, "https://qoj.ac");
   if (problemUrl.origin !== "https://qoj.ac") return undefined;
-  const problemId = contestPath?.[2] ?? path?.[1]!;
+  const problemId = contestPath?.[2] ?? path?.[1];
+  if (!problemId) return undefined;
   const prefix = `#${problemId}.`;
   const problemName = link.text.startsWith(prefix)
     ? link.text.slice(prefix.length).trim()

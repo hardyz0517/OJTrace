@@ -1,177 +1,95 @@
-import { adapterBySource } from "../../adapters";
-import { AdapterFailure } from "../../domain/errors";
-import { instanceBrandingKey } from "../../domain/account-identity";
-import { mergeSubmissions } from "../../domain/merge";
+import { resolveSyncWindow } from "../../domain";
 import type {
-  AccountConfig,
-  AccountCredentials,
-  AdapterError,
-  Diagnostic,
+  AccountRecord,
+  AccountSyncProgress,
+  CollectionProgress,
   HttpClient,
-  InstanceBrandingRecord,
   StoredData,
-  Submission,
 } from "../../domain";
+import { submissionKey } from "../../domain/merge";
 import type { StoragePort } from "../storage/store";
-import { refreshInstanceBranding } from "./instance-branding";
-import { updateBrandingCache } from "../../domain/instance-branding";
-
-export interface SyncSourceResult {
-  accountId: string;
-  source: AccountConfig["source"];
-  records: Submission[];
-  diagnostics: Diagnostic[];
-  instanceBranding?: InstanceBrandingRecord;
-  error?: AdapterError;
-  stale: boolean;
-}
+import {
+  accountCollectorFor,
+  skippedCollection,
+  type AccountCollector,
+  type SyncSourceResult,
+  type AccountCollection,
+} from "./collect-account";
+import { commitCollections, isCurrentCollection } from "./commit-collection";
+export type { SyncSourceResult } from "./collect-account";
 
 export interface SyncResult {
   data: StoredData;
   sources: SyncSourceResult[];
+  /** Authoritative terminal status for every account targeted by this request. */
+  progress: AccountSyncProgress[];
+  /** New submission keys actually retained by this batch's storage transaction. */
+  addedRecords: number;
 }
 
-const sourceRateLimitUntil = new Map<AccountConfig["source"], number>();
-const SOURCE_COOLDOWN_MS = 2 * 60 * 1_000;
-const MAX_LIMIT = 1_000;
-const DEFAULT_SYNC_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1_000;
-
-interface InFlightSync {
-  promise: Promise<SyncSourceResult>;
-  controller: AbortController;
-  credentialRevision?: number;
-  since: number;
+function notifyProgress(
+  observer: ((progress: AccountSyncProgress) => void) | undefined,
+  progress: AccountSyncProgress,
+): void {
+  try {
+    observer?.({ ...progress });
+  } catch {
+    // Transport/UI failures must never interrupt collection or its commit.
+  }
 }
 
-const inFlight = new Map<string, InFlightSync>();
-
-function toError(
-  error: unknown,
-  account: AccountConfig,
-  requestId: string,
-): AdapterError {
-  if (error instanceof AdapterFailure) return error.error;
-  return {
-    kind: "unknown",
+function terminalProgress(
+  collection: AccountCollection,
+  latest: CollectionProgress,
+  collector: AccountCollector,
+  data?: StoredData,
+): AccountSyncProgress {
+  const { account, result } = collection;
+  const base: AccountSyncProgress = {
+    ...latest,
+    phase: "done",
+    accountId: account.accountId,
     source: account.source,
-    stage: "request",
-    messageKey: "source.unknownError",
-    retryable: false,
-    requestId,
+    status: "partial",
+    pagesFetched: result.coverage?.pagesFetched ?? latest.pagesFetched,
+    recordsFetched: result.coverage?.acceptedRecords ?? result.records.length,
+    diagnostics: result.diagnostics,
   };
-}
-
-async function syncOne(
-  account: AccountConfig,
-  credentials: AccountCredentials | undefined,
-  existingBranding: InstanceBrandingRecord | undefined,
-  http: HttpClient,
-  now: number,
-  since: number,
-): Promise<SyncSourceResult> {
-  const requestId = crypto.randomUUID();
-  const adapter = adapterBySource.get(account.source);
-  if (!adapter) {
+  if (!collector.isCurrent(collection)) {
+    return { ...base, status: "cancelled", messageKey: "sync.cancelled" };
+  }
+  if (data && !isCurrentCollection(data, collection)) {
+    const active = data.accounts.find(
+      (item) => item.accountId === account.accountId,
+    );
     return {
-      accountId: account.accountId,
-      source: account.source,
-      records: [],
-      diagnostics: [],
-      stale: true,
-      error: {
-        kind: "unsupported",
-        source: account.source,
-        stage: "request",
-        messageKey: "source.unsupported",
-        retryable: false,
-        requestId,
-      },
+      ...base,
+      status: "skipped",
+      messageKey:
+        active && !active.enabled ? "sync.disabled" : "sync.superseded",
     };
   }
-  const existing = inFlight.get(account.accountId);
-  // A waiter holding an older snapshot must not cancel a newer credential run.
-  if (
-    existing &&
-    (existing.credentialRevision ?? 0) > (account.credentialRevision ?? 0)
-  )
-    return existing.promise;
-  if (existing && existing.credentialRevision === account.credentialRevision) {
-    if (existing.since <= since) return existing.promise;
-    // A wider requested window must not reuse a narrower running fetch.
-    await existing.promise;
-    return syncOne(account, credentials, existingBranding, http, now, since);
+  if (result.skipped) {
+    return {
+      ...base,
+      status: result.skipped === "cancelled" ? "cancelled" : "skipped",
+      messageKey: `sync.${result.skipped}`,
+    };
   }
-  existing?.controller.abort();
-  const controller = new AbortController();
-  const promise = (async () => {
-    try {
-      const result = await adapter.fetchRecent({
-        account,
-        credentials,
-        limit: MAX_LIMIT,
-        since,
-        signal: controller.signal,
-        now,
-        requestId,
-        http,
-      });
-      if (result.account.providerAccountKey !== account.providerAccountKey)
-        throw new AdapterFailure({
-          kind: "auth_required",
-          source: account.source,
-          stage: "identity",
-          messageKey: "account.identityChanged",
-          retryable: false,
-          userAction: "edit_account",
-          requestId,
-        });
-      let diagnostics = [...result.diagnostics];
-      let instanceBranding = result.instanceMetadata?.branding;
-      if (!instanceBranding) {
-        const branding = await refreshInstanceBranding(
-          adapter,
-          {
-            account,
-            credentials,
-            signal: controller.signal,
-            now,
-            requestId,
-            http,
-          },
-          existingBranding,
-        );
-        diagnostics = diagnostics.concat(branding.diagnostics);
-        instanceBranding = branding.branding;
-      }
-      return {
-        accountId: account.accountId,
-        source: account.source,
-        records: result.records,
-        diagnostics,
-        instanceBranding,
-        stale: false,
-      };
-    } catch (error) {
-      return {
-        accountId: account.accountId,
-        source: account.source,
-        records: [],
-        diagnostics: [],
-        stale: true,
-        error: toError(error, account, requestId),
-      };
-    } finally {
-      const active = inFlight.get(account.accountId);
-      if (active?.controller === controller) inFlight.delete(account.accountId);
-    }
-  })();
-  inFlight.set(account.accountId, {
-    promise,
-    controller,
-    credentialRevision: account.credentialRevision,
-    since,
-  });
-  return promise;
+  if (result.error) {
+    return { ...base, status: "failed", messageKey: result.error.messageKey };
+  }
+  if (result.coverage?.outcome.status === "complete") {
+    return { ...base, status: "complete" };
+  }
+  return {
+    ...base,
+    status: "partial",
+    reasons:
+      result.coverage?.outcome.status === "partial"
+        ? result.coverage.outcome.reasons
+        : ["unverified-coverage"],
+  };
 }
 
 export async function syncEnabledAccounts(
@@ -183,122 +101,105 @@ export async function syncEnabledAccounts(
     since?: number;
     until?: number;
     accountIds?: string[];
+    recheckActivities?: boolean;
+    onProgress?: (progress: AccountSyncProgress) => void;
   } = { force: false },
+  collector: AccountCollector = accountCollectorFor(storage, http),
 ): Promise<SyncResult> {
   const now = options.now ?? Date.now();
-  const since = options.since ?? now - DEFAULT_SYNC_LOOKBACK_MS;
-  const until = options.until;
   const current = await storage.load();
-  const selectedAccountIds =
-    options.accountIds ?? current.preferences.syncAccountIds;
-  const requestedAccountIds =
-    options.accountIds === undefined && selectedAccountIds === undefined
-      ? undefined
-      : new Set(options.accountIds ?? selectedAccountIds ?? []);
+  const window = resolveSyncWindow({
+    now,
+    since: options.since,
+    until: options.until,
+    preference: current.preferences.syncRange,
+  });
+  const selectedIds = options.accountIds ?? current.preferences.syncAccountIds;
   const accounts = current.accounts.filter(
     (account) =>
       account.enabled &&
-      (selectedAccountIds === undefined ||
-        selectedAccountIds.includes(account.accountId)) &&
-      (!requestedAccountIds || requestedAccountIds.has(account.accountId)),
+      (selectedIds === undefined || selectedIds.includes(account.accountId)),
   );
-  const eligible = accounts.filter((account) => {
-    if ((sourceRateLimitUntil.get(account.source) ?? 0) > now) return false;
-    if (options.force) return true;
-    const state = current.syncStates[account.accountId];
-    return (
-      !state?.lastSuccessAt ||
-      now - state.lastSuccessAt >= current.preferences.freshnessCooldownMs
-    );
-  });
-  const sources = await Promise.all(
-    eligible.map(async (account) => {
-      const result = await syncOne(
-        account,
-        current.credentials.find((item) => item.accountId === account.accountId)
-          ?.credentials,
-        account.source === "hydroj" && account.origin
-          ? current.instanceBranding[
-              instanceBrandingKey(account.source, account.origin)
-            ]
-          : undefined,
-        http,
-        now,
-        since,
+  const latest = new Map<string, AccountSyncProgress>();
+  function publish(
+    account: AccountRecord,
+    update: Partial<CollectionProgress>,
+  ): void {
+    const progress: AccountSyncProgress = {
+      phase: "queued",
+      pagesFetched: 0,
+      recordsFetched: 0,
+      ...latest.get(account.accountId),
+      ...update,
+      accountId: account.accountId,
+      source: account.source,
+      status: "running",
+    };
+    latest.set(account.accountId, progress);
+    notifyProgress(options.onProgress, progress);
+  }
+  for (const account of accounts) publish(account, {});
+  const collections = await Promise.all(
+    accounts.map(async (account) => {
+      const lastAttemptAt =
+        current.syncStates[account.accountId]?.lastAttemptAt;
+      const collection =
+        !options.force &&
+        !options.recheckActivities &&
+        lastAttemptAt !== undefined &&
+        now - lastAttemptAt < current.preferences.freshnessCooldownMs
+          ? skippedCollection(account, window, now, "freshness")
+          : await collector.collect({
+              account,
+              window,
+              now,
+              onProgress: (update) => publish(account, update),
+              recheckActivities: options.recheckActivities,
+            });
+      const settled = terminalProgress(
+        collection,
+        latest.get(account.accountId)!,
+        collector,
       );
-      return until === undefined
-        ? result
-        : {
-            ...result,
-            records: result.records.filter(
-              (record) =>
-                record.submittedAt >= since && record.submittedAt <= until,
-            ),
-          };
+      latest.set(account.accountId, settled);
+      notifyProgress(options.onProgress, settled);
+      return collection;
     }),
   );
-
-  const result = await storage.transact((data) => {
-    const accepted = sources.filter((item) => {
-      const started = eligible.find(
-        (account) => account.accountId === item.accountId,
-      );
-      const active = data.accounts.find(
-        (account) => account.accountId === item.accountId,
-      );
-      return (
-        active &&
-        active.enabled &&
-        active.credentialRevision === started?.credentialRevision
-      );
-    });
-    const incoming = accepted.flatMap((item) => item.records);
-    const submissions = mergeSubmissions(
-      data.submissions,
-      incoming,
-      data.preferences.retentionPerAccount,
+  let addedRecords = 0;
+  const data = await storage.transact((value) => {
+    const previousKeys = new Set(value.submissions.map(submissionKey));
+    const committed = commitCollections(
+      value,
+      collections.filter((item) => collector.isCurrent(item)),
     );
-    const syncStates = { ...data.syncStates };
-    const brandings: InstanceBrandingRecord[] = [];
-    for (const item of accepted) {
-      const previous = syncStates[item.accountId];
-      syncStates[item.accountId] = {
-        stale: item.stale,
-        lastAttemptAt: now,
-        lastSuccessAt: item.stale ? previous?.lastSuccessAt : now,
-        lastError: item.error,
-      };
-      if (item.instanceBranding) {
-        try {
-          instanceBrandingKey(item.source, item.instanceBranding.origin);
-          brandings.push(item.instanceBranding);
-        } catch {
-          // Invalid metadata cannot make a successful submission sync fail.
-        }
-      }
-    }
-    return {
-      ...data,
-      submissions,
-      syncStates,
-      instanceBranding: updateBrandingCache(data.instanceBranding, brandings),
-    };
+    addedRecords = committed.submissions.filter(
+      (record) => !previousKeys.has(submissionKey(record)),
+    ).length;
+    return committed;
   });
-  const acceptedSources = sources.filter((item) => {
-    const active = result.accounts.find(
-      (account) => account.accountId === item.accountId,
+  const progress = collections.map((collection) => {
+    const final = terminalProgress(
+      collection,
+      latest.get(collection.account.accountId)!,
+      collector,
+      data,
     );
-    const started = eligible.find(
-      (account) => account.accountId === item.accountId,
-    );
-    return (
-      active?.enabled &&
-      active.credentialRevision === started?.credentialRevision
-    );
+    notifyProgress(options.onProgress, final);
+    return final;
   });
-  for (const item of acceptedSources) {
-    if (item.error?.kind === "rate_limited")
-      sourceRateLimitUntil.set(item.source, now + SOURCE_COOLDOWN_MS);
-  }
-  return { data: result, sources: acceptedSources };
+  return {
+    data,
+    progress,
+    addedRecords,
+    sources: collections
+      .filter(
+        (item) =>
+          isCurrentCollection(data, item) &&
+          collector.isCurrent(item) &&
+          item.result.skipped !== "superseded" &&
+          item.result.skipped !== "cancelled",
+      )
+      .map((item) => item.result),
+  };
 }

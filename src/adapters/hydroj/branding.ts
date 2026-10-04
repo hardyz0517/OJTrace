@@ -1,7 +1,8 @@
 import type { HttpClient, InstanceBrandingRecord } from "../../domain";
+import { hydroScopedUrl } from "../../domain/hydro-scope";
+import { assertHydroScopeResponse } from "./session";
 
 export interface HydroBrandingParseResult {
-  name?: string;
   iconUrls: string[];
 }
 
@@ -18,16 +19,6 @@ function decodeHtml(value: string): string {
     );
 }
 
-function cleanName(value: string | undefined): string | undefined {
-  const name = decodeHtml(value ?? "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name))
-    return undefined;
-  if (/^(?:登录|login|hydrooj)$/i.test(name)) return undefined;
-  return name;
-}
-
 function attributes(tag: string): Record<string, string> {
   const result: Record<string, string> = {};
   for (const match of tag.matchAll(/([:\w-]+)\s*=\s*(["'])(.*?)\2/gs)) {
@@ -41,17 +32,6 @@ export function parseHydroBrandingHtml(
   text: string,
   responseUrl: string,
 ): HydroBrandingParseResult {
-  let siteName: string | undefined;
-  let applicationName: string | undefined;
-  for (const match of text.matchAll(/<meta\b[^>]*>/gi)) {
-    const attrs = attributes(match[0] ?? "");
-    const key = (attrs.property ?? attrs.name ?? "").toLowerCase();
-    if (key === "og:site_name") {
-      siteName ??= cleanName(attrs.content);
-    } else if (key === "application-name") {
-      applicationName ??= cleanName(attrs.content);
-    }
-  }
   const icons: Array<{ href: string; priority: number; sizeDistance: number }> =
     [];
   const iconPattern = /<link\b([^>]+)>/gi;
@@ -102,7 +82,6 @@ export function parseHydroBrandingHtml(
     }
   });
   return {
-    name: siteName ?? applicationName,
     iconUrls: [...new Set(iconUrls)].slice(0, 8),
   };
 }
@@ -153,6 +132,7 @@ export async function fetchHydroBranding(
   http: HttpClient,
   input: {
     origin: string;
+    domainId?: string;
     source: "hydroj";
     credentials?: RequestCredentials;
     cookie?: string;
@@ -161,7 +141,7 @@ export async function fetchHydroBranding(
     now?: number;
   },
 ): Promise<InstanceBrandingRecord> {
-  const root = await http.request("hydroj", new URL("/", input.origin).href, {
+  const root = await http.request("hydroj", hydroScopedUrl(input), {
     credentials: input.credentials ?? "include",
     signal: input.signal,
     headers: {
@@ -176,8 +156,8 @@ export async function fetchHydroBranding(
     (root.status !== 401 && (root.status < 200 || root.status >= 300))
   )
     throw new Error("Branding unavailable");
+  assertHydroScopeResponse(input, root);
   const parsed = parseHydroBrandingHtml(root.text, root.url);
-  const name = parsed.name ?? new URL(input.origin).hostname;
   let iconDataUrl: string | undefined;
   let iconFetchedAt: number | undefined;
   for (const iconUrl of parsed.iconUrls) {
@@ -212,7 +192,8 @@ export async function fetchHydroBranding(
   return {
     source: "hydroj",
     origin: input.origin,
-    name,
+    ...(input.domainId ? { domainId: input.domainId } : {}),
+    name: "HydroOJ",
     ...(iconDataUrl ? { iconDataUrl } : {}),
     fetchedAt: input.now ?? Date.now(),
     ...(iconFetchedAt ? { iconFetchedAt } : {}),

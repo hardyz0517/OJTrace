@@ -29,6 +29,106 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 describe("account authorization UI", () => {
+  it("splits a domain URL for detection and authorization while requesting origin-only permission", async () => {
+    const account = accountRecord({
+      source: "hydroj",
+      accountId: "student",
+      origin: "http://ui.example.org",
+      domainId: "student",
+      providerAccountKey: "42",
+      authMode: "browser-session",
+      enabled: true,
+    });
+    vi.mocked(browser.runtime.sendMessage).mockImplementation(async (raw) => {
+      const message = raw as unknown as { type: string };
+      return message.type === "DETECT_BROWSER_SESSION"
+        ? {
+            ok: true,
+            type: "BROWSER_SESSION",
+            account: {
+              authenticated: true,
+              status: "authenticated",
+              uid: "42",
+              username: "tester",
+            },
+          }
+        : {
+            ok: true,
+            type: "AUTHORIZED",
+            account,
+            data: publicStoredData({
+              ...defaultStoredData(),
+              accounts: [account],
+            }),
+            diagnostics: [],
+            superseded: false,
+          };
+    });
+    await act(async () => state.selectSource("hydroj"));
+    await act(async () =>
+      state.updateForm({ origin: "http://ui.example.org/d/student/" }),
+    );
+    await act(async () => state.detect(true));
+    expect(ensureAuthorizationPermission).toHaveBeenCalledWith(
+      "hydroj",
+      "http://ui.example.org",
+      true,
+    );
+    expect(browser.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "DETECT_BROWSER_SESSION",
+        origin: "http://ui.example.org",
+        domainId: "student",
+      }),
+    );
+    await act(async () => state.authorize());
+    expect(browser.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "AUTHORIZE_ACCOUNT",
+        origin: "http://ui.example.org",
+        domainId: "student",
+      }),
+    );
+    expect(state.status).toBe("completed");
+  });
+  it("reports saved records with unverified completeness without claiming records were lost", async () => {
+    const account = accountRecord({
+      source: "atcoder",
+      accountId: "a",
+      providerAccountKey: "Hardy_Zheng",
+      authMode: "manual-cookie",
+      enabled: true,
+    });
+    vi.mocked(browser.runtime.sendMessage).mockResolvedValue({
+      schemaVersion: 2,
+      requestId: "r",
+      ok: true,
+      type: "AUTHORIZED",
+      account,
+      data: publicStoredData({ ...defaultStoredData(), accounts: [account] }),
+      diagnostics: [],
+      superseded: false,
+      coverage: {
+        window: { since: 0, until: 10 },
+        pagesFetched: 1,
+        acceptedRecords: 3,
+        outcome: { status: "partial", reasons: ["unverified-coverage"] },
+      },
+    } as never);
+    await act(async () => state.selectSource("atcoder"));
+    await act(async () =>
+      state.updateForm({
+        authMode: "manual-cookie",
+        credentials: { REVEL_SESSION: "session" },
+      }),
+    );
+    await act(async () => state.authorize());
+    expect(state.status).toBe("completed");
+    expect(state.message).toBe(
+      "账号已连接，已获取 3 条记录；所选范围的完整性尚未验证。",
+    );
+    expect(onAuthorized).toHaveBeenCalledOnce();
+  });
   it("keeps a background failure code and message in the session state", async () => {
     vi.mocked(browser.runtime.sendMessage).mockResolvedValue({
       schemaVersion: 2,
@@ -75,6 +175,7 @@ describe("account authorization UI", () => {
       state.updateForm({
         authMode: "password",
         origin: "https://ui.example.org",
+        label: "  School OJ  ",
         credentials: { username: "tester", password: " password with spaces " },
       }),
     );
@@ -88,6 +189,7 @@ describe("account authorization UI", () => {
     expect(browser.runtime.sendMessage).toHaveBeenCalledTimes(1);
     expect(browser.runtime.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        label: "School OJ",
         credentials: { username: "tester", password: " password with spaces " },
       }),
     );
@@ -97,7 +199,44 @@ describe("account authorization UI", () => {
     });
     expect(state.form.credentials).toEqual({});
     expect(state.form.origin).toBe("");
+    expect(state.form.label).toBe("");
     expect(onAuthorized).toHaveBeenCalledTimes(1);
+  });
+  it("keeps an in-flight browser session detection when the instance name changes", async () => {
+    let release!: (value: unknown) => void;
+    const pending = new Promise((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(browser.runtime.sendMessage).mockReturnValue(pending as never);
+    await act(async () => state.selectSource("hydroj"));
+    await act(async () =>
+      state.updateForm({ origin: "https://ui.example.org" }),
+    );
+    let detection!: Promise<void>;
+    await act(async () => {
+      detection = state.detect(false);
+    });
+    await act(async () => state.updateForm({ label: "School OJ" }));
+    await act(async () => {
+      release({
+        schemaVersion: 2,
+        requestId: "r",
+        ok: true,
+        type: "BROWSER_SESSION",
+        source: "hydroj",
+        account: {
+          authenticated: true,
+          status: "authenticated",
+          username: "tester",
+        },
+      });
+      await detection;
+    });
+    expect(state.session).toMatchObject({
+      authenticated: true,
+      username: "tester",
+    });
+    expect(state.form.label).toBe("School OJ");
   });
   it("rejects an invalid instance before requesting permission or sending a command", async () => {
     await act(async () => state.selectSource("hydroj"));

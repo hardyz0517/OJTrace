@@ -114,23 +114,10 @@ input {
   display: flex;
   flex-direction: column;
 }
-.auth-methods {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
-  width: 100%;
-  max-width: none;
-}
-.auth-methods .auth-panel {
-  min-width: 0;
-}
 .auth-panel-actions {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
-}
-.browser-actions {
-  margin-top: auto;
 }
 .auth-panel-heading {
   display: grid;
@@ -143,26 +130,11 @@ input {
   font-size: 14px;
   font-weight: 600;
 }
-.auth-panel-heading p,
-.auth-description,
-.session-help {
+.auth-description {
   margin: 0;
   color: #8a93a3;
   font-size: 12px;
   line-height: 1.6;
-}
-.auth-heading-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.recommended-badge {
-  border: 1px solid #c8d8ef;
-  border-radius: 4px;
-  color: #4f78bd;
-  background: #f3f7fd;
-  padding: 2px 6px;
-  font-size: 11px;
 }
 .public-panel {
   display: grid;
@@ -175,10 +147,6 @@ input {
 .session-status-area {
   display: grid;
   gap: 8px;
-}
-.field-label {
-  color: #667085;
-  font-size: 12px;
 }
 .session-status {
   margin: 0;
@@ -193,28 +161,11 @@ input {
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
-.session-status strong {
-  margin-left: 4px;
-  color: #344054;
-  font-weight: 600;
-}
 .session-status.is-authenticated {
   color: #356b4b;
 }
-.session-status.is-checking {
-  color: #667085;
-}
-.session-status.is-error,
 .session-status.is-unauthenticated {
   color: #8b6262;
-}
-.status-mark {
-  color: #4e9a67;
-  margin-right: 5px;
-}
-.session-status-block {
-  display: grid;
-  gap: 3px;
 }
 .text-button {
   width: max-content;
@@ -232,11 +183,6 @@ input {
 .manual-panel {
   display: grid;
   gap: 14px;
-}
-.account-form-actions {
-  display: flex;
-  justify-content: flex-end;
-  max-width: 720px;
 }
 .primary-button,
 .secondary-button,
@@ -268,11 +214,6 @@ input {
 }
 .unavailable-panel strong {
   font-weight: 600;
-}
-.unavailable-panel p {
-  margin: 7px 0 0;
-  color: #8a93a3;
-  font-size: 12px;
 }
 .message {
   color: #356b4b;
@@ -527,6 +468,7 @@ input {
   cursor: pointer;
 }
 .select-option:hover,
+.select-option.is-active,
 .select-option.is-selected {
   background: #f1f5fb;
   color: #315b9f;
@@ -564,16 +506,9 @@ input {
     padding: 32px 18px;
   }
   .source-field,
-  .auth-panel,
-  .account-form-actions {
+  .auth-panel {
     max-width: none;
     width: 100%;
-  }
-  .auth-methods {
-    grid-template-columns: 1fr;
-  }
-  .account-form-actions {
-    justify-content: stretch;
   }
   .primary-button {
     width: 100%;

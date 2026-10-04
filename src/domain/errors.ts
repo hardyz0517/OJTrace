@@ -19,18 +19,37 @@ export class AdapterFailure extends Error {
     const kind: AdapterErrorKind =
       code === "timeout"
         ? "timeout"
-        : code === "invalid_url"
-          ? "invalid_response"
-          : "network";
+        : code === "rate_limited"
+          ? "rate_limited"
+          : code === "invalid_url"
+            ? "invalid_response"
+            : "network";
     return new AdapterFailure(
       {
         kind,
         source,
         stage: "request",
         messageKey:
-          kind === "timeout" ? "source.timeout" : "source.networkError",
+          kind === "timeout"
+            ? "source.timeout"
+            : kind === "rate_limited"
+              ? "source.rateLimited"
+              : "source.networkError",
         retryable: kind === "network",
-        userAction: kind === "timeout" ? "retry_later" : undefined,
+        userAction:
+          kind === "timeout" || kind === "rate_limited"
+            ? "retry_later"
+            : undefined,
+        ...(kind === "rate_limited"
+          ? {
+              httpStatus: 429,
+              ...(error instanceof Error &&
+              "retryAfterMs" in error &&
+              typeof error.retryAfterMs === "number"
+                ? { retryAfterMs: error.retryAfterMs }
+                : {}),
+            }
+          : {}),
         requestId,
       },
       { cause: error },

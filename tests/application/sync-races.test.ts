@@ -54,13 +54,18 @@ function result(input: FetchInput, submissionId: string): FetchResult {
         submissionId,
         problemId: "1A",
         identityQuality: "stable",
-        submittedAt: 10,
+        submittedAt: input.since + 1,
         fetchedAt: input.now,
         verdict: { code: "accepted", raw: "OK" },
       },
     ],
     diagnostics: [],
-    hasMore: false,
+    coverage: {
+      window: { since: input.since, until: input.until },
+      pagesFetched: 1,
+      acceptedRecords: 1,
+      outcome: { status: "complete", evidence: "exhausted" },
+    },
   };
 }
 afterEach(() => vi.restoreAllMocks());
@@ -113,14 +118,14 @@ describe("sync commit races", () => {
         credentialRevision: 2,
       })),
     }));
-    const newSync = await syncEnabledAccounts(storage, http, {
+    const newSyncing = syncEnabledAccounts(storage, http, {
       force: true,
       now: 200,
       since: 0,
     });
-    expect(oldInput.signal.aborted).toBe(true);
+    await vi.waitFor(() => expect(oldInput.signal.aborted).toBe(true));
     finish.resolve(result(oldInput, "old"));
-    const oldResult = await oldSync;
+    const [oldResult, newSync] = await Promise.all([oldSync, newSyncing]);
     expect(oldResult.sources).toEqual([]);
     expect(newSync.sources).toHaveLength(1);
     const stored = await storage.load();

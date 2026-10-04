@@ -96,6 +96,9 @@ describe("QOJ adapter", () => {
       username: "Hardy",
     });
     const recent = await qojAdapter.fetchRecent({
+      since: 0,
+      until: Number.MAX_SAFE_INTEGER,
+      pagination: { runPage: ({ request }) => request() },
       ...input,
       account: {
         accountId: "account-1",
@@ -544,6 +547,9 @@ describe("QOJ adapter", () => {
       }),
     };
     const result = await qojAdapter.fetchRecent({
+      since: 0,
+      until: Number.MAX_SAFE_INTEGER,
+      pagination: { runPage: ({ request }) => request() },
       account: {
         accountId: "account-1",
         source: "qoj",
@@ -638,6 +644,9 @@ describe("QOJ adapter", () => {
       }),
     };
     const result = await qojAdapter.fetchRecent({
+      since: 0,
+      until: Number.MAX_SAFE_INTEGER,
+      pagination: { runPage: ({ request }) => request() },
       account: {
         accountId: "account-1",
         source: "qoj",
@@ -653,7 +662,11 @@ describe("QOJ adapter", () => {
     });
     expect(requests).toHaveLength(2);
     expect(requests[1]).toContain("page=2");
-    expect(result.records).toHaveLength(3);
+    expect(result.records).toHaveLength(2);
+    expect(result.coverage.outcome).toEqual({
+      status: "partial",
+      reasons: ["pagination-repeated"],
+    });
     expect(result.account.providerAccountKey).toBe("sample_user");
     expect(loginPage).toContain("username");
   });
@@ -664,7 +677,7 @@ describe("QOJ adapter", () => {
       "utf8",
     );
     const http: HttpClient = {
-      request: vi.fn(async (_source, url) => ({
+      request: vi.fn(async () => ({
         status: 200,
         url: "https://qoj.ac/login",
         contentType: "text/html",
@@ -674,6 +687,9 @@ describe("QOJ adapter", () => {
     };
     await expect(
       qojAdapter.fetchRecent({
+        since: 0,
+        until: Number.MAX_SAFE_INTEGER,
+        pagination: { runPage: ({ request }) => request() },
         account: {
           accountId: "account-1",
           source: "qoj",
@@ -705,6 +721,9 @@ describe("QOJ adapter", () => {
     };
     await expect(
       qojAdapter.fetchRecent({
+        since: 0,
+        until: Number.MAX_SAFE_INTEGER,
+        pagination: { runPage: ({ request }) => request() },
         account: {
           accountId: "account-1",
           source: "qoj",
@@ -738,6 +757,9 @@ describe("QOJ adapter", () => {
       ),
     };
     const result = await qojAdapter.fetchRecent({
+      since: 0,
+      until: Number.MAX_SAFE_INTEGER,
+      pagination: { runPage: ({ request }) => request() },
       account: {
         accountId: "account-1",
         source: "qoj",
@@ -756,7 +778,7 @@ describe("QOJ adapter", () => {
 
   it("rejects an unfiltered submissions response", async () => {
     const http: HttpClient = {
-      request: vi.fn(async (_source, url) => ({
+      request: vi.fn(async () => ({
         status: 200,
         url: "https://qoj.ac/submissions",
         contentType: "text/html",
@@ -766,6 +788,9 @@ describe("QOJ adapter", () => {
     };
     await expect(
       qojAdapter.fetchRecent({
+        since: 0,
+        until: Number.MAX_SAFE_INTEGER,
+        pagination: { runPage: ({ request }) => request() },
         account: {
           accountId: "account-1",
           source: "qoj",

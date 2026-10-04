@@ -9,6 +9,7 @@ import { hydroOJAdapter } from "../../src/adapters/hydroj";
 import type {
   CanonicalAccount,
   FetchInput,
+  AuthorizeInput,
   FetchResult,
   HttpClient,
 } from "../../src/domain";
@@ -40,7 +41,7 @@ const command = {
   credentials: { username: "test-user", password: "test-password" },
   requestId: "request",
 };
-const canonical = (input: FetchInput): CanonicalAccount => ({
+const canonical = (input: AuthorizeInput): CanonicalAccount => ({
   accountId: input.account.accountId,
   source: "hydroj",
   providerAccountKey: "42",
@@ -54,6 +55,7 @@ const records = (input: FetchInput): FetchResult => ({
       accountId: input.account.accountId,
       providerAccountKey: "42",
       origin: input.account.origin,
+      ...(input.account.domainId ? { domainId: input.account.domainId } : {}),
       submissionId: "1",
       identityQuality: "stable",
       problemId: "P1",
@@ -63,12 +65,158 @@ const records = (input: FetchInput): FetchResult => ({
     },
   ],
   diagnostics: [],
-  hasMore: false,
+  coverage: {
+    window: { since: input.since, until: input.until },
+    pagesFetched: 1,
+    acceptedRecords: 1,
+    outcome: { status: "complete", evidence: "exhausted" },
+  },
 });
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("account lifecycle", () => {
+  it("binds the same Hydro UID to distinct domains and reauthorizes one without replacing the others", async () => {
+    vi.spyOn(hydroOJAdapter, "authorize").mockImplementation(async (input) =>
+      canonical(input),
+    );
+    vi.spyOn(hydroOJAdapter, "fetchRecent").mockImplementation(async (input) =>
+      records(input),
+    );
+    vi.spyOn(hydroOJAdapter, "fetchInstanceBranding").mockResolvedValue({
+      diagnostics: [],
+    });
+    const { service, storage } = fixture();
+    const root = await service.authorize(command);
+    const student = await service.authorize({
+      ...command,
+      origin: `${command.origin}/d/student/`,
+    });
+    const teacher = await service.authorize({
+      ...command,
+      origin: command.origin,
+      domainId: "teacher",
+    });
+    const renewed = await service.authorize({
+      ...command,
+      origin: `${command.origin}/d/student`,
+    });
+    expect(student.account.origin).toBe(command.origin);
+    expect(student.account.domainId).toBe("student");
+    expect(renewed.account.accountId).toBe(student.account.accountId);
+    const data = await storage.load();
+    expect(data.accounts).toHaveLength(3);
+    expect(data.credentials).toHaveLength(3);
+    expect(data.submissions).toHaveLength(3);
+    expect(
+      new Set(data.accounts.map((account) => account.identityKey)).size,
+    ).toBe(3);
+    await service.remove(student.account.accountId);
+    const removed = await storage.load();
+    expect(removed.accounts.map((account) => account.accountId).sort()).toEqual(
+      [root.account.accountId, teacher.account.accountId].sort(),
+    );
+    expect(removed.submissions).toHaveLength(2);
+  });
+  it("does not let a slower earlier authorization overwrite newer credentials", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    vi.spyOn(hydroOJAdapter, "authorize").mockImplementation(async (input) => {
+      if (input.credentials?.password === "old-password") {
+        started();
+        await gate;
+      }
+      return canonical(input);
+    });
+    vi.spyOn(hydroOJAdapter, "fetchRecent").mockImplementation(async (input) =>
+      records(input),
+    );
+    vi.spyOn(hydroOJAdapter, "fetchInstanceBranding").mockResolvedValue({
+      diagnostics: [],
+    });
+    const { service, storage } = fixture();
+    const older = service.authorize({
+      ...command,
+      credentials: { username: "test-user", password: "old-password" },
+    });
+    const rejected = expect(older).rejects.toMatchObject({
+      code: "superseded",
+    });
+    await ready;
+    await service.authorize({
+      ...command,
+      credentials: { username: "test-user", password: "new-password" },
+    });
+    release();
+    await rejected;
+    expect((await storage.load()).credentials[0]?.credentials.password).toBe(
+      "new-password",
+    );
+    expect((await storage.load()).accounts).toHaveLength(1);
+  });
+
+  it("does not persist a pending identity authorization after accounts are cleared", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    vi.spyOn(hydroOJAdapter, "authorize").mockImplementation(async (input) => {
+      started();
+      await gate;
+      return canonical(input);
+    });
+    const fetcher = vi.spyOn(hydroOJAdapter, "fetchRecent");
+    const { service, storage } = fixture();
+    const pending = service.authorize(command);
+    const rejected = expect(pending).rejects.toMatchObject({
+      code: "superseded",
+    });
+    await ready;
+    await service.clearAll();
+    release();
+    await rejected;
+    expect((await storage.load()).accounts).toEqual([]);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("does not return complete coverage when first collection was invalidated before commit", async () => {
+    vi.spyOn(hydroOJAdapter, "authorize").mockImplementation(async (input) =>
+      canonical(input),
+    );
+    vi.spyOn(hydroOJAdapter, "fetchRecent").mockImplementation(async (input) =>
+      records(input),
+    );
+    vi.spyOn(hydroOJAdapter, "fetchInstanceBranding").mockResolvedValue({
+      diagnostics: [],
+    });
+    const { service, storage } = fixture();
+    const original = storage.transact.bind(storage);
+    let transactions = 0;
+    vi.spyOn(storage, "transact").mockImplementation((operation) => {
+      transactions += 1;
+      if (transactions === 2) service.cancelPending();
+      return original(operation);
+    });
+    const result = await service.authorize(command);
+    expect(result.coverage).toBeUndefined();
+    expect(result.superseded).toBe(true);
+    expect(result.data.submissions).toEqual([]);
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "sync-cancelled" }),
+      ]),
+    );
+  });
   it("rejects undeclared credential fields before authorization or persistence", async () => {
     const authorize = vi.spyOn(hydroOJAdapter, "authorize");
     const { service, storage } = fixture();
@@ -95,11 +243,18 @@ describe("account lifecycle", () => {
       diagnostics: [],
     });
     const { service, storage } = fixture();
-    const first = await service.authorize(command);
+    const first = await service.authorize({
+      ...command,
+      label: "  School OJ  ",
+    });
+    expect(first.account.label).toBe("School OJ");
+    expect((await storage.load()).accounts[0]?.label).toBe("School OJ");
     const second = await service.authorize({
       ...command,
+      label: "Renamed OJ",
       credentials: { username: "new-name", password: "new-password" },
     });
+    expect(second.account.label).toBe("Renamed OJ");
     expect(second.account.accountId).toBe(first.account.accountId);
     expect(second.account.credentialRevision).toBe(2);
     expect(second.data.accounts).toHaveLength(1);
@@ -118,8 +273,26 @@ describe("account lifecycle", () => {
       authMode: "browser-session",
       credentials: undefined,
     });
-    expect((await storage.load()).credentials).toEqual([]);
+    const loaded = await storage.load();
+    expect(loaded.credentials).toEqual([]);
+    expect(loaded.accounts[0]?.label).toBe("HydroOJ");
   });
+
+  it.each([undefined, "", "   "])(
+    "defaults an omitted or blank instance name (%s) to HydroOJ even when sync fails",
+    async (label) => {
+      vi.spyOn(hydroOJAdapter, "authorize").mockImplementation(async (input) =>
+        canonical(input),
+      );
+      vi.spyOn(hydroOJAdapter, "fetchRecent").mockRejectedValue(
+        new Error("offline"),
+      );
+      const { service, storage } = fixture();
+      const result = await service.authorize({ ...command, label });
+      expect(result.account.label).toBe("HydroOJ");
+      expect((await storage.load()).accounts[0]?.label).toBe("HydroOJ");
+    },
+  );
 
   it("isolates same UID across origins and keeps failed initial sync accounts for reauthorization", async () => {
     vi.spyOn(hydroOJAdapter, "authorize").mockImplementation(async (input) =>
@@ -135,9 +308,7 @@ describe("account lifecycle", () => {
       origin: "https://other.example.org",
     });
     expect(second.data.accounts).toHaveLength(2);
-    expect(second.data.accounts.every((account) => !account.enabled)).toBe(
-      true,
-    );
+    expect(second.data.accounts.every((account) => account.enabled)).toBe(true);
     expect(second.syncError?.messageKey).toBe("source.unknownError");
   });
 
@@ -148,6 +319,69 @@ describe("account lifecycle", () => {
     const { service, storage } = fixture();
     await expect(service.authorize(command)).rejects.toThrow();
     expect(await storage.load()).toEqual(defaultStoredData());
+  });
+
+  it("authorizes identity independently when a saved fixed window has expired", async () => {
+    const authorize = vi
+      .spyOn(hydroOJAdapter, "authorize")
+      .mockImplementation(async (input) => canonical(input));
+    const fetcher = vi.spyOn(hydroOJAdapter, "fetchRecent");
+    const { storage } = fixture();
+    await storage.transact((data) => ({
+      ...data,
+      preferences: {
+        ...data.preferences,
+        syncRange: { from: 0, to: 1, followNow: false },
+      },
+    }));
+    const service = createAccountService(storage, {
+      http: {
+        request: async () => {
+          throw new Error("unexpected HTTP");
+        },
+      },
+      ensurePermission: async () => true,
+      now: () => 40 * 86_400_000,
+    });
+    const result = await service.authorize(command);
+    expect(result.account.enabled).toBe(true);
+    expect(result.coverage).toBeUndefined();
+    expect(result.diagnostics[0]?.code).toBe("invalid-sync-range");
+    expect(authorize.mock.calls[0]?.[0]).not.toHaveProperty("since");
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(
+      result.data.syncStates[result.account.accountId]?.lastSuccessAt,
+    ).toBeUndefined();
+  });
+
+  it("keeps an existing enabled choice and never counts authorization as a successful collection", async () => {
+    vi.spyOn(hydroOJAdapter, "authorize").mockImplementation(async (input) =>
+      canonical(input),
+    );
+    const fetcher = vi
+      .spyOn(hydroOJAdapter, "fetchRecent")
+      .mockImplementation(async (input) => records(input));
+    vi.spyOn(hydroOJAdapter, "fetchInstanceBranding").mockResolvedValue({
+      diagnostics: [],
+    });
+    const { service, storage } = fixture();
+    const first = await service.authorize(command);
+    await storage.transact((data) => ({
+      ...data,
+      accounts: data.accounts.map((account) => ({
+        ...account,
+        enabled: false,
+      })),
+    }));
+    fetcher.mockClear();
+    const second = await service.authorize(command);
+    expect(second.account.accountId).toBe(first.account.accountId);
+    expect(second.account.enabled).toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(
+      second.data.syncStates[second.account.accountId]?.lastSuccessAt,
+    ).toBe(10);
+    expect(second.data.syncStates[second.account.accountId]?.stale).toBe(true);
   });
 
   it("does not resurrect an account removed during its first sync", async () => {

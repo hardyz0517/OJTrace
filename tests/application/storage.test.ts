@@ -16,6 +16,35 @@ function fakeArea() {
 }
 
 describe("storage port", () => {
+  it("drops obsolete preference fields and repairs invalid limits without losing accounts", async () => {
+    const area = fakeArea();
+    const account = accountRecord({
+      accountId: "account",
+      source: "codeforces",
+      enabled: true,
+      authMode: "public-handle",
+      providerAccountKey: "tourist",
+    });
+    await area.set({
+      "ojtrace:data": {
+        ...defaultStoredData(),
+        accounts: [account],
+        preferences: {
+          enabledSources: ["codeforces"],
+          retentionPerAccount: -1,
+          freshnessCooldownMs: "invalid",
+          syncAccountIds: [account.accountId],
+        },
+      },
+    });
+    const loaded = await createStoragePort(area).load();
+    expect(loaded.accounts).toEqual([account]);
+    expect(loaded.preferences).toEqual({
+      ...defaultStoredData().preferences,
+      syncAccountIds: [account.accountId],
+    });
+  });
+
   it("persists the manual sync range across unrelated preference writes", async () => {
     const store = createStoragePort(fakeArea());
     const syncRange = {

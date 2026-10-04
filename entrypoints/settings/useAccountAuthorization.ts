@@ -25,6 +25,7 @@ export interface AccountFormValue {
   source: SourceId;
   authMode: AccountAuthMode | null;
   identifier: string;
+  label: string;
   origin: string;
   credentials: Record<string, string>;
 }
@@ -36,18 +37,23 @@ function initialForm(source: SourceId): AccountFormValue {
     authMode:
       modes.find((mode) => mode.recommended)?.type ?? modes[0]?.type ?? null,
     identifier: "",
+    label: "",
     origin: "",
     credentials: {},
   };
 }
 
-function normalizedOrigin(form: AccountFormValue): string | undefined {
-  if (form.source !== "hydroj") return undefined;
+function normalizedScope(form: AccountFormValue): {
+  origin?: string;
+  domainId?: string;
+} {
+  if (form.source !== "hydroj") return {};
   if (!form.origin.trim()) throw new Error("请输入 HydroOJ 实例地址。");
   try {
-    return createHydroOJInstance(form.origin.trim()).origin;
+    const { origin, domainId } = createHydroOJInstance(form.origin.trim());
+    return { origin, ...(domainId === undefined ? {} : { domainId }) };
   } catch {
-    throw new Error("实例地址无效，请输入完整根地址。");
+    throw new Error("实例地址无效，请输入网站根地址或 /d/域名/ 地址。");
   }
 }
 
@@ -74,7 +80,8 @@ export function useAccountAuthorization(
 
   function updateForm(patch: Partial<AccountFormValue>) {
     if (busyRef.current) return;
-    detectionRevision.current += 1;
+    if (Object.keys(patch).some((key) => key !== "label"))
+      detectionRevision.current += 1;
     setForm((current) => ({ ...current, ...patch }));
     setMessage(null);
     setStatus("idle");
@@ -93,7 +100,8 @@ export function useAccountAuthorization(
     const revision = ++detectionRevision.current;
     setSession("checking");
     try {
-      const origin = normalizedOrigin(form);
+      const scope = normalizedScope(form);
+      const { origin } = scope;
       if (
         requestPermission &&
         !(await ensureAuthorizationPermission(form.source, origin, true))
@@ -111,7 +119,7 @@ export function useAccountAuthorization(
         type: "DETECT_BROWSER_SESSION",
         requestId: crypto.randomUUID(),
         source: form.source,
-        ...(origin ? { origin } : {}),
+        ...scope,
       });
       if (revision !== detectionRevision.current) return;
       if (!response.ok) {
@@ -167,7 +175,8 @@ export function useAccountAuthorization(
     setMessage(null);
     try {
       if (!mode) throw new Error("该 OJ 暂无可用的账号接入方式。");
-      const origin = normalizedOrigin(form);
+      const scope = normalizedScope(form);
+      const { origin } = scope;
       const identifier = form.identifier.trim();
       if (
         mode.type === "browser-session" &&
@@ -202,7 +211,10 @@ export function useAccountAuthorization(
         source: form.source,
         authMode: mode.type,
         ...(identifier ? { identifier } : {}),
-        ...(origin ? { origin } : {}),
+        ...(form.source === "hydroj" && form.label.trim()
+          ? { label: form.label.trim() }
+          : {}),
+        ...scope,
         ...(Object.keys(credentials).length ? { credentials } : {}),
       });
       if (!response.ok) throw new Error(response.error.message);
@@ -211,6 +223,7 @@ export function useAccountAuthorization(
       setForm((current) => ({
         ...current,
         identifier: "",
+        label: "",
         origin: "",
         credentials: {},
       }));
@@ -218,9 +231,16 @@ export function useAccountAuthorization(
       setMessage(
         response.superseded
           ? "账号已被另一项操作更新或删除，请刷新后重试。"
-          : response.account.enabled
-            ? "账号已连接并完成首次同步。"
-            : "账号已验证并保存，首次同步失败，请重新授权重试。",
+          : response.syncError
+            ? "账号已连接；首次同步失败，可稍后在时间线重试。"
+            : response.coverage?.outcome.status === "complete"
+              ? "账号已连接并完成首次同步。"
+              : response.coverage?.outcome.status === "partial"
+                ? response.coverage.outcome.reasons.length === 1 &&
+                  response.coverage.outcome.reasons[0] === "unverified-coverage"
+                  ? `账号已连接，已获取 ${response.coverage.acceptedRecords} 条记录；所选范围的完整性尚未验证。`
+                  : "账号已连接，首次同步未完整完成，请查看提示。"
+                : "账号已连接，首次同步覆盖状态未知，请查看提示。",
       );
       onAuthorized(response);
     } catch (error) {

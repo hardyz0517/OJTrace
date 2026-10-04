@@ -1,3 +1,11 @@
+import {
+  hydroDomainFromUrl,
+  hydroDomainPrefix,
+  hydroScopedUrl,
+  isHydroScopeUrl,
+} from "../../domain/hydro-scope";
+import type { ActivityScheduleRecord } from "../../domain/activity-schedule";
+
 export interface HydroOJRawRecord {
   _id?: string;
   rid?: string;
@@ -21,7 +29,68 @@ export interface HydroOJRecordPage {
   page: number;
   rdocs: HydroOJRawRecord[];
   hasMore: boolean;
+  /** Whether hasMore was explicitly supplied by the verified response contract. */
+  paginationKnown?: boolean;
   authenticated: boolean;
+  activitySchedule?: Pick<
+    ActivityScheduleRecord,
+    "activityId" | "beginAt" | "endAt"
+  >;
+}
+
+function activityTimestamp(value: unknown): number | undefined {
+  // Hydro serializes Date fields as ISO strings, not Unix seconds.
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+      value,
+    )
+  )
+    return;
+  const timestamp = Date.parse(value);
+  return Number.isSafeInteger(timestamp) && timestamp >= 0
+    ? timestamp
+    : undefined;
+}
+
+function parseActivitySchedule(
+  value: unknown,
+  responseUrl?: string,
+): HydroOJRecordPage["activitySchedule"] {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !responseUrl
+  )
+    return;
+  const tdoc = value as Record<string, unknown>;
+  const url = new URL(responseUrl);
+  const requestedId = url.searchParams.get("tid");
+  if (
+    typeof tdoc.docId !== "string" ||
+    !isObjectId(tdoc.docId) ||
+    tdoc.docId.toLowerCase() !== requestedId?.toLowerCase() ||
+    (hydroDomainFromUrl(responseUrl) !== undefined &&
+      tdoc.domainId !== undefined &&
+      tdoc.domainId !== hydroDomainFromUrl(responseUrl)) ||
+    typeof tdoc.rule !== "string" ||
+    ![
+      "homework",
+      "oi",
+      "ioi",
+      "acm",
+      "noi",
+      "codeforces",
+      "strictioi",
+      "ledo",
+    ].includes(tdoc.rule)
+  )
+    return;
+  const beginAt = activityTimestamp(tdoc.beginAt);
+  const endAt = activityTimestamp(tdoc.endAt);
+  if (beginAt === undefined || endAt === undefined || beginAt >= endAt) return;
+  return { activityId: tdoc.docId.toLowerCase(), beginAt, endAt };
 }
 
 export interface HydroActivity {
@@ -87,6 +156,7 @@ export function parseHydroUserActivities(
   responseUrl: string,
 ): HydroActivity[] {
   const origin = new URL(responseUrl).origin;
+  const domainId = hydroDomainFromUrl(responseUrl);
   const result = new Map<string, HydroActivity>();
   const linkPattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   for (const match of text.matchAll(linkPattern)) {
@@ -98,8 +168,11 @@ export function parseHydroUserActivities(
     } catch {
       continue;
     }
-    if (url.origin !== origin) continue;
-    const parts = url.pathname.split("/").filter(Boolean);
+    if (!isHydroScopeUrl({ origin, domainId }, url.href)) continue;
+    const parts = url.pathname
+      .slice(hydroDomainPrefix(domainId).length)
+      .split("/")
+      .filter(Boolean);
     if (parts.length !== 2 || !["contest", "homework"].includes(parts[0]!))
       continue;
     const id = parts[1]!;
@@ -110,7 +183,7 @@ export function parseHydroUserActivities(
       id,
       title,
       type: parts[0] === "homework" ? "homework" : "contest",
-      url: new URL(`/${parts[0]}/${id}`, origin).href,
+      url: hydroScopedUrl({ origin, domainId }, `/${parts[0]}/${id}`),
     });
   }
   return [...result.values()];
@@ -125,6 +198,7 @@ export function parseHydroUserActivitiesJson(
   const tdocs = (value as { tdocs?: unknown }).tdocs;
   if (!Array.isArray(tdocs)) throw new Error("Unsupported user page");
   const origin = new URL(responseUrl).origin;
+  const domainId = hydroDomainFromUrl(responseUrl);
   const activities = new Map<string, HydroActivity>();
   let invalidCount = 0;
   for (const raw of tdocs) {
@@ -155,7 +229,7 @@ export function parseHydroUserActivitiesJson(
       type,
       ...(type === "other"
         ? {}
-        : { url: new URL(`/${type}/${id}`, origin).href }),
+        : { url: hydroScopedUrl({ origin, domainId }, `/${type}/${id}`) }),
     });
   }
   return { activities: [...activities.values()], invalidCount };
@@ -227,7 +301,7 @@ export function parseHydroOJRecordPage(
       memory: memoryInKiB(memoryText),
       lang: lang || undefined,
       submitAt: timestamp,
-      submissionUrl: `/record/${encodeURIComponent(rid)}`,
+      submissionUrl: `${hydroDomainPrefix(responseUrl ? hydroDomainFromUrl(responseUrl) : undefined)}/record/${encodeURIComponent(rid)}`,
       problemUrl: problem?.[1] ? decodeHtml(problem[1]) : undefined,
     } satisfies HydroOJRawRecord;
   });
@@ -237,6 +311,7 @@ export function parseHydroOJRecordPage(
     hasMore: /class=["'][^"']*pager__item[^"']*next[^"']*["'][^>]+href=/i.test(
       text,
     ),
+    paginationKnown: true,
     authenticated: true,
   };
 }
@@ -255,6 +330,9 @@ export function parseHydroOJJsonRecordPage(
     throw new Error("HydroOJ response is not an object");
   }
   const response = value as Record<string, unknown>;
+  const prefix = hydroDomainPrefix(
+    responseUrl ? hydroDomainFromUrl(responseUrl) : undefined,
+  );
   if (!Array.isArray(response.rdocs) || typeof response.page !== "number") {
     throw new Error(
       "HydroOJ response does not match the verified record-page contract",
@@ -271,8 +349,12 @@ export function parseHydroOJJsonRecordPage(
   ) {
     throw new Error("HydroOJ response contains an invalid record");
   }
+  const paginationKnown =
+    Object.prototype.hasOwnProperty.call(response, "hasMore") &&
+    typeof response.hasMore === "boolean";
   return {
     page: response.page,
+    activitySchedule: parseActivitySchedule(response.tdoc, responseUrl),
     rdocs: (response.rdocs as HydroOJRawRecord[]).map((raw) => {
       const pdict = response.pdict as
         Record<string, Record<string, unknown>> | undefined;
@@ -294,7 +376,7 @@ export function parseHydroOJJsonRecordPage(
       const problemPath =
         routePid === undefined
           ? undefined
-          : `/p/${encodeURIComponent(String(routePid))}${tid && isObjectId(tid) ? `?tid=${encodeURIComponent(tid)}` : ""}`;
+          : `${prefix}/p/${encodeURIComponent(String(routePid))}${tid && isObjectId(tid) ? `?tid=${encodeURIComponent(tid)}` : ""}`;
       return {
         ...raw,
         pid:
@@ -306,17 +388,11 @@ export function parseHydroOJJsonRecordPage(
             ? textOf(problem.title)
             : raw.problemName,
         problemUrl: problemPath ?? raw.problemUrl,
-        submissionUrl: `/record/${encodeURIComponent(String(raw._id ?? raw.rid))}`,
+        submissionUrl: `${prefix}/record/${encodeURIComponent(String(raw._id ?? raw.rid))}`,
       };
     }),
-    hasMore: false,
+    hasMore: paginationKnown ? response.hasMore === true : false,
+    paginationKnown,
     authenticated: true,
   };
-}
-
-/** JSON contract assertion for callers that explicitly require JSON. */
-export function assertHydroOJJsonResponse(contentType: string): void {
-  if (!/\bjson\b/i.test(contentType)) {
-    throw new Error("HydroOJ response is not a supported JSON API response");
-  }
 }

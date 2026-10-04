@@ -97,24 +97,6 @@ describe("AtCoder adapter", () => {
     });
   });
 
-  it("accepts the identity read from the logged-in AtCoder page", async () => {
-    const account = await atcoderAdapter.detectBrowserSession!({
-      signal: new AbortController().signal,
-      requestId: "request",
-      pageIdentity: "Hardy_Zheng",
-      http: {
-        request: async () => {
-          throw new Error("page identity should avoid service-worker fetch");
-        },
-      },
-    });
-    expect(account).toEqual({
-      authenticated: true,
-      status: "authenticated",
-      username: "Hardy_Zheng",
-    });
-  });
-
   it("wraps a manual token as the REVEL_SESSION cookie", async () => {
     const requests: Array<{
       url: string;
@@ -122,6 +104,9 @@ describe("AtCoder adapter", () => {
     }> = [];
     await expect(
       atcoderAdapter.fetchRecent({
+        since: 0,
+        until: Number.MAX_SAFE_INTEGER,
+        pagination: { runPage: ({ request }) => request() },
         account: {
           accountId: "local",
           source: "atcoder",
@@ -152,7 +137,7 @@ describe("AtCoder adapter", () => {
         },
       }),
     ).resolves.toMatchObject({ records: [] });
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(2);
     expect(requests[0]?.headers?.Cookie).toBeUndefined();
     expect(requests[1]?.url).toBe(
       "https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions?user=Hardy_Zheng&from_second=0",

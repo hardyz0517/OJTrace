@@ -81,28 +81,38 @@ export function hydroOJLanguageDisplayName(value: unknown): string | undefined {
   return HYDRO_LANGUAGE_LABELS[key] ?? key;
 }
 
-function recordTimestamp(raw: HydroOJRawRecord): number {
+function recordTimestamp(raw: HydroOJRawRecord): {
+  timestamp: number;
+  basis: "submit-at" | "object-id";
+} {
   const explicit = parseTimestamp(raw.submitAt);
-  if (explicit !== undefined) return explicit;
+  if (explicit !== undefined)
+    return { timestamp: explicit, basis: "submit-at" };
+  if (raw.submitAt !== undefined)
+    throw new Error("HydroOJ record has an invalid submission timestamp");
   const id = raw._id ?? raw.rid;
   if (id && /^[0-9a-f]{24}$/i.test(id))
-    return parseInt(id.slice(0, 8), 16) * 1000;
-  const judged = parseTimestamp(raw.judgeAt);
-  if (judged !== undefined) return judged;
+    return {
+      timestamp: parseInt(id.slice(0, 8), 16) * 1000,
+      basis: "object-id",
+    };
   throw new Error("HydroOJ record has no valid timestamp");
 }
 
 function parseTimestamp(
   value: HydroOJRawRecord["submitAt"],
 ): number | undefined {
-  if (value instanceof Date) return value.getTime();
-  if (typeof value === "number") return value < 1e12 ? value * 1000 : value;
+  const valid = (timestamp: number) =>
+    Number.isSafeInteger(timestamp) && timestamp >= 0 ? timestamp : undefined;
+  if (value instanceof Date) return valid(value.getTime());
+  if (typeof value === "number")
+    return valid(value < 1e12 ? value * 1000 : value);
   if (typeof value === "string") {
     const numeric = Number(value);
-    if (Number.isFinite(numeric))
-      return numeric < 1e12 ? numeric * 1000 : numeric;
+    if (value.trim() && Number.isFinite(numeric))
+      return valid(numeric < 1e12 ? numeric * 1000 : numeric);
     const parsed = Date.parse(value);
-    if (Number.isFinite(parsed)) return parsed;
+    if (Number.isFinite(parsed)) return valid(parsed);
   }
   return undefined;
 }
@@ -112,6 +122,7 @@ export function normalizeHydroOJSubmission(raw: HydroOJRawRecord): {
   problemId: string;
   problemName?: string;
   submittedAt: number;
+  timestampBasis: "submit-at" | "object-id";
   verdict: { code: VerdictCode; raw: string };
   score?: number;
   timeMs?: number;
@@ -125,7 +136,7 @@ export function normalizeHydroOJSubmission(raw: HydroOJRawRecord): {
     throw new Error("HydroOJ record has no stable id");
   const rawStatus = String(raw.statusText ?? raw.status ?? "unknown");
   const status = rawStatus.toLowerCase();
-  const timestamp = recordTimestamp(raw);
+  const { timestamp, basis } = recordTimestamp(raw);
   if (!Number.isFinite(timestamp))
     throw new Error("HydroOJ record has an invalid timestamp");
   return {
@@ -133,6 +144,7 @@ export function normalizeHydroOJSubmission(raw: HydroOJRawRecord): {
     problemId: raw.pid === undefined ? `record-${id}` : String(raw.pid),
     ...(raw.problemName ? { problemName: String(raw.problemName).trim() } : {}),
     submittedAt: timestamp,
+    timestampBasis: basis,
     verdict: {
       code: VERDICTS[status] ?? VERDICTS[String(raw.status)] ?? "other",
       raw: rawStatus,

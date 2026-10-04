@@ -51,6 +51,7 @@ export function mergeSubmission(
       incoming.providerAccountKey,
     ),
     origin: prefer(current.origin, incoming.origin),
+    domainId: prefer(current.domainId, incoming.domainId),
     problemName: prefer(current.problemName, incoming.problemName),
     language: prefer(current.language, incoming.language),
     submissionUrl: prefer(current.submissionUrl, incoming.submissionUrl),

@@ -30,6 +30,9 @@ function input(http: HttpClient, uid: string): FetchInput {
     requestId: "r",
     now: 1,
     limit: 100,
+    since: 0,
+    until: 1,
+    pagination: { runPage: ({ request }) => request() },
   };
 }
 describe("Hydro session ownership", () => {

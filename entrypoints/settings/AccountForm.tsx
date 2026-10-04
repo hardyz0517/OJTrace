@@ -94,13 +94,25 @@ export function AccountForm({
           {form.source === "hydroj" && (
             <div className="auth-panel public-panel">
               <label>
-                <span>HydroOJ 实例地址</span>
+                <span>实例名字（可选）</span>
+                <input
+                  value={form.label}
+                  maxLength={80}
+                  onChange={(event) =>
+                    state.updateForm({ label: event.target.value })
+                  }
+                  placeholder="HydroOJ"
+                  autoComplete="off"
+                />
+              </label>
+              <label>
+                <span>HydroOJ 实例或域地址</span>
                 <input
                   value={form.origin}
                   onChange={(event) =>
                     state.updateForm({ origin: event.target.value })
                   }
-                  placeholder="https://hydro.ac"
+                  placeholder="https://hydro.ac/d/student/"
                   autoComplete="off"
                 />
               </label>

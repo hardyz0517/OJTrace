@@ -1,5 +1,4 @@
 import { buildIdentityKey } from "../../domain/account-identity";
-import { mergeSubmissions } from "../../domain/merge";
 import type {
   AccountAuthMode,
   AccountConfig,
@@ -8,27 +7,30 @@ import type {
   CanonicalAccount,
   CredentialRecord,
   InstanceBrandingRecord,
-  Submission,
   StoredData,
   HttpClient,
   SourceId,
   AdapterError,
   Diagnostic,
+  SyncCoverage,
 } from "../../domain";
-import { AdapterFailure } from "../../domain/errors";
 import { adapterBySource } from "../../adapters";
 import { createHydroOJInstance } from "../../adapters/hydroj/instance";
 import { AccountCommandError } from "./account-errors";
 import type { StoragePort } from "../storage/store";
-import { refreshInstanceBranding } from "../sync/instance-branding";
+import {
+  accountCollectorFor,
+  type AccountCollector,
+  type AccountCollection,
+} from "../sync/collect-account";
+import { commitCollections } from "../sync/commit-collection";
+import { resolveSyncWindow, SyncRangeError } from "../../domain";
 import { updateBrandingCache } from "../../domain/instance-branding";
-import { instanceBrandingFor } from "./account-queries";
 
 export interface AuthorizedAccountInput {
   requested: AccountConfig;
   credentials?: AccountCredentials;
   canonical: CanonicalAccount;
-  records?: Submission[];
   branding?: InstanceBrandingRecord;
   now: number;
 }
@@ -39,6 +41,7 @@ export interface AccountService {
     account: AccountRecord;
     syncError?: AdapterError;
     diagnostics: Diagnostic[];
+    coverage?: SyncCoverage;
     superseded: boolean;
   }>;
   upsertAuthorized(input: AuthorizedAccountInput): Promise<{
@@ -47,14 +50,17 @@ export interface AccountService {
   }>;
   remove(accountId: string): Promise<StoredData>;
   clearAll(): Promise<StoredData>;
+  cancelPending(): void;
 }
 
 export interface AuthorizeAccountCommand {
   source: SourceId;
   authMode: AccountAuthMode;
   identifier?: string;
+  label?: string;
   credentials?: AccountCredentials;
   origin?: string;
+  domainId?: string;
   requestId: string;
 }
 
@@ -62,6 +68,7 @@ export interface AccountServiceDependencies {
   http: HttpClient;
   ensurePermission(source: SourceId, origin?: string): Promise<boolean>;
   now?: () => number;
+  collector?: AccountCollector;
 }
 
 function credentialRecord(
@@ -77,10 +84,15 @@ export function createAccountService(
   storage: StoragePort,
   dependencies?: AccountServiceDependencies,
 ): AccountService {
+  let authorizationSequence = 0;
+  let authorizationGeneration = 0;
+  const completedAuthorizations = new Map<string, number>();
   const service: AccountService = {
     async authorize(command) {
       if (!dependencies)
         throw new AccountCommandError("unsupported", "account.unavailable");
+      const sequence = ++authorizationSequence;
+      const generation = authorizationGeneration;
       const adapter = adapterBySource.get(command.source);
       const mode = adapter?.metadata.authModes.find(
         (item) => item.type === command.authMode,
@@ -126,16 +138,20 @@ export function createAccountService(
               }),
             );
       let origin: string | undefined;
+      let domainId: string | undefined;
       if (command.source === "hydroj") {
         try {
-          origin = createHydroOJInstance(command.origin).origin;
+          ({ origin, domainId } = createHydroOJInstance(
+            command.origin,
+            command.domainId,
+          ));
         } catch {
           throw new AccountCommandError(
             "invalid-origin",
             "account.invalidOrigin",
           );
         }
-      } else if (command.origin !== undefined)
+      } else if (command.origin !== undefined || command.domainId !== undefined)
         throw new AccountCommandError(
           "invalid-origin",
           "account.invalidOrigin",
@@ -151,126 +167,124 @@ export function createAccountService(
         source: command.source,
         authMode: command.authMode,
         identifier,
+        ...(command.source === "hydroj"
+          ? { label: command.label?.trim() || "HydroOJ" }
+          : {}),
         origin,
-        enabled: false,
+        ...(domainId === undefined ? {} : { domainId }),
+        enabled: true,
       };
       const input = {
         account: requested,
         credentials,
-        limit: 1_000,
-        since: now - 30 * 24 * 60 * 60 * 1_000,
         signal: new AbortController().signal,
         now,
         requestId: command.requestId,
         http: dependencies.http,
       };
       const canonical = await adapter.authorize(input);
+      const identityKey = buildIdentityKey({
+        source: canonical.source,
+        origin: requested.origin,
+        domainId: requested.domainId,
+        providerAccountKey: canonical.providerAccountKey,
+      });
+      if (
+        generation !== authorizationGeneration ||
+        sequence < (completedAuthorizations.get(identityKey) ?? 0)
+      )
+        throw new AccountCommandError(
+          "superseded",
+          "account.operationSuperseded",
+        );
+      completedAuthorizations.set(identityKey, sequence);
       const saved = await service.upsertAuthorized({
         requested,
         credentials,
         canonical,
         now,
       });
-      let records: Submission[] = [];
-      let branding: InstanceBrandingRecord | undefined;
-      let syncError: AdapterError | undefined;
+      (
+        dependencies.collector ??
+        accountCollectorFor(storage, dependencies.http)
+      ).invalidate(saved.account.accountId, saved.account.credentialRevision);
+      let collection: AccountCollection | undefined;
       let diagnostics: Diagnostic[] = [];
       try {
-        const fetched = await adapter.fetchRecent({
-          ...input,
-          account: saved.account,
+        const window = resolveSyncWindow({
+          now,
+          preference: saved.data.preferences.syncRange,
         });
-        if (fetched.account.providerAccountKey !== canonical.providerAccountKey)
-          throw new AdapterFailure({
-            kind: "auth_required",
-            source: command.source,
-            stage: "identity",
-            messageKey: "account.identityChanged",
-            retryable: false,
-            userAction: "edit_account",
-            requestId: command.requestId,
-          });
-        records = fetched.records;
-        diagnostics = fetched.diagnostics;
-        if (adapter.fetchInstanceBranding) {
-          try {
-            const refreshed = await refreshInstanceBranding(
-              adapter,
-              {
-                ...input,
-                account: saved.account,
-              },
-              instanceBrandingFor(saved.data, saved.account),
-            );
-            branding = refreshed.branding;
-            diagnostics = diagnostics.concat(refreshed.diagnostics);
-          } catch {
-            /* Optional cache cannot invalidate records. */
-          }
-        }
-      } catch (error) {
-        syncError =
-          error instanceof AdapterFailure
-            ? error.error
-            : {
-                kind: "unknown",
-                source: command.source,
-                stage: "request",
-                messageKey: "source.unknownError",
-                retryable: false,
-                requestId: command.requestId,
-              };
-      }
-      const data = await storage.transact((current) => {
-        const active = current.accounts.find(
-          (item) => item.accountId === saved.account.accountId,
-        );
-        if (
-          !active ||
-          active.credentialRevision !== saved.account.credentialRevision
-        )
-          return current;
-        const account = { ...active, enabled: !syncError };
-        return {
-          ...current,
-          accounts: current.accounts.map((item) =>
-            item.accountId === active.accountId ? account : item,
-          ),
-          submissions: mergeSubmissions(
-            current.submissions,
-            records,
-            current.preferences.retentionPerAccount,
-          ),
-          syncStates: {
-            ...current.syncStates,
-            [active.accountId]: {
-              stale: Boolean(syncError),
-              lastAttemptAt: now,
-              lastSuccessAt: syncError
-                ? current.syncStates[active.accountId]?.lastSuccessAt
-                : now,
-              lastError: syncError,
+        collection = await (
+          dependencies.collector ??
+          accountCollectorFor(storage, dependencies.http)
+        ).collect({ account: saved.account, window, now });
+        diagnostics = collection.result.diagnostics;
+        if (collection.result.skipped)
+          diagnostics = [
+            ...diagnostics,
+            {
+              source: command.source,
+              code: "sync-skipped",
+              severity: "info",
+              messageKey: `sync.${collection.result.skipped}`,
+              retryable: false,
             },
+          ];
+      } catch (error) {
+        if (!(error instanceof SyncRangeError)) throw error;
+        diagnostics = [
+          {
+            source: command.source,
+            code: "invalid-sync-range",
+            severity: "warning",
+            messageKey: "sync.invalidRange",
+            retryable: false,
           },
-          instanceBranding: updateBrandingCache(
-            current.instanceBranding,
-            branding ? [branding] : [],
-          ),
-        };
-      });
+        ];
+      }
+      const data = await storage.transact((current) =>
+        collection &&
+        (
+          dependencies.collector ??
+          accountCollectorFor(storage, dependencies.http)
+        ).isCurrent(collection)
+          ? commitCollections(current, [collection])
+          : current,
+      );
+      const collectionCurrent =
+        !collection ||
+        (
+          dependencies.collector ??
+          accountCollectorFor(storage, dependencies.http)
+        ).isCurrent(collection);
       return {
         data,
         account:
           data.accounts.find(
             (item) => item.accountId === saved.account.accountId,
           ) ?? saved.account,
-        syncError,
-        diagnostics,
-        superseded: !data.accounts.some(
-          (item) =>
-            item.accountId === saved.account.accountId &&
-            item.credentialRevision === saved.account.credentialRevision,
-        ),
+        syncError: collectionCurrent ? collection?.result.error : undefined,
+        coverage: collectionCurrent ? collection?.result.coverage : undefined,
+        diagnostics: collectionCurrent
+          ? diagnostics
+          : [
+              ...diagnostics,
+              {
+                source: command.source,
+                code: "sync-cancelled",
+                severity: "warning",
+                messageKey: "sync.cancelled",
+                retryable: false,
+              },
+            ],
+        superseded:
+          !collectionCurrent ||
+          !data.accounts.some(
+            (item) =>
+              item.accountId === saved.account.accountId &&
+              item.credentialRevision === saved.account.credentialRevision,
+          ),
       };
     },
     async upsertAuthorized(input) {
@@ -279,6 +293,7 @@ export function createAccountService(
         const identityKey = buildIdentityKey({
           source: input.canonical.source,
           origin: input.requested.origin,
+          domainId: input.requested.domainId,
           providerAccountKey: input.canonical.providerAccountKey,
         });
         const existing = current.accounts.find(
@@ -288,8 +303,11 @@ export function createAccountService(
         account = {
           source: input.requested.source,
           authMode: input.requested.authMode,
-          enabled: input.requested.enabled,
+          enabled: existing?.enabled ?? input.requested.enabled,
           ...(input.requested.origin ? { origin: input.requested.origin } : {}),
+          ...(input.requested.domainId
+            ? { domainId: input.requested.domainId }
+            : {}),
           ...((input.requested.label ?? existing?.label)
             ? { label: input.requested.label ?? existing?.label }
             : {}),
@@ -317,12 +335,7 @@ export function createAccountService(
         if (record) credentials.push(record);
         const syncStates = {
           ...current.syncStates,
-          [accountId]: {
-            stale: input.records === undefined,
-            ...(input.records === undefined
-              ? {}
-              : { lastAttemptAt: input.now, lastSuccessAt: input.now }),
-          },
+          [accountId]: { ...current.syncStates[accountId], stale: true },
         };
         const instanceBranding = updateBrandingCache(
           current.instanceBranding,
@@ -332,13 +345,6 @@ export function createAccountService(
           ...current,
           accounts,
           credentials,
-          submissions: input.records
-            ? mergeSubmissions(
-                current.submissions,
-                input.records.map((item) => ({ ...item, accountId })),
-                current.preferences.retentionPerAccount,
-              )
-            : current.submissions,
           syncStates,
           instanceBranding,
         };
@@ -348,6 +354,11 @@ export function createAccountService(
     },
 
     async remove(accountId) {
+      if (dependencies)
+        (
+          dependencies.collector ??
+          accountCollectorFor(storage, dependencies.http)
+        ).cancel(accountId);
       return storage.transact((current) => ({
         ...current,
         accounts: current.accounts.filter(
@@ -376,6 +387,7 @@ export function createAccountService(
     },
 
     async clearAll() {
+      service.cancelPending();
       return storage.transact((current) => ({
         ...current,
         accounts: [],
@@ -383,8 +395,17 @@ export function createAccountService(
         submissions: [],
         syncStates: {},
         instanceBranding: {},
+        activitySchedules: {},
         preferences: { ...current.preferences, syncAccountIds: [] },
       }));
+    },
+    cancelPending() {
+      authorizationGeneration += 1;
+      if (dependencies)
+        (
+          dependencies.collector ??
+          accountCollectorFor(storage, dependencies.http)
+        ).cancelAll();
     },
   };
   return service;

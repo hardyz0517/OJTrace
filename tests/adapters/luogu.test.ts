@@ -5,7 +5,6 @@ import { luoguAdapter } from "../../src/adapters/luogu";
 import {
   parseLuoguDocument,
   parseLuoguIdentityDocument,
-  parseLuoguResponse,
 } from "../../src/adapters/luogu/parser";
 
 describe("Luogu parser and normalizer", () => {
@@ -67,6 +66,9 @@ describe("Luogu parser and normalizer", () => {
   it("accepts a full manual cookie without requiring a UID", async () => {
     let options: Record<string, unknown> | undefined;
     const result = await luoguAdapter.fetchRecent({
+      since: 0,
+      until: Number.MAX_SAFE_INTEGER,
+      pagination: { runPage: ({ request }) => request() },
       account: {
         accountId: "account",
         source: "luogu",
@@ -129,7 +131,7 @@ describe("Luogu parser and normalizer", () => {
   });
 
   it("parses the documented JSON-shaped fixture", () => {
-    const records = parseLuoguResponse(
+    const { records } = parseLuoguDocument(
       JSON.stringify({
         currentData: {
           records: {
@@ -292,7 +294,7 @@ describe("Luogu parser and normalizer", () => {
 
   it("rejects login HTML instead of treating it as empty", () => {
     expect(() =>
-      parseLuoguResponse("<!doctype html><html><body>Login</body></html>"),
+      parseLuoguDocument("<!doctype html><html><body>Login</body></html>"),
     ).toThrow("login page");
   });
 
@@ -344,6 +346,9 @@ describe("Luogu parser and normalizer", () => {
     let requestCalls = 0;
     await expect(
       luoguAdapter.fetchRecent({
+        since: 0,
+        until: Number.MAX_SAFE_INTEGER,
+        pagination: { runPage: ({ request }) => request() },
         account: {
           accountId: "account",
           source: "luogu",
@@ -375,6 +380,9 @@ describe("Luogu parser and normalizer", () => {
   it("recognizes a login error embedded in a successful HTTP response", async () => {
     await expect(
       luoguAdapter.fetchRecent({
+        since: 0,
+        until: Number.MAX_SAFE_INTEGER,
+        pagination: { runPage: ({ request }) => request() },
         account: {
           accountId: "account",
           source: "luogu",
@@ -407,6 +415,9 @@ describe("Luogu parser and normalizer", () => {
   it("maps HTTP 429 to a source rate-limit error", async () => {
     await expect(
       luoguAdapter.fetchRecent({
+        since: 0,
+        until: Number.MAX_SAFE_INTEGER,
+        pagination: { runPage: ({ request }) => request() },
         account: {
           accountId: "account",
           source: "luogu",
@@ -466,6 +477,9 @@ describe("Luogu parser and normalizer", () => {
       },
     };
     const result = await luoguAdapter.fetchRecent({
+      since: 1_699_500_000_000,
+      until: Number.MAX_SAFE_INTEGER,
+      pagination: { runPage: ({ request }) => request() },
       account: {
         accountId: "account",
         source: "luogu",
@@ -474,7 +488,7 @@ describe("Luogu parser and normalizer", () => {
         authMode: "browser-session",
       },
       limit: 1_000,
-      since: 1_699_500_000_000,
+
       signal: new AbortController().signal,
       now: 1_700_000_001_000,
       requestId: "request",
@@ -518,6 +532,9 @@ describe("Luogu parser and normalizer", () => {
       ],
     ]);
     const result = await luoguAdapter.fetchRecent({
+      since: 0,
+      until: Number.MAX_SAFE_INTEGER,
+      pagination: { runPage: ({ request }) => request() },
       account: {
         accountId: "account",
         source: "luogu",

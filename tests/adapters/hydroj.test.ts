@@ -10,10 +10,7 @@ import {
   HYDROOJ_OFFICIAL_ORIGIN,
 } from "../../src/adapters/hydroj/instance";
 import { normalizeHydroOJSubmission } from "../../src/adapters/hydroj/normalizer";
-import {
-  assertHydroOJJsonResponse,
-  parseHydroOJRecordPage,
-} from "../../src/adapters/hydroj/parser";
+import { parseHydroOJRecordPage } from "../../src/adapters/hydroj/parser";
 
 const fixture = (name: string) =>
   readFileSync(
@@ -172,9 +169,6 @@ describe("HydroOJ research utilities", () => {
   });
 
   it("never treats challenge HTML or an unknown body as an empty page", () => {
-    expect(() =>
-      assertHydroOJJsonResponse("text/html; charset=utf-8"),
-    ).toThrow();
     expect(() => parseHydroOJRecordPage(fixture("challenge.html"))).toThrow();
     expect(() => parseHydroOJRecordPage('{"page":1,"rdocs":[]}')).not.toThrow();
   });
@@ -241,6 +235,9 @@ describe("HydroOJ research utilities", () => {
       },
       credentials: { username: "test-user", password: "test-password" },
       limit: 100,
+      since: 0,
+      until: Date.now(),
+      pagination: { runPage: ({ request }) => request() },
       signal: new AbortController().signal,
       now: Date.now(),
       requestId: "request-1",
@@ -264,7 +261,7 @@ describe("HydroOJ research utilities", () => {
     expect(result.records).toHaveLength(1);
   });
 
-  it("continues JSON record pages until the requested time window is covered", async () => {
+  it("continues JSON pages until a verified tail when explicit timestamps lack an ordering contract", async () => {
     const requests: string[] = [];
     const page = (number: number, judgeAt: string) =>
       JSON.stringify({
@@ -290,6 +287,8 @@ describe("HydroOJ research utilities", () => {
       },
       limit: 1_000,
       since: Date.parse("2026-01-01T00:00:00.000Z"),
+      until: Date.parse("2026-01-03T00:00:00.000Z"),
+      pagination: { runPage: ({ request }) => request() },
       signal: new AbortController().signal,
       now: Date.parse("2026-01-03T00:00:00.000Z"),
       requestId: "request-3",
@@ -316,16 +315,18 @@ describe("HydroOJ research utilities", () => {
             status: 200,
             url,
             contentType: "application/json",
-            text: url.includes("page=2")
-              ? page(2, "2025-12-31T00:00:00.000Z")
-              : page(1, "2026-01-02T00:00:00.000Z"),
+            text: url.includes("page=3")
+              ? '{"page":3,"rdocs":[]}'
+              : url.includes("page=2")
+                ? page(2, "2025-12-31T00:00:00.000Z")
+                : page(1, "2026-01-02T00:00:00.000Z"),
             headers: new Headers(),
           };
         },
       },
     });
 
-    expect(requests).toHaveLength(4);
+    expect(requests).toHaveLength(5);
     expect(requests[2]).toContain("page=2");
     expect(result.records).toHaveLength(1);
     expect(result.records[0]?.problemId).toBe("P1");
@@ -356,6 +357,9 @@ describe("HydroOJ research utilities", () => {
         },
         credentials: { username: "test-user", password: "test-password" },
         limit: 100,
+        since: 0,
+        until: Date.now(),
+        pagination: { runPage: ({ request }) => request() },
         signal: new AbortController().signal,
         now: Date.now(),
         requestId: "request-2",

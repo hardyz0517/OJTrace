@@ -7,10 +7,6 @@ export function luoguRecordListUrl(identifier: string, page = 1): string {
   return `${LUOGU_ORIGIN}/record/list?user=${encodeURIComponent(identifier)}&page=${page}&_contentOnly=1`;
 }
 
-export function luoguRecordListBaseUrl(): string {
-  return `${LUOGU_ORIGIN}/record/list`;
-}
-
 export function luoguUserSettingUrl(): string {
   return `${LUOGU_ORIGIN}/user/setting?_contentOnly=1`;
 }

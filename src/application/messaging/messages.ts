@@ -1,7 +1,6 @@
 import {
   MESSAGE_SCHEMA_VERSION,
   type AccountAuthMode,
-  type AccountConfig,
   type AccountRecord,
   type BrowserSessionAccount,
   type SourceId,
@@ -11,6 +10,87 @@ import {
 } from "../../domain";
 import type { PublicStoredData } from "../accounts/account-queries";
 import type { SyncResult } from "../sync/sync-service";
+import type { SyncCoverage } from "../../domain";
+import type { AccountSyncProgress } from "../../domain/sync-progress";
+import { isHydroDomainId } from "../../domain/hydro-scope";
+
+function isDomainScopeValid(source: unknown, domainId: unknown): boolean {
+  return (
+    domainId === undefined || (source === "hydroj" && isHydroDomainId(domainId))
+  );
+}
+
+/** Ephemeral notifications, scoped to one SYNC_REQUEST; never persisted. */
+export interface SyncProgressEvent {
+  schemaVersion: 2;
+  type: "SYNC_PROGRESS";
+  requestId: string;
+  sequence: number;
+  progress: AccountSyncProgress;
+}
+
+export function isSyncProgressEvent(
+  value: unknown,
+): value is SyncProgressEvent {
+  if (!value || typeof value !== "object") return false;
+  const event = value as Partial<SyncProgressEvent>;
+  const progress = event.progress;
+  const count = (value: unknown) =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  return Boolean(
+    event.schemaVersion === MESSAGE_SCHEMA_VERSION &&
+    event.type === "SYNC_PROGRESS" &&
+    typeof event.requestId === "string" &&
+    event.requestId.length > 0 &&
+    count(event.sequence) &&
+    progress &&
+    typeof progress.accountId === "string" &&
+    ["codeforces", "luogu", "qoj", "hydroj", "atcoder"].includes(
+      progress.source,
+    ) &&
+    [
+      "running",
+      "complete",
+      "partial",
+      "failed",
+      "skipped",
+      "cancelled",
+    ].includes(progress.status) &&
+    [
+      "queued",
+      "identity",
+      "list",
+      "activities",
+      "details",
+      "branding",
+      "done",
+    ].includes(progress.phase) &&
+    count(progress.pagesFetched) &&
+    count(progress.recordsFetched) &&
+    [
+      progress.pageEstimate,
+      progress.activitiesCompleted,
+      progress.activitiesTotal,
+      progress.detailsCompleted,
+      progress.detailsTotal,
+    ].every((value) => value === undefined || count(value)) &&
+    (progress.messageKey === undefined ||
+      typeof progress.messageKey === "string") &&
+    (progress.reasons === undefined ||
+      (Array.isArray(progress.reasons) &&
+        progress.reasons.every((reason) => typeof reason === "string"))) &&
+    (progress.diagnostics === undefined ||
+      (Array.isArray(progress.diagnostics) &&
+        progress.diagnostics.every(
+          (item) =>
+            item &&
+            typeof item.messageKey === "string" &&
+            ["info", "warning", "error"].includes(item.severity) &&
+            (item.context?.activityName === undefined ||
+              typeof item.context.activityName === "string"),
+        ))),
+  );
+}
 
 export type RuntimeMessage =
   | { schemaVersion: 2; type: "GET_STATE"; requestId: string }
@@ -19,6 +99,7 @@ export type RuntimeMessage =
       type: "SYNC_REQUEST";
       requestId: string;
       force: boolean;
+      recheckActivities?: boolean;
       accountIds?: string[];
       since?: number;
       until?: number;
@@ -46,17 +127,11 @@ export type RuntimeMessage =
   | { schemaVersion: 2; type: "CLEAR_SUBMISSIONS"; requestId: string }
   | {
       schemaVersion: 2;
-      type: "REQUEST_HOST_PERMISSION";
-      requestId: string;
-      source: AccountConfig["source"];
-    }
-  | {
-      schemaVersion: 2;
       type: "DETECT_BROWSER_SESSION";
       requestId: string;
       source: SourceId;
       origin?: string;
-      pageIdentity?: string;
+      domainId?: string;
     }
   | {
       schemaVersion: 2;
@@ -65,8 +140,11 @@ export type RuntimeMessage =
       source: SourceId;
       authMode: AccountAuthMode;
       identifier?: string;
+      /** Optional user-facing HydroOJ instance name. */
+      label?: string;
       credentials?: Record<string, string>;
       origin?: string;
+      domainId?: string;
     };
 
 export type RuntimeResponse =
@@ -101,17 +179,12 @@ export type RuntimeResponse =
       schemaVersion: 2;
       requestId: string;
       ok: true;
-      type: "PERMISSION";
-      granted: boolean;
-    }
-  | {
-      schemaVersion: 2;
-      requestId: string;
-      ok: true;
       type: "AUTHORIZED";
       data: PublicStoredData;
       account: AccountRecord;
       diagnostics: Diagnostic[];
+      coverage?: SyncCoverage;
+      syncError?: import("../../domain").AdapterError;
       superseded: boolean;
     }
   | {
@@ -146,7 +219,6 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
       "CLEAR_DATA",
       "CLEAR_ACCOUNTS",
       "CLEAR_SUBMISSIONS",
-      "REQUEST_HOST_PERMISSION",
       "DETECT_BROWSER_SESSION",
       "AUTHORIZE_ACCOUNT",
     ].includes(item.type)
@@ -154,11 +226,6 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
     if (item.type === "DELETE_ACCOUNT") {
       return (
         typeof item.accountId === "string" && item.accountId.trim().length > 0
-      );
-    }
-    if (item.type === "REQUEST_HOST_PERMISSION") {
-      return ["codeforces", "luogu", "qoj", "atcoder", "hydroj"].includes(
-        item.source ?? "",
       );
     }
     if (item.type === "UPDATE_SYNC_ACCOUNTS") {
@@ -179,6 +246,8 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
       const until = (item as { until?: unknown }).until;
       return (
         typeof (item as { force?: unknown }).force === "boolean" &&
+        (item.recheckActivities === undefined ||
+          typeof item.recheckActivities === "boolean") &&
         (since === undefined ||
           (typeof since === "number" &&
             Number.isFinite(since) &&
@@ -203,8 +272,7 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
           (item as { source?: unknown }).source as string,
         ) &&
         (item.origin === undefined || typeof item.origin === "string") &&
-        (item.pageIdentity === undefined ||
-          typeof item.pageIdentity === "string")
+        isDomainScopeValid(item.source, item.domainId)
       );
     }
     if (item.type === "AUTHORIZE_ACCOUNT") {
@@ -212,8 +280,10 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
         source?: unknown;
         authMode?: unknown;
         identifier?: unknown;
+        label?: unknown;
         credentials?: unknown;
         origin?: unknown;
+        domainId?: unknown;
       };
       if ("cookie" in account) return false;
       const credentialsValid =
@@ -239,8 +309,13 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
         ].includes(account.authMode as string) &&
         (account.identifier === undefined ||
           typeof account.identifier === "string") &&
+        (account.label === undefined ||
+          (typeof account.label === "string" &&
+            !/[\r\n]/.test(account.label) &&
+            account.label.length <= 80)) &&
         credentialsValid &&
         (account.origin === undefined || typeof account.origin === "string") &&
+        isDomainScopeValid(account.source, account.domainId) &&
         (account.authMode === "browser-session" ||
           account.authMode === "manual-cookie" ||
           account.authMode === "password" ||

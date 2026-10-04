@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrowserHttpClient } from "../../src/platform/network/browser-http-client";
 import { qojAdapter } from "../../src/adapters/qoj";
+import { createPaginationRuntime } from "../../src/platform/network/pagination-throttle";
+import {
+  withCookieScope,
+  withTemporaryCookies,
+} from "../../src/platform/network/temporary-cookies";
 
 const cookieApi = vi.hoisted(() => ({
   get: vi.fn(),
@@ -14,6 +19,7 @@ vi.stubGlobal("browser", {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
   cookieApi.get.mockReset();
   cookieApi.getAll.mockReset();
   cookieApi.set.mockReset();
@@ -471,6 +477,162 @@ describe("BrowserHttpClient Codeforces manual session", () => {
 });
 
 describe("BrowserHttpClient Hydro manual Cookie", () => {
+  it("holds Cookie scope until deferred response-body cancellation settles", async () => {
+    vi.useFakeTimers();
+    cookieApi.get.mockResolvedValue(null);
+    cookieApi.set.mockResolvedValue({});
+    cookieApi.remove.mockResolvedValue({});
+    let finishCancel!: () => void;
+    const pendingCancel = new Promise<void>(
+      (resolve) => (finishCancel = resolve),
+    );
+    const cancel = vi.fn(() => pendingCancel);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(new ReadableStream({ cancel })))
+      .mockResolvedValueOnce(new Response("browser"));
+    const controller = new AbortController();
+    const http = createBrowserHttpClient();
+    const manual = http.request("hydroj", "https://hydro.body.test/record", {
+      hydroOrigin: "https://hydro.body.test",
+      headers: { Cookie: "sid=manual" },
+      signal: controller.signal,
+    });
+    const rejected = expect(manual).rejects.toBeDefined();
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    const ordinary = http.request(
+      "hydroj",
+      "https://hydro.body.test/record?page=2",
+      { hydroOrigin: "https://hydro.body.test", credentials: "include" },
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(cookieApi.remove).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    finishCancel();
+    await rejected;
+    await expect(ordinary).resolves.toMatchObject({ text: "browser" });
+    expect(cookieApi.remove).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+  it("keeps the pagination lock through aborted HTTP and deferred Cookie restoration", async () => {
+    cookieApi.get.mockResolvedValue(null);
+    cookieApi.set.mockResolvedValue({});
+    let finishRestore!: (value: object) => void;
+    let restorationStarted!: () => void;
+    const restoring = new Promise<void>(
+      (resolve) => (restorationStarted = resolve),
+    );
+    cookieApi.remove.mockImplementationOnce(() => {
+      restorationStarted();
+      return new Promise((resolve) => (finishRestore = resolve));
+    });
+    let started!: () => void;
+    const requesting = new Promise<void>((resolve) => (started = resolve));
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementationOnce(
+        (_url, options) =>
+          new Promise((_resolve, reject) => {
+            started();
+            options?.signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          }),
+      )
+      .mockImplementationOnce(async () => new Response("next"));
+    const controller = new AbortController();
+    const pagination = createPaginationRuntime({
+      sleep: async () => undefined,
+    });
+    const http = createBrowserHttpClient();
+    const first = pagination.runPage({
+      origin: "https://hydro.abort.test",
+      signal: controller.signal,
+      request: () =>
+        http.request("hydroj", "https://hydro.abort.test/record", {
+          hydroOrigin: "https://hydro.abort.test",
+          headers: { Cookie: "sid=manual" },
+          signal: controller.signal,
+        }),
+    });
+    const rejected = expect(first).rejects.toBeDefined();
+    await requesting;
+    controller.abort();
+    await restoring;
+    const secondCallback = vi.fn(() =>
+      http.request("hydroj", "https://hydro.abort.test/record?page=2", {
+        hydroOrigin: "https://hydro.abort.test",
+      }),
+    );
+    const second = pagination.runPage({
+      origin: "https://hydro.abort.test",
+      signal: new AbortController().signal,
+      request: secondCallback,
+    });
+    await Promise.resolve();
+    expect(secondCallback).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    finishRestore({});
+    await rejected;
+    await expect(second).resolves.toMatchObject({ text: "next" });
+    expect(secondCallback).toHaveBeenCalledOnce();
+    expect(cookieApi.remove).toHaveBeenCalledOnce();
+  });
+  it("reports restoration failure after a failed task and releases the origin queue", async () => {
+    cookieApi.get.mockResolvedValue(null);
+    cookieApi.set.mockResolvedValue({});
+    cookieApi.remove
+      .mockRejectedValueOnce(new Error("restoration rejected"))
+      .mockResolvedValueOnce({});
+    const taskFailure = new Error("request failed");
+    const origin = "https://hydro.example.test";
+    const manual = withCookieScope(origin, () =>
+      withTemporaryCookies(
+        origin,
+        "sid=manual; sid.sig=signature",
+        async () => {
+          throw taskFailure;
+        },
+      ),
+    );
+    const following = withCookieScope(origin, async () => {
+      expect(cookieApi.remove).toHaveBeenCalledTimes(2);
+      return "next request";
+    });
+    await expect(manual).rejects.toMatchObject({
+      code: "cookie-restoration",
+      cookieName: "sid.sig",
+    });
+    await expect(following).resolves.toBe("next request");
+    expect(cookieApi.remove).toHaveBeenLastCalledWith({
+      url: `${origin}/`,
+      name: "sid",
+    });
+  });
+
+  it.each([new Error("request failed"), undefined])(
+    "preserves the task rejection after successful restoration (%s)",
+    async (failure) => {
+      cookieApi.get.mockResolvedValue(null);
+      cookieApi.set.mockResolvedValue({});
+      cookieApi.remove.mockResolvedValue({});
+      const task = withTemporaryCookies(
+        "https://hydro.example.test",
+        "sid=manual",
+        async () => {
+          throw failure;
+        },
+      );
+      await expect(task).rejects.toBe(failure);
+      expect(cookieApi.remove).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("injects both sid fields on an HTTP instance and restores the prior session", async () => {
     cookieApi.get.mockImplementation(async ({ name }) =>
       name === "sid"

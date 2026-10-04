@@ -4,6 +4,7 @@ import type {
   HttpResponse,
 } from "../../domain";
 import type { SourceId } from "../../domain";
+import { createRateLimitRegistry, type RateLimitRegistry } from "./rate-limit";
 
 const ALLOWED_ORIGINS: Record<SourceId, readonly string[]> = {
   codeforces: ["https://codeforces.com/"],
@@ -21,8 +22,14 @@ const RETRY_DELAY_MS = 250;
 export class HttpClientError extends Error {
   constructor(
     public readonly code:
-      "invalid_url" | "timeout" | "network" | "response_too_large",
+      | "invalid_url"
+      | "timeout"
+      | "network"
+      | "response_too_large"
+      | "rate_limited",
     message: string,
+    public readonly retryAfterMs?: number,
+    public readonly httpStatus?: number,
   ) {
     super(message);
     this.name = "HttpClientError";
@@ -58,9 +65,11 @@ function isAllowed(
 async function readLimited(
   response: Response,
   maxBytes: number,
+  signal: AbortSignal,
 ): Promise<Uint8Array> {
   const declared = response.headers.get("content-length");
   if (declared && Number(declared) > maxBytes) {
+    await response.body?.cancel();
     throw new HttpClientError(
       "response_too_large",
       "Response exceeds size limit",
@@ -68,15 +77,27 @@ async function readLimited(
   }
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
+  let cancellation: Promise<void> | undefined;
+  const cancel = (reason?: unknown): Promise<void> => {
+    cancellation ??= reader.cancel(reason).catch(() => undefined);
+    return cancellation;
+  };
+  const cancelFromSignal = () => {
+    void cancel(signal.reason);
+  };
+  signal.addEventListener("abort", cancelFromSignal, { once: true });
+  if (signal.aborted) cancelFromSignal();
   const chunks: Uint8Array[] = [];
   let length = 0;
   try {
     while (true) {
+      if (signal.aborted) throw signal.reason;
       const chunk = await reader.read();
+      if (signal.aborted) throw signal.reason;
       if (chunk.done) break;
       length += chunk.value.byteLength;
       if (length > maxBytes) {
-        await reader.cancel();
+        await cancel();
         throw new HttpClientError(
           "response_too_large",
           "Response exceeds size limit",
@@ -85,6 +106,12 @@ async function readLimited(
       chunks.push(chunk.value);
     }
   } finally {
+    signal.removeEventListener("abort", cancelFromSignal);
+    // Closing a pending read happens before the stream's underlying cancel()
+    // promise necessarily settles. Hold HTTP/Cookie/page locks through that
+    // cleanup instead of returning as soon as the read wakes after abort.
+    if (signal.aborted) await cancel(signal.reason);
+    else await cancellation;
     reader.releaseLock();
   }
   const bytes = new Uint8Array(length);
@@ -114,7 +141,12 @@ function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-export function createHttpClient(): HttpClient {
+export interface HttpClientOptions {
+  rateLimits?: RateLimitRegistry;
+}
+
+export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
+  const rateLimits = options.rateLimits ?? createRateLimitRegistry();
   return {
     async request(
       source: SourceId,
@@ -155,10 +187,28 @@ export function createHttpClient(): HttpClient {
       }
 
       const canRetry = (options.method ?? "GET") === "GET";
+      const origin = new URL(url).origin;
       let retried = false;
       while (true) {
         if (options.signal?.aborted) {
-          throw new HttpClientError("network", "Request aborted");
+          throw (
+            options.signal.reason ?? new DOMException("Aborted", "AbortError")
+          );
+        }
+        await rateLimits.ready();
+        if (options.signal?.aborted) {
+          throw (
+            options.signal.reason ?? new DOMException("Aborted", "AbortError")
+          );
+        }
+        const retryAfterMs = rateLimits.getRetryAfterMs(origin);
+        if (retryAfterMs > 0) {
+          throw new HttpClientError(
+            "rate_limited",
+            "Request origin is cooling down after rate limiting",
+            retryAfterMs,
+            429,
+          );
         }
         const controller = new AbortController();
         let timedOut = false;
@@ -189,11 +239,14 @@ export function createHttpClient(): HttpClient {
                   : "error",
             });
           } catch (error) {
+            if (options.signal?.aborted) {
+              throw (
+                options.signal.reason ??
+                new DOMException("Aborted", "AbortError")
+              );
+            }
             if (timedOut) {
               throw new HttpClientError("timeout", "Request timed out");
-            }
-            if (options.signal?.aborted) {
-              throw new HttpClientError("network", "Request aborted");
             }
             if (!canRetry || retried) {
               throw new HttpClientError(
@@ -207,7 +260,10 @@ export function createHttpClient(): HttpClient {
             try {
               await waitForRetry(RETRY_DELAY_MS, options.signal);
             } catch {
-              throw new HttpClientError("network", "Request aborted");
+              throw (
+                options.signal?.reason ??
+                new DOMException("Aborted", "AbortError")
+              );
             }
             continue;
           }
@@ -233,6 +289,24 @@ export function createHttpClient(): HttpClient {
               "Response redirected outside source allowlist",
             );
           }
+          if (response.status === 429) {
+            // Record from response headers, before body reads/adapter parsing.
+            // The original response remains available for site diagnostics.
+            rateLimits.record429(
+              new URL(response.url || url).origin,
+              response.headers.get("retry-after"),
+            );
+          }
+          if (options.signal?.aborted) {
+            await response.body?.cancel().catch(() => undefined);
+            throw (
+              options.signal.reason ?? new DOMException("Aborted", "AbortError")
+            );
+          }
+          if (timedOut) {
+            await response.body?.cancel().catch(() => undefined);
+            throw new HttpClientError("timeout", "Request timed out");
+          }
           if (
             canRetry &&
             !retried &&
@@ -240,17 +314,40 @@ export function createHttpClient(): HttpClient {
             response.status < 600
           ) {
             retried = true;
+            await response.body?.cancel().catch(() => undefined);
             try {
               await waitForRetry(RETRY_DELAY_MS, options.signal);
             } catch {
-              throw new HttpClientError("network", "Request aborted");
+              throw (
+                options.signal?.reason ??
+                new DOMException("Aborted", "AbortError")
+              );
             }
             continue;
           }
-          const bytes = await readLimited(
-            response,
-            options.maxBytes ?? DEFAULT_MAX_BYTES,
-          );
+          let bytes: Uint8Array;
+          try {
+            bytes = await readLimited(
+              response,
+              options.maxBytes ?? DEFAULT_MAX_BYTES,
+              controller.signal,
+            );
+          } catch (error) {
+            if (options.signal?.aborted) {
+              throw (
+                options.signal.reason ??
+                new DOMException("Aborted", "AbortError")
+              );
+            }
+            if (timedOut)
+              throw new HttpClientError("timeout", "Request timed out");
+            throw error instanceof HttpClientError
+              ? error
+              : new HttpClientError(
+                  "network",
+                  "Response body could not be read",
+                );
+          }
           return {
             status: response.status,
             url: response.url || url,

@@ -24,7 +24,11 @@ export async function refreshInstanceBranding(
     (current && input.now - current.fetchedAt < BRANDING_REFRESH_MS)
   )
     return { diagnostics: [] };
-  const key = instanceBrandingKey(input.account.source, input.account.origin);
+  const key = instanceBrandingKey(
+    input.account.source,
+    input.account.origin,
+    input.account.domainId,
+  );
   const existing = inFlight.get(key);
   if (existing) return existing;
   const operation = adapter

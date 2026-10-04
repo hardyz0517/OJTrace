@@ -4,3 +4,5 @@ export * from "./credentials";
 export * from "./errors";
 export * from "./types";
 export * from "./sync-range";
+export * from "./sync-progress";
+export * from "./activity-schedule";

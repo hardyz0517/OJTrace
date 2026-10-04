@@ -54,24 +54,6 @@ describe("Codeforces parser and normalizer", () => {
     });
   });
 
-  it("accepts a username read from the current Codeforces page", async () => {
-    const result = await codeforcesAdapter.detectBrowserSession!({
-      signal: new AbortController().signal,
-      requestId: "request",
-      pageIdentity: "tester",
-      http: {
-        async request() {
-          throw new Error("page identity should avoid service-worker fetch");
-        },
-      },
-    });
-    expect(result).toEqual({
-      authenticated: true,
-      status: "authenticated",
-      username: "tester",
-    });
-  });
-
   it("uses a manual cookie to discover and fetch the current account", async () => {
     const requests: Array<{
       url: string;
@@ -79,6 +61,9 @@ describe("Codeforces parser and normalizer", () => {
       codeforcesCookie?: string;
     }> = [];
     const result = await codeforcesAdapter.fetchRecent({
+      since: 0,
+      until: Number.MAX_SAFE_INTEGER,
+      pagination: { runPage: ({ request }) => request() },
       account: {
         accountId: "account",
         source: "codeforces",
@@ -191,6 +176,9 @@ describe("Codeforces parser and normalizer", () => {
       result: [{ id: 9, creationTimeSeconds: 10, verdict: "WRONG_ANSWER" }],
     });
     const result = await codeforcesAdapter.fetchRecent({
+      since: 0,
+      until: Number.MAX_SAFE_INTEGER,
+      pagination: { runPage: ({ request }) => request() },
       account: {
         accountId: "account",
         source: "codeforces",

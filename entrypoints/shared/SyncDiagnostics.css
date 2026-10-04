@@ -17,3 +17,8 @@
 .sync-diagnostics .diagnostic-error {
   color: #9a6700;
 }
+.sync-diagnostics-note {
+  margin: 4px 0 0;
+  color: #667085;
+  overflow-wrap: anywhere;
+}

@@ -1,7 +1,107 @@
 import { describe, expect, it } from "vitest";
-import { isRuntimeMessage } from "../../src/application/messaging/messages";
+import {
+  isRuntimeMessage,
+  isSyncProgressEvent,
+} from "../../src/application/messaging/messages";
 
 describe("runtime message validation", () => {
+  it("accepts only a boolean full activity recheck flag", () => {
+    const message = {
+      schemaVersion: 2,
+      type: "SYNC_REQUEST",
+      requestId: "recheck",
+      force: true,
+    };
+    for (const recheckActivities of [undefined, true, false])
+      expect(isRuntimeMessage({ ...message, recheckActivities })).toBe(true);
+    for (const recheckActivities of [null, "true", 1, {}])
+      expect(isRuntimeMessage({ ...message, recheckActivities })).toBe(false);
+  });
+  it.each(["DETECT_BROWSER_SESSION", "AUTHORIZE_ACCOUNT"])(
+    "validates Hydro domain ids at the %s boundary",
+    (type) => {
+      const message = {
+        schemaVersion: 2,
+        type,
+        requestId: "scope",
+        source: "hydroj",
+        authMode: "browser-session",
+      };
+      expect(isRuntimeMessage({ ...message, domainId: "student" })).toBe(true);
+      expect(isRuntimeMessage(message)).toBe(true);
+      for (const domainId of [
+        "",
+        "a/b",
+        "../root",
+        "a?b",
+        " student",
+        "a".repeat(65),
+        null,
+        42,
+      ])
+        expect(isRuntimeMessage({ ...message, domainId })).toBe(false);
+      expect(
+        isRuntimeMessage({ ...message, source: "luogu", domainId: "student" }),
+      ).toBe(false);
+    },
+  );
+
+  it("validates progress events separately from commands and rejects invalid counters", () => {
+    const event = {
+      schemaVersion: 2,
+      type: "SYNC_PROGRESS",
+      requestId: "run",
+      sequence: 1,
+      progress: {
+        accountId: "cf",
+        source: "codeforces",
+        phase: "list",
+        status: "running",
+        pagesFetched: 1,
+        recordsFetched: 24,
+      },
+    };
+    expect(isSyncProgressEvent(event)).toBe(true);
+    expect(isRuntimeMessage(event)).toBe(false);
+    for (const pagesFetched of [-1, Infinity, 1.5, "1"]) {
+      expect(
+        isSyncProgressEvent({
+          ...event,
+          progress: { ...event.progress, pagesFetched },
+        }),
+      ).toBe(false);
+    }
+    expect(
+      isSyncProgressEvent({
+        ...event,
+        progress: { ...event.progress, diagnostics: {} },
+      }),
+    ).toBe(false);
+    expect(isSyncProgressEvent({ ...event, sequence: -1 })).toBe(false);
+    expect(
+      isSyncProgressEvent({
+        ...event,
+        progress: { ...event.progress, status: "unknown" },
+      }),
+    ).toBe(false);
+  });
+  it("accepts an optional HydroOJ instance name and rejects malformed names", () => {
+    const message = {
+      schemaVersion: 2,
+      type: "AUTHORIZE_ACCOUNT",
+      requestId: "r",
+      source: "hydroj",
+      authMode: "browser-session",
+      origin: "https://oj.example.org",
+    };
+    for (const label of [undefined, "", "学校 OJ"]) {
+      expect(isRuntimeMessage({ ...message, label })).toBe(true);
+    }
+    for (const label of [null, 1, {}, "a\nb", "a".repeat(81)]) {
+      expect(isRuntimeMessage({ ...message, label })).toBe(false);
+    }
+  });
+
   it("accepts collection ranges and rejects malformed ranges and reversed request bounds", () => {
     const message = {
       schemaVersion: 2,

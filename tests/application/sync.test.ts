@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { syncEnabledAccounts } from "../../src/application/sync/sync-service";
 import {
   createStoragePort,
   defaultStoredData,
 } from "../../src/application/storage/store";
 import type { HttpClient, StoredData, AccountConfig } from "../../src/domain";
+import { createHttpClient } from "../../src/platform/network/http-client";
+import { createRateLimitRegistry } from "../../src/platform/network/rate-limit";
 import { accountRecord } from "../account-fixture";
 
 function area(
@@ -95,10 +97,10 @@ describe("sync application", () => {
         },
       }),
     );
-    let calls = 0;
+    const requestedSources: string[] = [];
     const http: HttpClient = {
       async request(source) {
-        calls += 1;
+        requestedSources.push(source);
         return {
           status: 200,
           url:
@@ -116,7 +118,7 @@ describe("sync application", () => {
       force: true,
       now: 1_700_000_000_000,
     });
-    expect(calls).toBe(1);
+    expect(requestedSources).toEqual(["codeforces"]);
     expect(result.sources.map((item) => item.accountId)).toEqual([
       codeforcesAccount.accountId,
     ]);
@@ -168,47 +170,6 @@ describe("sync application", () => {
     };
     const result = await syncEnabledAccounts(storage, http, { force: true });
     expect(result.sources).toHaveLength(0);
-  });
-
-  it("does not request Luogu when it is not explicitly selected", async () => {
-    const luoguAccount = {
-      accountId: "luogu-account",
-      source: "luogu" as const,
-      identifier: "10001",
-      enabled: true,
-      authMode: "browser-session" as const,
-    };
-    const storage = createStoragePort(
-      area({
-        ...defaultStoredData(),
-        accounts: [codeforcesAccount, luoguAccount],
-        preferences: {
-          ...defaultStoredData().preferences,
-          syncAccountIds: [codeforcesAccount.accountId],
-        },
-      }),
-    );
-    const requestedSources: string[] = [];
-    const http: HttpClient = {
-      async request(source) {
-        requestedSources.push(source);
-        return {
-          status: 200,
-          url: "https://codeforces.com/api/user.status",
-          contentType: "application/json",
-          text: JSON.stringify({ status: "OK", result: [] }),
-          headers: new Headers(),
-        };
-      },
-    };
-
-    const result = await syncEnabledAccounts(storage, http, {
-      force: true,
-      now: 1_700_000_000_000,
-    });
-
-    expect(requestedSources).toEqual(["codeforces"]);
-    expect(result.sources.some((item) => item.source === "luogu")).toBe(false);
   });
 
   it("keeps successful records when another source fails", async () => {
@@ -301,26 +262,17 @@ describe("sync application", () => {
       now: 1_700_000_001_000,
     });
     expect(calls).toBe(1);
-    expect(second.sources).toHaveLength(0);
+    expect(second.sources[0]?.skipped).toBe("freshness");
   });
 
   it("does not immediately retry a rate-limited source", async () => {
     const storage = createStoragePort(
       area({ ...defaultStoredData(), accounts: [codeforcesAccount] }),
     );
-    let calls = 0;
-    const http: HttpClient = {
-      async request() {
-        calls += 1;
-        return {
-          status: 429,
-          url: "https://codeforces.com/api/user.status",
-          contentType: "application/json",
-          text: "{}",
-          headers: new Headers(),
-        };
-      },
-    };
+    const fetcher = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 429 }));
+    const http = createHttpClient({ rateLimits: createRateLimitRegistry() });
     const first = await syncEnabledAccounts(storage, http, {
       force: true,
       now: 1_700_000_000_000,
@@ -330,7 +282,8 @@ describe("sync application", () => {
       now: 1_700_000_001_000,
     });
     expect(first.sources[0]?.error?.kind).toBe("rate_limited");
-    expect(second.sources).toHaveLength(0);
-    expect(calls).toBe(1);
+    expect(second.sources[0]?.error?.kind).toBe("rate_limited");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    fetcher.mockRestore();
   });
 });

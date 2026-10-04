@@ -1,4 +1,4 @@
-import { authorizeFromRecent } from "../authorization";
+import { finalizeCoverage } from "../shared/submission-window";
 import {
   cookieHeaderFromCredentials,
   credentialValue,
@@ -7,6 +7,7 @@ import {
   type OJAdapter,
 } from "../../domain";
 import { AdapterFailure } from "../../domain/errors";
+import { reportProgress } from "../../domain/sync-progress";
 import { normalizeCodeforcesSubmission } from "./normalizer";
 import { parseCodeforcesResponse } from "./parser";
 
@@ -48,11 +49,6 @@ async function currentCodeforcesUser(
   const identityMessageKey = cookie
     ? "account.identityFromCookieRequired"
     : "source.authRequired";
-  const pageIdentity =
-    "pageIdentity" in input ? input.pageIdentity?.trim() : undefined;
-  if (pageIdentity && !cookie && !/\s/.test(pageIdentity)) {
-    return pageIdentity;
-  }
   let response;
   try {
     response = await input.http.request("codeforces", CODEFORCES_HOME_URL, {
@@ -63,6 +59,7 @@ async function currentCodeforcesUser(
       signal: input.signal,
     });
   } catch (error) {
+    if (input.signal.aborted) throw input.signal.reason;
     throw AdapterFailure.fromTransport(error, "codeforces", input.requestId);
   }
   if (response.status === 401 || isCodeforcesLoginPage(response.text)) {
@@ -154,8 +151,122 @@ function codeforcesRequestOptions(
 }
 
 export const codeforcesAdapter: OJAdapter = {
-  authorize(input) {
-    return authorizeFromRecent(this, input);
+  async authorize(input) {
+    const authMode = input.account.authMode;
+    if (
+      authMode !== "public-handle" &&
+      authMode !== "browser-session" &&
+      authMode !== "manual-cookie"
+    ) {
+      throw new AdapterFailure({
+        kind: "unsupported",
+        source: "codeforces",
+        stage: "identity",
+        messageKey: "account.authModeUnsupported",
+        retryable: false,
+        requestId: input.requestId,
+      });
+    }
+    let username: string;
+    if (authMode === "public-handle") {
+      const handle = (
+        input.account.identifier ??
+        input.account.providerAccountKey ??
+        ""
+      ).trim();
+      if (!handle)
+        throw new AdapterFailure({
+          kind: "invalid_response",
+          source: "codeforces",
+          stage: "identity",
+          messageKey: "account.identifierRequired",
+          retryable: false,
+          requestId: input.requestId,
+        });
+      let response;
+      try {
+        response = await input.http.request(
+          "codeforces",
+          `https://codeforces.com/api/user.info?handles=${encodeURIComponent(handle)}`,
+          codeforcesRequestOptions("public-handle", input.signal),
+        );
+      } catch (error) {
+        if (input.signal.aborted) throw input.signal.reason;
+        throw AdapterFailure.fromTransport(
+          error,
+          "codeforces",
+          input.requestId,
+        );
+      }
+      if (response.status < 200 || response.status >= 300)
+        throw new AdapterFailure({
+          kind:
+            response.status === 429
+              ? "rate_limited"
+              : response.status === 403
+                ? "blocked"
+                : "network",
+          source: "codeforces",
+          stage: "identity",
+          messageKey:
+            response.status === 429 ? "source.rateLimited" : "source.httpError",
+          retryable: response.status >= 500,
+          httpStatus: response.status,
+          requestId: input.requestId,
+        });
+      let parsed: { status?: unknown; result?: Array<{ handle?: unknown }> };
+      try {
+        parsed = JSON.parse(response.text) as typeof parsed;
+      } catch {
+        throw new AdapterFailure({
+          kind: "parse_failed",
+          source: "codeforces",
+          stage: "identity",
+          messageKey: "source.invalidResponse",
+          retryable: false,
+          requestId: input.requestId,
+        });
+      }
+      const resolved = Array.isArray(parsed.result)
+        ? parsed.result[0]?.handle
+        : undefined;
+      if (
+        parsed.status !== "OK" ||
+        typeof resolved !== "string" ||
+        !resolved.trim()
+      )
+        throw new AdapterFailure({
+          kind: "invalid_response",
+          source: "codeforces",
+          stage: "identity",
+          messageKey: "account.notFound",
+          retryable: false,
+          userAction: "edit_account",
+          requestId: input.requestId,
+        });
+      username = resolved;
+    } else {
+      const cookie =
+        authMode === "manual-cookie"
+          ? manualCodeforcesCookie(input.credentials)
+          : undefined;
+      if (authMode === "manual-cookie" && !cookie)
+        throw new AdapterFailure({
+          kind: "invalid_response",
+          source: "codeforces",
+          stage: "identity",
+          messageKey: "account.cookieRequired",
+          retryable: false,
+          requestId: input.requestId,
+        });
+      username = await currentCodeforcesUser(input, cookie);
+    }
+    return {
+      accountId: input.account.accountId,
+      source: "codeforces",
+      providerAccountKey: username,
+      displayName: username,
+    };
   },
   metadata: {
     id: "codeforces",
@@ -190,14 +301,6 @@ export const codeforcesAdapter: OJAdapter = {
         description: "直接输入 Codeforces 用户名，使用公开提交记录。",
       },
     ],
-    capabilities: {
-      accountLookup: true,
-      stableSubmissionId: true,
-      directSubmissionUrl: true,
-      requiresBrowserSession: false,
-      supportsAnonymous: true,
-      supportsContentScriptFallback: false,
-    },
   },
 
   async detectBrowserSession(input: BrowserSessionInput) {
@@ -209,6 +312,7 @@ export const codeforcesAdapter: OJAdapter = {
         username,
       };
     } catch (error) {
+      if (input.signal.aborted) throw input.signal.reason;
       if (!(error instanceof AdapterFailure)) {
         return { authenticated: false, status: "site-error" as const };
       }
@@ -227,6 +331,11 @@ export const codeforcesAdapter: OJAdapter = {
   },
 
   async fetchRecent(input: FetchInput) {
+    reportProgress(input.onProgress, {
+      phase: "identity",
+      pagesFetched: 0,
+      recordsFetched: 0,
+    });
     const authMode = input.account.authMode;
     if (
       authMode !== "public-handle" &&
@@ -268,6 +377,7 @@ export const codeforcesAdapter: OJAdapter = {
       try {
         resolvedHandle = await currentCodeforcesUser(input, cookie);
       } catch (error) {
+        if (input.signal.aborted) throw input.signal.reason;
         if (error instanceof AdapterFailure) throw error;
         throw AdapterFailure.fromTransport(
           error,
@@ -289,12 +399,24 @@ export const codeforcesAdapter: OJAdapter = {
     }
     let response;
     try {
-      response = await input.http.request(
-        "codeforces",
-        `https://codeforces.com/api/user.status?handle=${encodeURIComponent(resolvedHandle)}&from=1&count=${Math.min(input.limit, 1000)}`,
-        codeforcesRequestOptions(authMode, input.signal),
-      );
+      response = await input.pagination.runPage({
+        origin: "https://codeforces.com",
+        signal: input.signal,
+        request: () => {
+          reportProgress(input.onProgress, {
+            phase: "list",
+            pagesFetched: 1,
+            recordsFetched: 0,
+          });
+          return input.http.request(
+            "codeforces",
+            `https://codeforces.com/api/user.status?handle=${encodeURIComponent(resolvedHandle)}&from=1&count=1000`,
+            codeforcesRequestOptions(authMode, input.signal),
+          );
+        },
+      });
     } catch (error) {
+      if (input.signal.aborted) throw input.signal.reason;
       throw AdapterFailure.fromTransport(error, "codeforces", input.requestId);
     }
     if (response.status === 429) {
@@ -362,21 +484,30 @@ export const codeforcesAdapter: OJAdapter = {
         requestId: input.requestId,
       });
     }
+    let normalized;
     let records;
     try {
-      records = (parsed.result ?? [])
-        .map((item) =>
-          normalizeCodeforcesSubmission(
-            item,
-            input.account.accountId,
-            resolvedHandle,
-            input.now,
-          ),
-        )
-        .filter(
-          (item) =>
-            input.since === undefined || item.submittedAt >= input.since,
-        );
+      normalized = (parsed.result ?? []).map((item) =>
+        normalizeCodeforcesSubmission(
+          item,
+          input.account.accountId,
+          resolvedHandle,
+          input.now,
+        ),
+      );
+      records = [
+        ...new Map(
+          normalized
+            .filter(
+              (item) =>
+                Number.isSafeInteger(item.submittedAt) &&
+                item.submittedAt >= 0 &&
+                item.submittedAt >= input.since &&
+                item.submittedAt <= input.until,
+            )
+            .map((record) => [record.submissionId, record]),
+        ).values(),
+      ];
     } catch {
       throw new AdapterFailure({
         kind: "parse_failed",
@@ -387,6 +518,41 @@ export const codeforcesAdapter: OJAdapter = {
         requestId: input.requestId,
       });
     }
+    const truncated = records.length > Math.max(1, Math.min(input.limit, 1000));
+    records = records.slice(0, Math.max(1, Math.min(input.limit, 1000)));
+    reportProgress(input.onProgress, {
+      phase: "list",
+      pagesFetched: 1,
+      recordsFetched: records.length,
+    });
+    const exhausted = (parsed.result ?? []).length < 1000;
+    // Official user.status is newest-first; validate the returned sequence.
+    const boundary =
+      normalized.every(
+        (record, index) =>
+          Number.isSafeInteger(record.submittedAt) &&
+          record.submittedAt >= 0 &&
+          (index === 0 ||
+            record.submittedAt <= normalized[index - 1]!.submittedAt),
+      ) && normalized.some((record) => record.submittedAt < input.since);
+    const invalidTimes = normalized.some(
+      (record) =>
+        !Number.isSafeInteger(record.submittedAt) || record.submittedAt < 0,
+    );
+    const coverage = finalizeCoverage(
+      input,
+      1,
+      records.length,
+      !invalidTimes && !truncated && (exhausted || boundary)
+        ? {
+            status: "complete",
+            evidence: boundary ? "window-boundary" : "exhausted",
+          }
+        : {
+            status: "partial",
+            reasons: invalidTimes ? ["invalid-record"] : ["record-limit"],
+          },
+    );
     return {
       account: {
         accountId: input.account.accountId,
@@ -396,7 +562,7 @@ export const codeforcesAdapter: OJAdapter = {
       },
       records,
       diagnostics: [],
-      hasMore: records.length >= Math.min(input.limit, 1000),
+      coverage,
     };
   },
 };

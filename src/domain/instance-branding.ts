@@ -10,7 +10,7 @@ export function updateBrandingCache(
 ): Record<string, InstanceBrandingRecord> {
   const cache = { ...current };
   for (const item of incoming) {
-    const key = instanceBrandingKey(item.source, item.origin);
+    const key = instanceBrandingKey(item.source, item.origin, item.domainId);
     const old = cache[key];
     cache[key] = {
       ...old,

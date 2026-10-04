@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
 import { hydroOJAdapter } from "../../src/adapters/hydroj";
+import { createHydroOJInstance } from "../../src/adapters/hydroj/instance";
+import { isHydroScopeUrl } from "../../src/domain/hydro-scope";
+import { createPaginationRuntime } from "../../src/platform/network/pagination-throttle";
+import { isActivityOutsideWindow } from "../../src/domain/activity-schedule";
 import type {
   HttpClient,
   HttpRequestOptions,
@@ -7,14 +11,16 @@ import type {
 } from "../../src/domain";
 
 // Opt-in only. Credentials are supplied by the invoking environment, never fixtures.
-const origin = process.env.OJTRACE_HYDRO_ORIGIN;
+const address = process.env.OJTRACE_HYDRO_ORIGIN;
 const username = process.env.OJTRACE_HYDRO_USERNAME;
 const password = process.env.OJTRACE_HYDRO_PASSWORD;
 
-it.skipIf(!origin || !username || !password)(
-  "syncs real Hydro ordinary, contest, homework and branding data",
+it.skipIf(!address || !username || !password)(
+  "syncs real Hydro time-windowed lists and branding data",
   async () => {
+    const scope = createHydroOJInstance(address!);
     const cookies = new Map<string, string>();
+    let loginCount = 0;
     const http: HttpClient = {
       async request(
         _source,
@@ -25,8 +31,10 @@ it.skipIf(!origin || !username || !password)(
         let method = options.method ?? "GET";
         let body = options.body;
         for (let redirect = 0; redirect < 8; redirect += 1) {
-          if (new URL(url).origin !== new URL(origin!).origin)
+          if (new URL(url).origin !== scope.origin)
             throw new Error("Unexpected origin");
+          if (method === "POST" && new URL(url).pathname.endsWith("/login"))
+            loginCount += 1;
           const response = await fetch(url, {
             method,
             body,
@@ -79,7 +87,8 @@ it.skipIf(!origin || !username || !password)(
       account: {
         accountId: "live",
         source: "hydroj" as const,
-        origin: origin!,
+        origin: scope.origin,
+        domainId: scope.domainId,
         authMode: "password" as const,
         enabled: true,
       },
@@ -89,7 +98,9 @@ it.skipIf(!origin || !username || !password)(
       requestId: "live",
       now: Date.now(),
       limit: 1000,
-      since: 0,
+      since: Date.now() - 35 * 24 * 60 * 60 * 1000,
+      until: Date.now(),
+      pagination: createPaginationRuntime(),
     };
     const authorized = await hydroOJAdapter.authorize(input);
     expect(authorized.providerAccountKey).toMatch(/^\d+$/);
@@ -105,13 +116,31 @@ it.skipIf(!origin || !username || !password)(
     expect(fetched.account.providerAccountKey).toBe(
       authorized.providerAccountKey,
     );
-    expect(fetched.records.some((record) => !record.activityId)).toBe(true);
+    expect(loginCount).toBe(2);
+    if (process.env.OJTRACE_HYDRO_REQUIRE_RECORDS === "1")
+      expect(fetched.records.length).toBeGreaterThan(0);
+    for (const record of fetched.records) {
+      expect(record.domainId).toBe(scope.domainId);
+      for (const url of [
+        record.problemUrl,
+        record.submissionUrl,
+        record.fallbackListUrl,
+        record.activityUrl,
+      ]) {
+        if (url) expect(isHydroScopeUrl(scope, url)).toBe(true);
+      }
+    }
     expect(
-      fetched.records.some((record) => record.activityType === "contest"),
+      fetched.records.every(
+        (record) =>
+          record.submittedAt >= input.since &&
+          record.submittedAt <= input.until,
+      ),
     ).toBe(true);
-    expect(
-      fetched.records.some((record) => record.activityType === "homework"),
-    ).toBe(true);
+    expect(fetched.coverage.window).toEqual({
+      since: input.since,
+      until: input.until,
+    });
     expect(
       fetched.records.every(
         (record) =>
@@ -121,11 +150,47 @@ it.skipIf(!origin || !username || !password)(
     expect(
       new Set(fetched.records.map((record) => record.submissionId)).size,
     ).toBe(fetched.records.length);
+    if (process.env.OJTRACE_HYDRO_TEST_ACTIVITY_CACHE === "1") {
+      const schedules = fetched.activitySchedules ?? [];
+      const expectedSkips = schedules.filter((item) =>
+        isActivityOutsideWindow(item, input, input.now),
+      ).length;
+      expect(expectedSkips).toBeGreaterThan(0);
+      const cached = await hydroOJAdapter.fetchRecent({
+        ...input,
+        account: {
+          ...input.account,
+          providerAccountKey: authorized.providerAccountKey,
+        },
+        activitySchedules: schedules,
+      });
+      const skipped = cached.diagnostics.filter(
+        (item) => item.context?.status === "cached-outside-window",
+      ).length;
+      expect(skipped).toBe(expectedSkips);
+      expect(cached.coverage.pagesFetched).toBeLessThan(
+        fetched.coverage.pagesFetched,
+      );
+      console.info(
+        JSON.stringify({
+          activityCache: {
+            initialPages: fetched.coverage.pagesFetched,
+            cachedPages: cached.coverage.pagesFetched,
+            skipped,
+            observations: schedules.length,
+          },
+        }),
+      );
+    }
     const metadata = await hydroOJAdapter.fetchInstanceBranding!(input);
     expect(metadata.branding?.name).toBeTruthy();
     console.info(
       JSON.stringify({
         uid: authorized.providerAccountKey,
+        domainId: scope.domainId ?? "default",
+        logins: loginCount,
+        outcome: fetched.coverage.outcome,
+        pagesFetched: fetched.coverage.pagesFetched,
         records: fetched.records.length,
         ordinary: fetched.records.filter((record) => !record.activityId).length,
         contest: fetched.records.filter(
@@ -145,5 +210,5 @@ it.skipIf(!origin || !username || !password)(
       }),
     );
   },
-  60_000,
+  240_000,
 );

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { isAllowedNavigation } from "../../src/platform/permissions/hosts";
+import {
+  isAllowedNavigation,
+  isAllowedOriginNavigation,
+} from "../../src/platform/permissions/hosts";
 import {
   CustomOriginValidationError,
   exactOriginPermissionPattern,
@@ -7,6 +10,54 @@ import {
 } from "../../src/platform/permissions/custom-origin";
 
 describe("navigation allowlist", () => {
+  it("keeps Hydro navigation in the bound domain, not just on the same host", () => {
+    const origin = "http://hydro.example.org";
+    expect(
+      isAllowedOriginNavigation(
+        "hydroj",
+        origin,
+        `${origin}/d/student/p/1`,
+        "student",
+      ),
+    ).toBe(true);
+    for (const path of ["/record/1", "/d/other/record/1", "/d/student2/p/1"])
+      expect(
+        isAllowedOriginNavigation(
+          "hydroj",
+          origin,
+          `${origin}${path}`,
+          "student",
+        ),
+      ).toBe(false);
+    expect(
+      isAllowedOriginNavigation("hydroj", origin, `${origin}/d/student/p/1`),
+    ).toBe(false);
+    expect(
+      isAllowedOriginNavigation(
+        "hydroj",
+        origin,
+        "http://user:pass@hydro.example.org/d/student/p/1",
+        "student",
+      ),
+    ).toBe(false);
+  });
+  it("restricts instance navigation to HydroOJ on the exact configured origin", () => {
+    const origin = "https://hydro.example.org";
+    expect(
+      isAllowedOriginNavigation("hydroj", origin, `${origin}/record/1`),
+    ).toBe(true);
+    expect(
+      isAllowedOriginNavigation(
+        "hydroj",
+        origin,
+        "https://other.example.org/record/1",
+      ),
+    ).toBe(false);
+    expect(
+      isAllowedOriginNavigation("codeforces", origin, `${origin}/record/1`),
+    ).toBe(false);
+  });
+
   it("accepts only HTTPS URLs on the source host", () => {
     expect(
       isAllowedNavigation(

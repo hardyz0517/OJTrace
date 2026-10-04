@@ -13,6 +13,10 @@ import {
   instanceBrandingKey,
 } from "../../domain/account-identity";
 import { updateBrandingCache } from "../../domain/instance-branding";
+import {
+  updateActivityScheduleCache,
+  type ActivityScheduleRecord,
+} from "../../domain/activity-schedule";
 
 const STORAGE_KEY = "ojtrace:data";
 
@@ -35,12 +39,10 @@ export function defaultStoredData(): StoredData {
     accounts: [],
     credentials: [],
     instanceBranding: {},
+    activitySchedules: {},
     submissions: [],
     syncStates: {},
-    preferences: {
-      ...DEFAULT_PREFERENCES,
-      enabledSources: [...DEFAULT_PREFERENCES.enabledSources],
-    },
+    preferences: { ...DEFAULT_PREFERENCES },
   };
 }
 
@@ -90,6 +92,7 @@ function sanitizeAccount(value: unknown): AccountRecord | undefined {
       buildIdentityKey({
         source: value.source as AccountConfig["source"],
         origin: value.origin as string | undefined,
+        domainId: value.domainId as string | undefined,
         providerAccountKey: value.providerAccountKey as string,
       }) !== value.identityKey
     )
@@ -104,6 +107,7 @@ function sanitizeAccount(value: unknown): AccountRecord | undefined {
     enabled: value.enabled,
     authMode: value.authMode as AccountConfig["authMode"],
     ...(typeof value.origin === "string" ? { origin: value.origin } : {}),
+    ...(typeof value.domainId === "string" ? { domainId: value.domainId } : {}),
     providerAccountKey: value.providerAccountKey as string,
     ...(typeof value.providerDisplayName === "string"
       ? { providerDisplayName: value.providerDisplayName }
@@ -142,6 +146,7 @@ function sanitizeBranding(value: unknown): InstanceBrandingRecord | undefined {
     instanceBrandingKey(
       value.source as InstanceBrandingRecord["source"],
       value.origin,
+      value.domainId as string | undefined,
     );
   } catch {
     return undefined;
@@ -155,6 +160,7 @@ function sanitizeBranding(value: unknown): InstanceBrandingRecord | undefined {
   return {
     source: value.source as InstanceBrandingRecord["source"],
     origin: value.origin,
+    ...(typeof value.domainId === "string" ? { domainId: value.domainId } : {}),
     name: value.name,
     ...(typeof value.iconDataUrl === "string" &&
     value.iconDataUrl.length <= 90_000 &&
@@ -188,6 +194,9 @@ function validateStoredData(value: StoredData): StoredData {
     .map(sanitizeAccount)
     .filter((account): account is AccountRecord => Boolean(account));
   const validAccountIds = new Set(accounts.map((account) => account.accountId));
+  const accountsById = new Map(
+    accounts.map((account) => [account.accountId, account]),
+  );
   const credentials = value.credentials
     .map(sanitizeCredentialRecord)
     .filter((item): item is CredentialRecord =>
@@ -207,8 +216,13 @@ function validateStoredData(value: StoredData): StoredData {
       typeof item.source === "string" &&
       typeof item.accountId === "string" &&
       validAccountIds.has(item.accountId) &&
+      item.source === accountsById.get(item.accountId)?.source &&
       typeof item.submissionId === "string" &&
       (item.origin === undefined || typeof item.origin === "string") &&
+      (item.domainId === undefined || typeof item.domainId === "string") &&
+      (item.source !== "hydroj" ||
+        (item.origin === accountsById.get(item.accountId)?.origin &&
+          item.domainId === accountsById.get(item.accountId)?.domainId)) &&
       Number.isFinite(item.submittedAt) &&
       Number.isFinite(item.fetchedAt),
   );
@@ -222,9 +236,18 @@ function validateStoredData(value: StoredData): StoredData {
         ),
       ]
     : undefined;
-  const preferences = { ...value.preferences } as StoredData["preferences"];
-  if (syncAccountIds === undefined) delete preferences.syncAccountIds;
-  else preferences.syncAccountIds = syncAccountIds;
+  const { retentionPerAccount, freshnessCooldownMs } = value.preferences;
+  const preferences: StoredData["preferences"] = {
+    retentionPerAccount:
+      Number.isSafeInteger(retentionPerAccount) && retentionPerAccount > 0
+        ? retentionPerAccount
+        : DEFAULT_PREFERENCES.retentionPerAccount,
+    freshnessCooldownMs:
+      Number.isFinite(freshnessCooldownMs) && freshnessCooldownMs >= 0
+        ? freshnessCooldownMs
+        : DEFAULT_PREFERENCES.freshnessCooldownMs,
+    ...(syncAccountIds === undefined ? {} : { syncAccountIds }),
+  };
   if (isSyncRangePreference(value.preferences.syncRange)) {
     const { from, to, followNow, preset } = value.preferences.syncRange;
     preferences.syncRange = {
@@ -241,6 +264,12 @@ function validateStoredData(value: StoredData): StoredData {
     accounts,
     credentials,
     instanceBranding,
+    activitySchedules: updateActivityScheduleCache(
+      {},
+      isRecord(value.activitySchedules)
+        ? (Object.values(value.activitySchedules) as ActivityScheduleRecord[])
+        : [],
+    ),
     submissions,
     preferences,
   };
@@ -270,9 +299,14 @@ export function createStoragePort(area: StorageAreaLike): StoragePort {
     try {
       await area.set({ [STORAGE_KEY]: persisted });
     } catch (error) {
-      if (Object.keys(persisted.instanceBranding).length === 0) throw error;
-      // Optional presentation cache must not prevent account/record persistence.
+      if (
+        Object.keys(persisted.instanceBranding).length === 0 &&
+        Object.keys(persisted.activitySchedules).length === 0
+      )
+        throw error;
+      // Discardable caches must not prevent account/record persistence.
       persisted.instanceBranding = {};
+      persisted.activitySchedules = {};
       await area.set({ [STORAGE_KEY]: persisted });
     }
     return persisted;

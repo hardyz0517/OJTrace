@@ -1,17 +1,19 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as Checkbox from "@radix-ui/react-checkbox";
 import * as Popover from "@radix-ui/react-popover";
+import { Clipboard } from "lucide-react";
 import type {
   RuntimeMessage,
   RuntimeResponse,
 } from "../../src/application/messaging/messages";
 import type { AccountConfig, Submission } from "../../src/domain";
+import { hydroScopedUrl } from "../../src/domain/hydro-scope";
 import {
   isSyncRangePreference,
   MAX_SYNC_LOOKBACK_DAYS,
+  DEFAULT_SYNC_LOOKBACK_DAYS,
 } from "../../src/domain/sync-range";
-import { errorMessage } from "../../src/application/messaging/error-messages";
 import { hydroOJLanguageDisplayName } from "../../src/adapters/hydroj/normalizer";
 import { latestSubmissionsPerProblem } from "../../src/domain/submission-filter";
 import {
@@ -20,8 +22,11 @@ import {
   ensureAdapterDataPermission,
 } from "../../src/platform/permissions/hosts";
 import { AppHeader } from "../shared/AppHeader";
+import { AnimatedSelect } from "../shared/AnimatedSelect";
 import { OJName } from "../shared/OJName";
 import { DateTimeRangePicker } from "../shared/DateTimeRangePicker";
+import { SyncProgressBar } from "./SyncProgressBar";
+import { useSyncProgress } from "./useSyncProgress";
 import {
   quickDateTimeRange,
   resolveDateTimeRange,
@@ -34,14 +39,6 @@ import {
 import "./style.css";
 
 const sourceLabels: Record<Submission["source"], string> = {
-  codeforces: "Codeforces",
-  luogu: "洛谷",
-  qoj: "QOJ",
-  atcoder: "AtCoder",
-  hydroj: "HydroOJ",
-};
-
-const sourceShortLabels: Record<Submission["source"], string> = {
   codeforces: "Codeforces",
   luogu: "洛谷",
   qoj: "QOJ",
@@ -66,19 +63,6 @@ type SubmissionFilter = "all" | "latest";
 
 function request<T extends RuntimeResponse>(message: object): Promise<T> {
   return browser.runtime.sendMessage(message) as Promise<T>;
-}
-
-function syncErrorMessage(
-  error: NonNullable<
-    Extract<
-      RuntimeResponse,
-      { type: "SYNC_RESULT" }
-    >["result"]["sources"][number]["error"]
-  >,
-): string {
-  const sourceLabel = sourceLabels[error.source] ?? error.source;
-  const detail = errorMessage(error.messageKey);
-  return `${sourceLabel}：${detail}`;
 }
 
 function formatTime(timestamp: number): string {
@@ -263,7 +247,12 @@ function navigationUrl(item: Submission): string | undefined {
   if (!candidate) return undefined;
   if (item.source === "hydroj") {
     return item.origin &&
-      isAllowedOriginNavigation(item.source, item.origin, candidate)
+      isAllowedOriginNavigation(
+        item.source,
+        item.origin,
+        candidate,
+        item.domainId,
+      )
       ? candidate
       : undefined;
   }
@@ -274,7 +263,7 @@ function ojHomeUrl(item: Submission): string | undefined {
   if (item.source === "hydroj") {
     if (!item.origin) return undefined;
     try {
-      return `${new URL(item.origin).origin}/`;
+      return hydroScopedUrl({ origin: item.origin, domainId: item.domainId });
     } catch {
       return undefined;
     }
@@ -295,8 +284,8 @@ function reviewMarkdown(item: Submission): string {
     ? `[${problem}](${item.problemUrl})`
     : problem;
   return item.submissionUrl
-    ? `${problemLink} [(code)](${item.submissionUrl})`
-    : problemLink;
+    ? `- ${problemLink} [(code)](${item.submissionUrl})`
+    : `- ${problemLink}`;
 }
 
 function ClipboardIcon() {
@@ -308,10 +297,10 @@ function ClipboardIcon() {
   );
 }
 
-async function copyReviewMarkdown(item: Submission): Promise<void> {
-  const text = reviewMarkdown(item);
+async function copyMarkdownText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
+    return true;
   } catch {
     const textarea = document.createElement("textarea");
     textarea.value = text;
@@ -319,9 +308,16 @@ async function copyReviewMarkdown(item: Submission): Promise<void> {
     textarea.style.opacity = "0";
     document.body.appendChild(textarea);
     textarea.select();
-    document.execCommand("copy");
-    textarea.remove();
+    try {
+      return document.execCommand("copy");
+    } finally {
+      textarea.remove();
+    }
   }
+}
+
+async function copyReviewMarkdown(item: Submission): Promise<void> {
+  await copyMarkdownText(reviewMarkdown(item));
 }
 
 function CopyReviewButton({
@@ -353,138 +349,81 @@ function CopyReviewButton({
   );
 }
 
-interface FilterOption<T extends string | number> {
-  value: T;
-  label: React.ReactNode;
-}
-
-function AnimatedSelect<T extends string | number>({
-  label,
-  value,
-  options,
-  onChange,
+function CopyReviewGroupButton({
+  items,
+  dayTimestamp,
+  onMessage,
 }: {
-  label: string;
-  value: T;
-  options: FilterOption<T>[];
-  onChange: (value: T) => void;
+  items: Submission[];
+  dayTimestamp?: number;
+  onMessage: (message: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(() =>
-    Math.max(
-      0,
-      options.findIndex((option) => option.value === value),
-    ),
-  );
-  const rootRef = useRef<HTMLDivElement>(null);
-  const listId = useId();
-  const selected =
-    options.find((option) => option.value === value) ?? options[0];
+  const [copying, setCopying] = useState(false);
+  const isDay = dayTimestamp !== undefined;
+  const label = isDay ? "复制当天复盘 Markdown" : "复制当前记录";
 
-  useEffect(() => {
-    setActiveIndex(
-      Math.max(
-        0,
-        options.findIndex((option) => option.value === value),
-      ),
-    );
-  }, [options, value]);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutside = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
-
-  function choose(index: number) {
-    const option = options[index];
-    if (!option) return;
-    setActiveIndex(index);
-    onChange(option.value);
-    setOpen(false);
-  }
-
-  function onKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const delta = event.key === "ArrowDown" ? 1 : -1;
-      setOpen(true);
-      setActiveIndex(
-        (index) => (index + delta + options.length) % options.length,
+  async function handleClick(event: React.MouseEvent<HTMLButtonElement>) {
+    if (copying || items.length === 0) return;
+    const button = event.currentTarget;
+    const pointerClick = event.detail > 0;
+    setCopying(true);
+    try {
+      const copied = await copyMarkdownText(
+        items.map(reviewMarkdown).join("\n"),
       );
-    } else if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      if (open) choose(activeIndex);
-      else setOpen(true);
+      if (!copied) throw new Error("Clipboard copy failed");
+      const date = isDay ? new Date(dayTimestamp) : undefined;
+      onMessage(
+        date
+          ? `已复制 ${date.getMonth() + 1} 月 ${date.getDate()} 日的 ${items.length} 条记录`
+          : `已复制 ${items.length} 条记录`,
+      );
+    } catch {
+      onMessage("复制失败，请重试");
+    } finally {
+      setCopying(false);
+      if (pointerClick) button.blur();
     }
   }
 
   return (
-    <div className="animated-select" ref={rootRef}>
-      <button
-        type="button"
-        className={`select-trigger${open ? " is-open" : ""}`}
-        aria-label={label}
-        aria-expanded={open}
-        aria-controls={listId}
-        onClick={() => setOpen((current) => !current)}
-        onKeyDown={onKeyDown}
-      >
-        <span>{selected?.label}</span>
-        <span className="select-chevron" aria-hidden="true" />
-      </button>
-      <div
-        id={listId}
-        className={`select-menu${open ? " is-open" : ""}`}
-        role="listbox"
-        aria-label={label}
-        aria-hidden={!open}
-      >
-        {options.map((option, index) => (
-          <button
-            type="button"
-            role="option"
-            aria-selected={option.value === value}
-            tabIndex={open ? 0 : -1}
-            className={`select-option${option.value === value ? " is-selected" : ""}${index === activeIndex ? " is-active" : ""}`}
-            key={String(option.value)}
-            onMouseEnter={() => setActiveIndex(index)}
-            onClick={() => choose(index)}
-          >
-            <span>{option.label}</span>
-          </button>
-        ))}
-      </div>
-    </div>
+    <button
+      type="button"
+      className={
+        isDay
+          ? "copy-review-button copy-day-button"
+          : "quiet-action copy-filtered-button"
+      }
+      aria-label={label}
+      title={label}
+      aria-busy={copying}
+      disabled={copying || items.length === 0}
+      onClick={(event) => void handleClick(event)}
+    >
+      <Clipboard aria-hidden="true" focusable="false" />
+    </button>
   );
 }
 
 function accountDisplayName(account: AccountConfig): string {
-  return (
+  const name =
     account.providerDisplayName?.trim() ||
     account.providerAccountKey?.trim() ||
-    "未命名账号"
-  );
+    "未命名账号";
+  return account.source === "hydroj" && account.domainId
+    ? `${name} · ${account.domainId}`
+    : name;
 }
 
 function sourceDisplayName(
   data: PublicStoredData | null,
   item: Submission,
 ): string {
-  return (
-    (data ? instanceBrandingFor(data, item)?.name : undefined) ??
-    sourceShortLabels[item.source]
+  if (item.source !== "hydroj") return sourceLabels[item.source];
+  const account = data?.accounts.find(
+    (candidate) => candidate.accountId === item.accountId,
   );
+  return account?.label?.trim() || sourceLabels[item.source];
 }
 
 function SyncAccountPopover({
@@ -602,14 +541,17 @@ function SyncAccountPopover({
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
 function syncRangeForData(data: PublicStoredData): DateTimeRange {
-  return data.preferences.syncRange ?? quickDateTimeRange(7);
+  return (
+    data.preferences.syncRange ?? quickDateTimeRange(DEFAULT_SYNC_LOOKBACK_DAYS)
+  );
 }
 
 function allowedRowUrl(item: Submission, url?: string): string | undefined {
   if (!url) return undefined;
   const allowed =
     item.source === "hydroj"
-      ? item.origin && isAllowedOriginNavigation(item.source, item.origin, url)
+      ? item.origin &&
+        isAllowedOriginNavigation(item.source, item.origin, url, item.domainId)
       : isAllowedNavigation(item.source, url);
   return allowed ? url : undefined;
 }
@@ -710,7 +652,7 @@ function TimelineRow({
   );
 }
 
-function App() {
+export function App() {
   const [data, setData] = useState<PublicStoredData | null>(null);
   const [source, setSource] = useState<Submission["source"] | "all">("all");
   const [verdict, setVerdict] = useState<VerdictFilter>("all");
@@ -718,10 +660,11 @@ function App() {
     useState<SubmissionFilter>("all");
   const [timeRange, setTimeRange] = useState(() => quickDateTimeRange(30));
   const [syncRange, setSyncRange] = useState<DateTimeRange>(() =>
-    quickDateTimeRange(7),
+    quickDateTimeRange(DEFAULT_SYNC_LOOKBACK_DAYS),
   );
   const [timeFilterNow, setTimeFilterNow] = useState(Date.now);
   const [syncing, setSyncing] = useState(false);
+  const syncProgress = useSyncProgress();
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
   const [selectionSaving, setSelectionSaving] = useState(false);
   const selectionSaveQueue = useRef(Promise.resolve());
@@ -846,12 +789,10 @@ function App() {
     }
     setSyncing(true);
     setError(null);
+    let syncRequestId: string | undefined;
     try {
-      const hasAtCoderAccount = data?.accounts.some(
-        (account) =>
-          account.source === "atcoder" &&
-          account.enabled &&
-          selectedAccountIds.includes(account.accountId),
+      const hasAtCoderAccount = selectedAccounts.some(
+        (account) => account.source === "atcoder",
       );
       if (
         hasAtCoderAccount &&
@@ -862,10 +803,11 @@ function App() {
         setError("未授予 AtCoder 详情页权限，无法读取内存数据。");
         return;
       }
+      syncRequestId = syncProgress.start(selectedAccounts);
       const response = await request<RuntimeResponse>({
         schemaVersion: 2,
         type: "SYNC_REQUEST",
-        requestId: crypto.randomUUID(),
+        requestId: syncRequestId,
         force: true,
         since: Math.max(0, bounds.from),
         until: bounds.to,
@@ -878,34 +820,12 @@ function App() {
       }
       setData(response.result.data);
       savedData.current = response.result.data;
-      setSelectedAccountIds(
-        selectedAccounts.map((account) => account.accountId),
-      );
-      const requestedAccountIds = new Set(
-        selectedAccounts.map((account) => account.accountId),
-      );
-      const failed = response.result.sources.filter(
-        (item) =>
-          item.error &&
-          requestedAccountIds.has(item.accountId) &&
-          selectedAccounts.some(
-            (account) => account.accountId === item.accountId,
-          ),
-      );
-      if (failed.length > 0) {
-        const firstError = failed[0]?.error;
-        setError(
-          firstError
-            ? failed.length === 1
-              ? syncErrorMessage(firstError)
-              : `${failed.length} 个来源同步失败，已保留本地缓存。`
-            : `${failed.length} 个来源暂时不可用，已保留本地缓存。`,
-        );
-      } else {
-        setError(null);
-      }
+      setSelectedAccountIds(selectionForData(response.result.data));
+      syncProgress.finish(syncRequestId, response.result);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "同步失败");
+      const message = caught instanceof Error ? caught.message : "同步失败";
+      if (syncRequestId) syncProgress.fail(syncRequestId, message);
+      else setError(message);
     } finally {
       setSyncing(false);
     }
@@ -950,6 +870,7 @@ function App() {
       ? latestSubmissionsPerProblem(filtered)
       : filtered;
   }, [data, timeRange, timeFilterNow, source, submissionFilter, verdict]);
+  const dateGroups = useMemo(() => groupByDate(visible), [visible]);
   const lastSuccessfulSyncAt = latestSuccessfulSyncAt(data, selectedAccountIds);
   const hasSyncAccounts = data?.accounts.some(
     (account) =>
@@ -1004,6 +925,10 @@ function App() {
               onChange={setSubmissionFilter}
               options={submissionFilterOptions}
             />
+            <CopyReviewGroupButton
+              items={dateGroups.flatMap(([, items]) => items)}
+              onMessage={setToast}
+            />
           </div>
           <div className="filter-actions">
             <span className="sync-state">
@@ -1055,6 +980,34 @@ function App() {
           </div>
         </section>
 
+        {syncProgress.run && (
+          <SyncProgressBar
+            key={syncProgress.run.requestId}
+            run={syncProgress.run}
+            onDismiss={syncProgress.dismiss}
+            renderAccount={(account) => (
+              <>
+                <OJName
+                  source={account.source}
+                  iconDataUrl={
+                    data
+                      ? instanceBrandingFor(data, account)?.iconDataUrl
+                      : undefined
+                  }
+                >
+                  {data
+                    ? (instanceBrandingFor(data, account)?.name ??
+                      sourceLabels[account.source])
+                    : sourceLabels[account.source]}
+                </OJName>
+                <span className="sync-progress-identity">
+                  {accountDisplayName(account)}
+                </span>
+              </>
+            )}
+          />
+        )}
+
         {error && <p className="notice">{error}</p>}
 
         {!data && <p className="empty">正在读取本地数据…</p>}
@@ -1062,9 +1015,16 @@ function App() {
           <p className="empty">暂无提交记录。请先在设置中添加账号。</p>
         )}
         <section className="timeline">
-          {groupByDate(visible).map(([day, items]) => (
+          {dateGroups.map(([day, items]) => (
             <section className="day" key={day}>
-              <h2>{items[0] ? dateLabel(items[0].submittedAt) : day}</h2>
+              <div className="day-heading">
+                <h2>{items[0] ? dateLabel(items[0].submittedAt) : day}</h2>
+                <CopyReviewGroupButton
+                  items={items}
+                  dayTimestamp={items[0]?.submittedAt}
+                  onMessage={setToast}
+                />
+              </div>
               {items.map((item) => (
                 <TimelineRow
                   key={`${item.source}:${item.accountId}:${item.submissionId}`}

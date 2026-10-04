@@ -5,6 +5,25 @@ import {
 } from "../../src/domain/account-identity";
 
 describe("canonical account identity", () => {
+  it("isolates one UID in the root and each explicit Hydro domain", () => {
+    const identity = {
+      source: "hydroj" as const,
+      origin: "http://oj.example.org",
+      providerAccountKey: "42",
+    };
+    const keys = [undefined, "student", "teacher"].map((domainId) =>
+      buildIdentityKey({ ...identity, domainId }),
+    );
+    expect(new Set(keys).size).toBe(3);
+    expect(() => buildIdentityKey({ ...identity, domainId: "a/b" })).toThrow();
+    expect(() =>
+      buildIdentityKey({
+        source: "qoj",
+        providerAccountKey: "42",
+        domainId: "student",
+      }),
+    ).toThrow();
+  });
   it("normalizes origins and isolates Hydro instances", () => {
     expect(normalizeOrigin("https://OJ.EXAMPLE.org/")).toBe(
       "https://oj.example.org",

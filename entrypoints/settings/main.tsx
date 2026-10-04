@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { adapterBySource } from "../../src/adapters";
 import type { RuntimeResponse } from "../../src/application/messaging/messages";
@@ -108,7 +108,9 @@ function App() {
                         source: response.account.source,
                         records: [],
                         diagnostics: response.diagnostics,
-                        stale: !response.account.enabled,
+                        coverage: response.coverage,
+                        error: response.syncError,
+                        stale: response.coverage?.outcome.status !== "complete",
                       },
                     ],
               );
@@ -125,7 +127,9 @@ function App() {
               const branding = instanceBrandingFor(data, account);
               const syncState = data.syncStates[account.accountId];
               const syncLabel = syncState?.stale
-                ? "最近同步失败"
+                ? syncState.lastError
+                  ? "最近同步失败"
+                  : "范围未完整同步"
                 : syncState?.lastSuccessAt
                   ? "最近同步成功"
                   : "尚未同步";
@@ -142,8 +146,9 @@ function App() {
                         size="small"
                         iconDataUrl={branding?.iconDataUrl}
                       >
-                        {branding?.name ??
-                          adapter?.metadata.displayName ??
+                        {(account.source === "hydroj" &&
+                          account.label?.trim()) ||
+                          adapter?.metadata.displayName ||
                           account.source}
                       </OJName>
                     </span>
@@ -154,6 +159,7 @@ function App() {
                       </strong>
                       <span>
                         {modeLabel(account.authMode)} · {syncLabel}
+                        {account.domainId && ` · ${account.domainId}`}
                       </span>
                     </div>
                   </div>

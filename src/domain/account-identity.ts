@@ -1,4 +1,5 @@
 import type { SourceId } from "./types";
+import { normalizeHydroDomainId } from "./hydro-scope";
 
 export class AccountIdentityError extends Error {
   constructor(
@@ -48,26 +49,37 @@ function tupleKey(parts: readonly string[]): string {
 export function buildIdentityKey(input: {
   source: SourceId;
   origin?: string;
+  domainId?: string;
   providerAccountKey: string;
 }): string {
   const scope = input.source === "hydroj" ? normalizeOrigin(input.origin) : "";
   if (input.source === "hydroj" && !scope) {
     throw new AccountIdentityError("origin-required");
   }
-  if (input.source !== "hydroj" && input.origin !== undefined) {
+  if (
+    input.source !== "hydroj" &&
+    (input.origin !== undefined || input.domainId !== undefined)
+  ) {
     throw new AccountIdentityError("invalid-origin");
   }
+  const domainId = normalizeHydroDomainId(input.domainId);
   return tupleKey([
     input.source,
     scope,
+    ...(domainId === undefined ? [] : [domainId]),
     normalizeProviderAccountKey(input.providerAccountKey),
   ]);
 }
 
-export function instanceBrandingKey(source: SourceId, origin: string): string {
+export function instanceBrandingKey(
+  source: SourceId,
+  origin: string,
+  domainId?: string,
+): string {
   const normalized = normalizeOrigin(origin);
   if (source !== "hydroj" || !normalized) {
     throw new AccountIdentityError("invalid-origin");
   }
-  return tupleKey([source, normalized]);
+  const domain = normalizeHydroDomainId(domainId);
+  return tupleKey([source, normalized, ...(domain ? [domain] : [])]);
 }

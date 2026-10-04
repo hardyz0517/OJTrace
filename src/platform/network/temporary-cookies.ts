@@ -57,6 +57,7 @@ export async function withTemporaryCookies<T>(
     }),
   );
   const injected: number[] = [];
+  let outcome: { value: T } | { error: unknown };
   try {
     const secure = new URL(origin).protocol === "https:";
     for (const [index, entry] of entries.entries()) {
@@ -79,7 +80,7 @@ export async function withTemporaryCookies<T>(
           httpOnly: old?.httpOnly ?? true,
           // Extension service-worker requests are cross-site relative to the
           // target OJ. A temporary HTTPS cookie must therefore be sent with
-          // SameSite=None; the original attribute is restored in finally.
+          // SameSite=None; the original attribute is restored after the task.
           sameSite: secure ? "no_restriction" : (old?.sameSite ?? "lax"),
           storeId: old?.storeId,
         });
@@ -89,40 +90,44 @@ export async function withTemporaryCookies<T>(
       if (!result) throw new CookieTransportError("injection", entry.name);
       injected.push(index);
     }
-    return await task();
-  } finally {
-    // Restore every injected field even if one restoration fails.
-    const failures: CookieTransportError[] = [];
-    for (const index of injected.reverse()) {
-      const old = previous[index];
-      try {
-        if (old) {
-          const hostCookie = old.name.startsWith("__Host-");
-          const restored = await browser.cookies.set({
-            url,
-            name: old.name,
-            value: old.value,
-            ...(!hostCookie && !old.hostOnly ? { domain: old.domain } : {}),
-            path: hostCookie ? "/" : old.path,
-            secure: old.secure,
-            httpOnly: old.httpOnly,
-            sameSite: old.sameSite,
-            expirationDate: old.expirationDate,
-            storeId: old.storeId,
-          });
-          if (!restored) throw new Error("Cookie restoration failed");
-        } else {
-          const name = entries[index]!.name;
-          const removed = await browser.cookies.remove({ url, name });
-          if (!removed && (await browser.cookies.get({ url, name })))
-            throw new Error("Cookie removal failed");
-        }
-      } catch (error) {
-        failures.push(
-          new CookieTransportError("restoration", entries[index]!.name, error),
-        );
-      }
-    }
-    if (failures.length) throw failures[0];
+    outcome = { value: await task() };
+  } catch (error) {
+    outcome = { error };
   }
+  // Restore every injected field even if one restoration fails.
+  const failures: CookieTransportError[] = [];
+  for (const index of injected.reverse()) {
+    const old = previous[index];
+    try {
+      if (old) {
+        const hostCookie = old.name.startsWith("__Host-");
+        const restored = await browser.cookies.set({
+          url,
+          name: old.name,
+          value: old.value,
+          ...(!hostCookie && !old.hostOnly ? { domain: old.domain } : {}),
+          path: hostCookie ? "/" : old.path,
+          secure: old.secure,
+          httpOnly: old.httpOnly,
+          sameSite: old.sameSite,
+          expirationDate: old.expirationDate,
+          storeId: old.storeId,
+        });
+        if (!restored) throw new Error("Cookie restoration failed");
+      } else {
+        const name = entries[index]!.name;
+        const removed = await browser.cookies.remove({ url, name });
+        if (!removed && (await browser.cookies.get({ url, name })))
+          throw new Error("Cookie removal failed");
+      }
+    } catch (error) {
+      failures.push(
+        new CookieTransportError("restoration", entries[index]!.name, error),
+      );
+    }
+  }
+  // Restoration failure takes precedence after every field has been attempted.
+  if (failures.length) throw failures[0];
+  if ("error" in outcome) throw outcome.error;
+  return outcome.value;
 }

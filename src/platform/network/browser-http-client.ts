@@ -1,4 +1,5 @@
 import { createHttpClient, HttpClientError } from "./http-client";
+import type { RateLimitRegistry } from "./rate-limit";
 import { withCookieScope, withTemporaryCookies } from "./temporary-cookies";
 import {
   normalizeCookieHeader,
@@ -62,8 +63,10 @@ function temporaryCredential(
 }
 
 /** Browser-only credential transport; adapters never call browser.cookies. */
-export function createBrowserHttpClient() {
-  const client = createHttpClient();
+export function createBrowserHttpClient(
+  options: { rateLimits?: RateLimitRegistry } = {},
+) {
+  const client = createHttpClient(options);
   return {
     async request(
       source: SourceId,
@@ -72,13 +75,14 @@ export function createBrowserHttpClient() {
     ) {
       const temporary = temporaryCredential(source, url, options);
       const origin = new URL(url).origin;
-      return withCookieScope(origin, () =>
-        temporary
+      return withCookieScope(origin, () => {
+        options.signal?.throwIfAborted();
+        return temporary
           ? withTemporaryCookies(origin, temporary.cookie, () =>
               client.request(source, url, temporary.options),
             )
-          : client.request(source, url, options),
-      );
+          : client.request(source, url, options);
+      });
     },
     async getCookie(source: SourceId, url: string, name: string) {
       if (source !== "qoj" || new URL(url).origin !== FIXED_ORIGINS.qoj)

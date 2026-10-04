@@ -223,27 +223,6 @@ export function parseLuoguPayload(
   };
 }
 
-export function parseLuoguResponse(
-  text: string,
-  contentType = "",
-): LuoguRawRecord[] {
-  try {
-    const value = parseDocumentValue(text, contentType);
-    if (isLoginPayload(value))
-      throw new Error("Luogu response is a login page");
-    const parsed = parseLuoguPayload(value);
-    if (parsed) return parsed.records;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("login page")) {
-      throw error;
-    }
-    if (/登录|login/i.test(text.slice(0, 5_000))) {
-      throw new Error("Luogu response is a login page");
-    }
-  }
-  throw new Error(`Unsupported Luogu response (${contentType || "unknown"})`);
-}
-
 export function parseLuoguDocument(
   text: string,
   contentType = "",

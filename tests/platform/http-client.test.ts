@@ -3,8 +3,142 @@ import {
   createHttpClient,
   HttpClientError,
 } from "../../src/platform/network/http-client";
+import { createRateLimitRegistry } from "../../src/platform/network/rate-limit";
 
 describe("HttpClient", () => {
+  it("waits for deferred stream cancellation before settling a body timeout", async () => {
+    vi.useFakeTimers();
+    let finishCancel!: () => void;
+    const pendingCancel = new Promise<void>(
+      (resolve) => (finishCancel = resolve),
+    );
+    const cancel = vi.fn(() => pendingCancel);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(new ReadableStream({ cancel })));
+    let settled = false;
+    try {
+      const request = createHttpClient().request(
+        "luogu",
+        "https://www.luogu.com.cn/record/list",
+        { timeoutMs: 10 },
+      );
+      const observed = request.then(
+        () => {
+          settled = true;
+        },
+        (error: unknown) => {
+          settled = true;
+          return error;
+        },
+      );
+      await vi.advanceTimersByTimeAsync(10);
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(settled).toBe(false);
+      finishCancel();
+      await expect(observed).resolves.toMatchObject({ code: "timeout" });
+      expect(settled).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      finishCancel();
+      fetchMock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+  it("blocks later requests as soon as 429 headers arrive, before the body finishes", async () => {
+    let body!: ReadableStreamDefaultController<Uint8Array>;
+    let bodyReadStarted!: () => void;
+    const reading = new Promise<void>((resolve) => (bodyReadStarted = resolve));
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        body = controller;
+      },
+      pull() {
+        bodyReadStarted();
+      },
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(stream, {
+        status: 429,
+        headers: { "retry-after": "10" },
+      }),
+    );
+    const registry = createRateLimitRegistry({ now: () => 100 });
+    const http = createHttpClient({ rateLimits: registry });
+    try {
+      const first = http.request(
+        "luogu",
+        "https://www.luogu.com.cn/record/list",
+      );
+      await reading;
+      // Pull can begin during stream construction, so wait until dispatch has
+      // accepted the response headers, without allowing its body to finish.
+      await vi.waitFor(() =>
+        expect(registry.getRetryAfterMs("https://www.luogu.com.cn")).toBe(
+          10_000,
+        ),
+      );
+      await expect(
+        http.request("luogu", "https://www.luogu.com.cn/record/list?page=2"),
+      ).rejects.toMatchObject({ code: "rate_limited", retryAfterMs: 10_000 });
+      expect(fetchMock).toHaveBeenCalledOnce();
+      body.close();
+      await expect(first).resolves.toMatchObject({ status: 429 });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("checks origin cooldown before each physical retry", async () => {
+    const registry = createRateLimitRegistry();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => {
+        registry.record429("https://www.luogu.com.cn", "10");
+        throw new TypeError("temporary network failure");
+      });
+    try {
+      await expect(
+        createHttpClient({ rateLimits: registry }).request(
+          "luogu",
+          "https://www.luogu.com.cn/record/list",
+        ),
+      ).rejects.toMatchObject({ code: "rate_limited" });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("preserves caller abort reasons during body reads without retry", async () => {
+    let started!: () => void;
+    const reading = new Promise<void>((resolve) => (started = resolve));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          pull() {
+            started();
+          },
+        }),
+      ),
+    );
+    const controller = new AbortController();
+    const reason = { kind: "deadline" };
+    try {
+      const promise = createHttpClient().request(
+        "luogu",
+        "https://www.luogu.com.cn/record/list",
+        { signal: controller.signal },
+      );
+      const rejected = expect(promise).rejects.toBe(reason);
+      await reading;
+      controller.abort(reason);
+      await rejected;
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
   it("cancels an oversized binary stream without buffering its entire body", async () => {
     const cancel = vi.fn();
     const stream = new ReadableStream<Uint8Array>({

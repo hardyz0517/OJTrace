@@ -1,10 +1,48 @@
-import { type FetchInput, type HttpResponse } from "../../domain";
+import { type AdapterContext, type HttpResponse } from "../../domain";
 import { AdapterFailure } from "../../domain/errors";
 import { createHydroOJInstance } from "./instance";
+import {
+  hydroScopedUrl,
+  isHydroScopeUrl,
+  type HydroScope,
+} from "../../domain/hydro-scope";
 import { isHydroOJLoginPage, parseHydroOJRecordPage } from "./parser";
 
-export function originFor(account: { origin?: string }): string {
-  return createHydroOJInstance(account.origin).origin;
+export function scopeFor(account: { origin?: string; domainId?: string }) {
+  return createHydroOJInstance(account.origin, account.domainId);
+}
+
+export function originFor(account: {
+  origin?: string;
+  domainId?: string;
+}): string {
+  return scopeFor(account).origin;
+}
+
+export class HydroScopeMismatchError extends Error {
+  constructor() {
+    super("Hydro response left the requested domain");
+    this.name = "HydroScopeMismatchError";
+  }
+}
+
+export function assertHydroScopeResponse(
+  scope: HydroScope,
+  response: HttpResponse,
+): void {
+  if (!isHydroScopeUrl(scope, response.url))
+    throw new HydroScopeMismatchError();
+  const context = response.text.match(
+    /window\.UiContext\s*=\s*'([\s\S]*?)';/i,
+  )?.[1];
+  if (scope.domainId !== undefined && context) {
+    try {
+      const actual = JSON.parse(context).domainId;
+      if (actual !== scope.domainId) throw new HydroScopeMismatchError();
+    } catch {
+      throw new HydroScopeMismatchError();
+    }
+  }
 }
 
 export function parseHydroUser(text: string): {
@@ -28,10 +66,10 @@ export function parseHydroUser(text: string): {
 }
 
 function requestOptions(
-  input: FetchInput,
+  input: AdapterContext,
   origin: string,
   cookie: string | undefined,
-): Parameters<NonNullable<FetchInput["http"]["request"]>>[2] {
+): Parameters<NonNullable<AdapterContext["http"]["request"]>>[2] {
   return {
     credentials:
       input.account.authMode === "manual-cookie" ? "omit" : "include",
@@ -43,7 +81,7 @@ function requestOptions(
 }
 
 export function failure(
-  input: FetchInput,
+  input: AdapterContext,
   kind: ConstructorParameters<typeof AdapterFailure>[0]["kind"],
   stage: ConstructorParameters<typeof AdapterFailure>[0]["stage"],
   messageKey: string,
@@ -54,15 +92,21 @@ export function failure(
     source: "hydroj",
     stage,
     messageKey,
-    retryable: response ? response.status >= 500 : false,
-    userAction: kind === "auth_required" ? "open_site_login" : undefined,
+    retryable:
+      kind === "rate_limited" || (response ? response.status >= 500 : false),
+    userAction:
+      kind === "auth_required"
+        ? "open_site_login"
+        : kind === "rate_limited"
+          ? "retry_later"
+          : undefined,
     ...(response ? { httpStatus: response.status } : {}),
     requestId: input.requestId,
   });
 }
 
 export function assertRecordResponse(
-  input: FetchInput,
+  input: AdapterContext,
   response: HttpResponse,
 ): void {
   if (response.status === 401 || isHydroOJLoginPage(response.text))
@@ -92,9 +136,10 @@ export function assertRecordResponse(
 }
 
 export async function loginHydroOJ(
-  input: FetchInput,
+  input: AdapterContext,
   origin: string,
 ): Promise<{ uid?: string; username?: string }> {
+  input.signal.throwIfAborted();
   const username = input.credentials?.username?.trim();
   const password = input.credentials?.password ?? "";
   if (!username || !password) {
@@ -109,13 +154,14 @@ export async function loginHydroOJ(
   try {
     response = await input.http.request(
       "hydroj",
-      new URL("/login", origin).href,
+      hydroScopedUrl(scopeFor(input.account), "/login"),
       {
         method: "POST",
         body: new URLSearchParams({
           uname: username,
           password,
           rememberme: "on",
+          redirect: hydroScopedUrl(scopeFor(input.account)),
           tfa: "",
           authnChallenge: "",
           login_submit: "登录",
@@ -131,8 +177,19 @@ export async function loginHydroOJ(
       },
     );
   } catch (error) {
+    if (input.signal.aborted) throw error;
+    if (error instanceof AdapterFailure) throw error;
     throw AdapterFailure.fromTransport(error, "hydroj", input.requestId);
   }
+  input.signal.throwIfAborted();
+  if (response.status === 429)
+    throw failure(
+      input,
+      "rate_limited",
+      "request",
+      "source.rateLimited",
+      response,
+    );
   const identity = parseHydroUser(response.text);
   if (
     response.status < 200 ||
@@ -151,31 +208,64 @@ export async function loginHydroOJ(
       requestId: input.requestId,
     });
   }
+  try {
+    assertHydroScopeResponse(scopeFor(input.account), response);
+  } catch {
+    throw failure(
+      input,
+      "invalid_response",
+      "identity",
+      "source.scopeMismatch",
+      response,
+    );
+  }
   return identity;
 }
 
 export async function requestPage(
-  input: FetchInput,
+  input: AdapterContext,
   url: string,
   origin: string,
   cookie: string | undefined,
   format: "json" | "html" = "html",
 ): Promise<HttpResponse> {
+  input.signal.throwIfAborted();
   try {
-    return await input.http.request("hydroj", url, {
+    const response = await input.http.request("hydroj", url, {
       ...requestOptions(input, origin, cookie),
       headers: {
         ...(cookie ? { Cookie: cookie } : {}),
         Accept: format === "json" ? "application/json" : "text/html",
       },
     });
+    input.signal.throwIfAborted();
+    if (
+      response.status >= 200 &&
+      response.status < 300 &&
+      !isHydroOJLoginPage(response.text)
+    ) {
+      try {
+        assertHydroScopeResponse(scopeFor(input.account), response);
+      } catch {
+        throw failure(
+          input,
+          "invalid_response",
+          "request",
+          "source.scopeMismatch",
+          response,
+        );
+      }
+    }
+    return response;
   } catch (error) {
+    if (input.signal.aborted) throw error;
+    if (error instanceof AdapterFailure) throw error;
     throw AdapterFailure.fromTransport(error, "hydroj", input.requestId);
   }
 }
 
 export async function requestRecordPage(
-  input: FetchInput,
+  input: AdapterContext,
   url: string,
   origin: string,
   cookie?: string,
@@ -201,6 +291,8 @@ export function withInstanceSession<T>(
   origin: string,
   task: () => Promise<T>,
 ): Promise<T> {
+  // Lock order: instance session -> pagination -> browser Cookie scope -> HTTP.
+  // Keep the session until the task (including Cookie restoration) truly settles.
   const operation = (sessionQueues.get(origin) ?? Promise.resolve())
     .catch(() => undefined)
     .then(task);

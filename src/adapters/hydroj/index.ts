@@ -1,11 +1,20 @@
 import { cookieHeaderFromCredentials, type OJAdapter } from "../../domain";
-import { mergeSubmissions, submissionKey } from "../../domain/merge";
+import { finalizeCoverage } from "../shared/submission-window";
+import { reportProgress } from "../../domain/sync-progress";
+import { hydroScopedUrl } from "../../domain/hydro-scope";
 import { fetchHydroBranding } from "./branding";
 import { isHydroOJLoginPage } from "./parser";
 import { collectActivityRecords } from "./activities";
-import { fetchRecordPages } from "./records";
+import {
+  createHydroCollectionBudget,
+  fetchRecordPages,
+  partialOutcome,
+} from "./records";
 import {
   originFor,
+  scopeFor,
+  assertHydroScopeResponse,
+  HydroScopeMismatchError,
   parseHydroUser,
   failure,
   assertRecordResponse,
@@ -68,15 +77,6 @@ const implementation: OJAdapter = {
         ],
       },
     ],
-    capabilities: {
-      accountLookup: true,
-      stableSubmissionId: true,
-      directSubmissionUrl: true,
-      requiresBrowserSession: true,
-      supportsAnonymous: false,
-      supportsContentScriptFallback: false,
-    },
-    dataOrigins: [],
   },
 
   async authorize(input) {
@@ -92,19 +92,37 @@ const implementation: OJAdapter = {
         "identity",
         "account.cookieRequired",
       );
-    const identity =
-      input.account.authMode === "password"
-        ? await loginHydroOJ(input, origin)
-        : parseHydroUser(
-            (
-              await requestPage(
-                input,
-                new URL("/", origin).href,
-                origin,
-                cookie,
-              )
-            ).text,
+    let identity: ReturnType<typeof parseHydroUser>;
+    if (input.account.authMode === "password") {
+      identity = await loginHydroOJ(input, origin);
+      // Verify access in the selected domain independently of a successful login.
+      if (input.account.domainId) {
+        const home = await requestPage(
+          input,
+          hydroScopedUrl(scopeFor(input.account)),
+          origin,
+          cookie,
+        );
+        assertRecordResponse(input, home);
+        const verified = parseHydroUser(home.text);
+        if (verified.uid !== identity.uid)
+          throw failure(
+            input,
+            "auth_required",
+            "identity",
+            "account.identityChanged",
           );
+      }
+    } else {
+      const home = await requestPage(
+        input,
+        hydroScopedUrl(scopeFor(input.account)),
+        origin,
+        cookie,
+      );
+      assertRecordResponse(input, home);
+      identity = parseHydroUser(home.text);
+    }
     if (!identity.uid || !identity.username)
       throw failure(input, "auth_required", "identity", "source.authRequired");
     return {
@@ -115,14 +133,13 @@ const implementation: OJAdapter = {
     };
   },
   async detectBrowserSession(input) {
-    const origin =
-      input.origin ??
-      (input.pageIdentity?.includes("://") ? input.pageIdentity : undefined);
-    if (!origin) return { authenticated: false, status: "site-error" };
+    if (!input.origin) return { authenticated: false, status: "site-error" };
+    const scope = scopeFor(input);
+    const { origin } = scope;
     try {
       const response = await input.http.request(
         "hydroj",
-        new URL("/", origin).href,
+        hydroScopedUrl(scope),
         {
           credentials: "include",
           signal: input.signal,
@@ -132,6 +149,9 @@ const implementation: OJAdapter = {
       );
       if (isHydroOJLoginPage(response.text))
         return { authenticated: false, status: "unauthenticated" };
+      if (response.status < 200 || response.status >= 300)
+        return { authenticated: false, status: "site-error" };
+      assertHydroScopeResponse(scope, response);
       const parsed = parseHydroUser(response.text);
       if (parsed.username)
         return {
@@ -141,7 +161,14 @@ const implementation: OJAdapter = {
           uid: parsed.uid,
         };
       return { authenticated: false, status: "unauthenticated" };
-    } catch {
+    } catch (error) {
+      if (input.signal.aborted) input.signal.throwIfAborted();
+      if (error instanceof HydroScopeMismatchError)
+        return {
+          authenticated: false,
+          status: "site-error",
+          diagnostic: "hydro-domain-mismatch",
+        };
       return { authenticated: false, status: "network-error" };
     }
   },
@@ -155,6 +182,7 @@ const implementation: OJAdapter = {
     try {
       const branding = await fetchHydroBranding(input.http, {
         origin,
+        domainId: input.account.domainId,
         source: "hydroj",
         credentials:
           input.account.authMode === "manual-cookie" ? "omit" : "include",
@@ -164,6 +192,7 @@ const implementation: OJAdapter = {
       });
       return { branding, diagnostics: [] };
     } catch {
+      if (input.signal.aborted) input.signal.throwIfAborted();
       return {
         diagnostics: [
           {
@@ -179,6 +208,7 @@ const implementation: OJAdapter = {
   },
 
   async fetchRecent(input) {
+    reportProgress(input.onProgress, { phase: "identity" });
     const origin = originFor(input.account);
     const cookie =
       input.account.authMode === "manual-cookie"
@@ -206,7 +236,7 @@ const implementation: OJAdapter = {
     // Always verify the active session, including when records are requested as JSON.
     const home = await requestPage(
       input,
-      new URL("/", origin).href,
+      hydroScopedUrl(scopeFor(input.account)),
       origin,
       cookie,
     );
@@ -245,15 +275,20 @@ const implementation: OJAdapter = {
               );
           }
         : undefined;
+    const budget = createHydroCollectionBudget(input.limit);
+    reportProgress(input.onProgress, {
+      phase: "list",
+      pagesFetched: 0,
+      recordsFetched: 0,
+    });
     const ordinary = await fetchRecordPages(
       input,
       origin,
       uid,
       cookie,
       undefined,
-      undefined,
       100,
-      input.limit,
+      budget,
       refreshSession,
     );
     const activities = await collectActivityRecords(
@@ -261,11 +296,14 @@ const implementation: OJAdapter = {
       origin,
       uid,
       cookie,
+      budget,
       refreshSession,
     );
-    const allRecords = ordinary.records.concat(activities.records);
     const diagnostics = ordinary.diagnostics.concat(activities.diagnostics);
-    if (ordinary.hasMore)
+    if (
+      ordinary.outcome.status === "partial" &&
+      ordinary.outcome.reasons.includes("record-limit")
+    )
       diagnostics.push({
         source: "hydroj",
         code: "record-limit",
@@ -273,31 +311,20 @@ const implementation: OJAdapter = {
         messageKey: "source.recordLimit",
         retryable: false,
       });
-    const activityIds = new Map<string, string>();
-    for (const record of allRecords) {
-      if (!record.activityId) continue;
-      const key = submissionKey(record);
-      const previous = activityIds.get(key);
-      if (previous && previous !== record.activityId)
-        diagnostics.push({
-          source: "hydroj",
-          code: "activity-conflict",
-          severity: "warning",
-          messageKey: "source.activityConflict",
-          retryable: false,
-        });
-      else activityIds.set(key, record.activityId);
-    }
-    const limit = Math.min(input.limit, 1000);
-    const merged = mergeSubmissions([], allRecords, Number.MAX_SAFE_INTEGER);
-    if (merged.length > limit)
-      diagnostics.push({
-        source: "hydroj",
-        code: "output-limit",
-        severity: "warning",
-        messageKey: "source.outputLimit",
-        retryable: false,
-      });
+    const reasons = [ordinary.outcome, activities.outcome].flatMap((outcome) =>
+      outcome.status === "partial" ? outcome.reasons : [],
+    );
+    const records = [...budget.records.values()].sort(
+      (a, b) => b.submittedAt - a.submittedAt,
+    );
+    const coverage = finalizeCoverage(
+      input,
+      budget.pagesFetched,
+      records.length,
+      reasons.length
+        ? partialOutcome(reasons)
+        : { status: "complete", evidence: "all-streams" },
+    );
     return {
       account: {
         accountId: input.account.accountId,
@@ -306,9 +333,10 @@ const implementation: OJAdapter = {
         displayName:
           identity.username ?? input.account.providerDisplayName ?? uid,
       },
-      records: merged.slice(0, limit),
+      records,
       diagnostics,
-      hasMore: ordinary.hasMore || activities.hasMore || merged.length > limit,
+      coverage,
+      activitySchedules: [...budget.activitySchedules.values()],
     };
   },
 };
@@ -328,7 +356,7 @@ export const hydroOJAdapter: OJAdapter = {
       implementation.fetchInstanceBranding!(input),
     ),
   detectBrowserSession: (input) =>
-    withInstanceSession(originFor({ origin: input.origin }), () =>
+    withInstanceSession(originFor(input), () =>
       implementation.detectBrowserSession!(input),
     ),
 };

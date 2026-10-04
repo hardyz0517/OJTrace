@@ -10,22 +10,50 @@ import { AdapterFailure } from "../src/domain/errors";
 import {
   isRuntimeMessage,
   isSchemaVersionSupported,
+  isSyncProgressEvent,
   type RuntimeMessage,
   type RuntimeResponse,
+  type SyncProgressEvent,
 } from "../src/application/messaging/messages";
 import {
   ensureAuthorizationPermission,
   hasSourcePermission,
   hasExactOriginPermission,
-  requestSourcePermission,
 } from "../src/platform/permissions/hosts";
 import { createHydroOJInstance } from "../src/adapters/hydroj/instance";
+import {
+  createRateLimitRegistry,
+  type RateLimitEntry,
+} from "../src/platform/network/rate-limit";
+import { createPaginationRuntime } from "../src/platform/network/pagination-throttle";
+import { createAccountCollector } from "../src/application/sync/collect-account";
+import { SyncRangeError } from "../src/domain";
 
 const TIMELINE_URL = () => browser.runtime.getURL("/timeline.html");
 const storage = createStoragePort(browser.storage.local);
-const http = createBrowserHttpClient();
+const rateLimits = createRateLimitRegistry({
+  storage: {
+    async load() {
+      return (await browser.storage.session.get("ojtrace:rateLimits"))[
+        "ojtrace:rateLimits"
+      ] as RateLimitEntry[] | undefined;
+    },
+    async save(entries) {
+      await browser.storage.session.set({ "ojtrace:rateLimits": entries });
+    },
+  },
+  onStorageError() {
+    console.warn(
+      "[OJTrace] rate-limit session persistence unavailable; using in-memory cooldown",
+    );
+  },
+});
+const http = createBrowserHttpClient({ rateLimits });
+const pagination = createPaginationRuntime({ rateLimits });
+const collector = createAccountCollector(storage, http, { pagination });
 const accounts = createAccountService(storage, {
   http,
+  collector,
   ensurePermission: ensureAuthorizationPermission,
 });
 
@@ -76,6 +104,8 @@ async function authorizeAccount(
     data: publicStoredData(saved.data),
     account: saved.account,
     diagnostics: saved.diagnostics,
+    coverage: saved.coverage,
+    syncError: saved.syncError,
     superseded: saved.superseded,
   };
 }
@@ -87,6 +117,7 @@ export default defineBackground(() => {
 
   browser.runtime.onMessage.addListener((raw: unknown, sender) => {
     if (sender.id !== browser.runtime.id) return undefined;
+    if (isSyncProgressEvent(raw)) return undefined;
     const schemaVersion =
       raw && typeof raw === "object"
         ? (raw as { schemaVersion?: unknown }).schemaVersion
@@ -109,6 +140,7 @@ async function handleMessage(
   message: RuntimeMessage,
 ): Promise<RuntimeResponse> {
   try {
+    await rateLimits.ready();
     switch (message.type) {
       case "GET_STATE":
         return {
@@ -119,12 +151,30 @@ async function handleMessage(
           data: publicStoredData(await storage.load()),
         };
       case "SYNC_REQUEST": {
-        const result = await syncEnabledAccounts(storage, http, {
-          force: message.force,
-          since: message.since,
-          until: message.until,
-          accountIds: message.accountIds,
-        });
+        let sequence = 0;
+        const result = await syncEnabledAccounts(
+          storage,
+          http,
+          {
+            force: message.force,
+            recheckActivities: message.recheckActivities,
+            since: message.since,
+            until: message.until,
+            accountIds: message.accountIds,
+            onProgress(progress) {
+              const event: SyncProgressEvent = {
+                schemaVersion: 2,
+                type: "SYNC_PROGRESS",
+                requestId: message.requestId,
+                sequence: ++sequence,
+                progress,
+              };
+              // Pages may close while collection continues; notifications are optional.
+              void browser.runtime.sendMessage(event).catch(() => {});
+            },
+          },
+          collector,
+        );
         return {
           schemaVersion: 2,
           requestId: message.requestId,
@@ -184,6 +234,7 @@ async function handleMessage(
         };
       }
       case "CLEAR_DATA":
+        accounts.cancelPending();
         await storage.clear();
         return {
           schemaVersion: 2,
@@ -202,6 +253,7 @@ async function handleMessage(
         };
       }
       case "CLEAR_SUBMISSIONS": {
+        collector.cancelAll();
         const data = await storage.transact((current) => ({
           ...current,
           submissions: [],
@@ -214,14 +266,6 @@ async function handleMessage(
           data: publicStoredData(data),
         };
       }
-      case "REQUEST_HOST_PERMISSION":
-        return {
-          schemaVersion: 2,
-          requestId: message.requestId,
-          ok: true,
-          type: "PERMISSION",
-          granted: await requestSourcePermission(message.source),
-        };
       case "DETECT_BROWSER_SESSION": {
         const adapter = adapterBySource.get(message.source);
         if (!adapter?.detectBrowserSession) {
@@ -235,9 +279,15 @@ async function handleMessage(
           };
         }
         let sessionOrigin: string | undefined;
+        let sessionDomainId: string | undefined;
         if (message.source === "hydroj") {
           try {
-            sessionOrigin = createHydroOJInstance(message.origin).origin;
+            const instance = createHydroOJInstance(
+              message.origin,
+              message.domainId,
+            );
+            sessionOrigin = instance.origin;
+            sessionDomainId = instance.domainId;
           } catch {
             return responseError(message.requestId, "HydroOJ 实例地址无效。");
           }
@@ -276,6 +326,7 @@ async function handleMessage(
           requestId: message.requestId,
           http,
           origin: sessionOrigin,
+          domainId: sessionDomainId,
         });
         console.info("[OJTrace] browser session result", {
           source: message.source,
@@ -297,6 +348,12 @@ async function handleMessage(
     }
     return responseError("unknown", "Unsupported runtime message");
   } catch (error) {
+    if (error instanceof SyncRangeError)
+      return responseError(
+        message.requestId,
+        errorMessage("sync.invalidRange"),
+        error.code,
+      );
     if (error instanceof AdapterFailure)
       return responseError(
         message.requestId,

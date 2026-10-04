@@ -1,18 +1,20 @@
-import { authorizeFromRecent } from "../authorization";
-import { credentialValue, type OJAdapter } from "../../domain";
-import { AdapterFailure } from "../../domain/errors";
-import { normalizeAtCoderSubmission } from "./normalizer";
+import { finalizeCoverage } from "../shared/submission-window";
 import {
-  parseAtCoderProblems,
-  parseAtCoderSubmissionDetails,
-  parseAtCoderSubmissions,
-} from "./parser";
+  credentialValue,
+  type OJAdapter,
+  type AuthorizeInput,
+  type Diagnostic,
+} from "../../domain";
+import { AdapterFailure } from "../../domain/errors";
+import { reportProgress } from "../../domain/sync-progress";
+import { normalizeAtCoderSubmission } from "./normalizer";
+import { parseAtCoderProblems, parseAtCoderSubmissionDetails } from "./parser";
 import {
   atcoderHomeUrl,
   atcoderProblemsUrl,
   atcoderSubmissionDetailUrl,
-  atcoderUserSubmissionsUrl,
 } from "./urls";
+import { collectAtCoderSubmissions } from "./submissions";
 
 function atcoderSessionCookie(raw: string): string {
   const value = raw.trim();
@@ -48,7 +50,7 @@ async function mapConcurrent<T, R>(
   concurrency: number,
   mapper: (item: T) => Promise<R>,
 ): Promise<R[]> {
-  const results = new Array<R>(items.length);
+  const results: R[] = [];
   let next = 0;
   async function worker(): Promise<void> {
     while (next < items.length) {
@@ -62,9 +64,109 @@ async function mapConcurrent<T, R>(
   return results;
 }
 
+async function resolveAtCoderHandle(
+  input: AuthorizeInput,
+  verify = false,
+): Promise<string> {
+  const authMode = input.account.authMode;
+  if (authMode !== "browser-session" && authMode !== "manual-cookie") {
+    throw new AdapterFailure({
+      kind: "unsupported",
+      source: "atcoder",
+      stage: "identity",
+      messageKey: "account.authModeUnsupported",
+      retryable: false,
+      userAction: "edit_account",
+      requestId: input.requestId,
+    });
+  }
+  const manualCookie = manualAtCoderCookie(input.credentials);
+  if (authMode === "manual-cookie" && !manualCookie) {
+    throw new AdapterFailure({
+      kind: "invalid_response",
+      source: "atcoder",
+      stage: "identity",
+      messageKey: "account.cookieRequired",
+      retryable: false,
+      userAction: "edit_account",
+      requestId: input.requestId,
+    });
+  }
+  let handle = (
+    input.account.providerAccountKey ??
+    input.account.identifier ??
+    ""
+  ).trim();
+  if (verify || !handle) {
+    try {
+      const identityResponse = await input.http.request(
+        "atcoder",
+        atcoderHomeUrl(),
+        {
+          credentials: authMode === "browser-session" ? "include" : "omit",
+          headers: { Accept: "text/html" },
+          ...(manualCookie ? { atcoderSessionCookie: manualCookie } : {}),
+          signal: input.signal,
+        },
+      );
+      if (identityResponse.status === 429 || identityResponse.status === 403)
+        throw new AdapterFailure({
+          kind: identityResponse.status === 429 ? "rate_limited" : "blocked",
+          source: "atcoder",
+          stage: "identity",
+          messageKey:
+            identityResponse.status === 429
+              ? "source.rateLimited"
+              : "source.blocked",
+          retryable: false,
+          httpStatus: identityResponse.status,
+          requestId: input.requestId,
+        });
+      if (
+        identityResponse.status < 200 ||
+        identityResponse.status >= 300 ||
+        /Sign In|ログイン|login\?continue/i.test(identityResponse.text)
+      ) {
+        throw new AdapterFailure({
+          kind: "auth_required",
+          source: "atcoder",
+          stage: "identity",
+          messageKey: "source.authRequired",
+          retryable: false,
+          userAction: "open_site_login",
+          httpStatus: identityResponse.status,
+          requestId: input.requestId,
+        });
+      }
+      handle = parseAtCoderUsername(identityResponse.text) ?? "";
+    } catch (error) {
+      if (error instanceof AdapterFailure) throw error;
+      if (input.signal.aborted) throw input.signal.reason;
+      throw AdapterFailure.fromTransport(error, "atcoder", input.requestId);
+    }
+  }
+  if (!handle)
+    throw new AdapterFailure({
+      kind: "invalid_response",
+      source: "atcoder",
+      stage: "identity",
+      messageKey: "account.identityFromCookieRequired",
+      retryable: false,
+      userAction: "edit_account",
+      requestId: input.requestId,
+    });
+  return handle;
+}
+
 export const atcoderAdapter: OJAdapter = {
-  authorize(input) {
-    return authorizeFromRecent(this, input);
+  async authorize(input) {
+    const handle = await resolveAtCoderHandle(input, true);
+    return {
+      accountId: input.account.accountId,
+      source: "atcoder",
+      providerAccountKey: handle,
+      displayName: handle,
+    };
   },
   metadata: {
     id: "atcoder",
@@ -96,27 +198,8 @@ export const atcoderAdapter: OJAdapter = {
         identifierRequired: false,
       },
     ],
-    capabilities: {
-      accountLookup: true,
-      stableSubmissionId: true,
-      directSubmissionUrl: true,
-      requiresBrowserSession: true,
-      supportsAnonymous: false,
-      supportsContentScriptFallback: false,
-    },
   },
   async detectBrowserSession(input) {
-    // A page-context identity is authoritative for this check. Extension
-    // service-worker fetches do not consistently share the browser tab's
-    // session cookie in Chrome and Edge.
-    const pageIdentity = input.pageIdentity?.trim();
-    if (pageIdentity && !/\s/.test(pageIdentity)) {
-      return {
-        authenticated: true,
-        status: "authenticated",
-        username: pageIdentity,
-      };
-    }
     try {
       const response = await input.http.request("atcoder", atcoderHomeUrl(), {
         credentials: "include",
@@ -128,15 +211,12 @@ export const atcoderAdapter: OJAdapter = {
           authenticated: false,
           status: response.status === 403 ? "permission-denied" : "site-error",
         };
-      if (
-        /Sign In|ログイン|login\?continue/i.test(response.text) &&
-        !pageIdentity
-      )
+      if (/Sign In|ログイン|login\?continue/i.test(response.text))
         return { authenticated: false, status: "unauthenticated" };
       const logoutLink = /(?:href|action)=["'][^"']*logout[^"']*["']/i.test(
         response.text,
       );
-      const username = pageIdentity ?? parseAtCoderUsername(response.text);
+      const username = parseAtCoderUsername(response.text);
       const authenticatedMarker =
         username ||
         logoutLink ||
@@ -155,183 +235,56 @@ export const atcoderAdapter: OJAdapter = {
     }
   },
   async fetchRecent(input) {
-    const authMode = input.account.authMode;
-    if (authMode !== "browser-session" && authMode !== "manual-cookie") {
-      throw new AdapterFailure({
-        kind: "unsupported",
-        source: "atcoder",
-        stage: "identity",
-        messageKey: "account.authModeUnsupported",
-        retryable: false,
-        userAction: "edit_account",
-        requestId: input.requestId,
-      });
-    }
-    const manualCookie = manualAtCoderCookie(input.credentials);
-    if (authMode === "manual-cookie" && !manualCookie) {
-      throw new AdapterFailure({
-        kind: "invalid_response",
-        source: "atcoder",
-        stage: "identity",
-        messageKey: "account.cookieRequired",
-        retryable: false,
-        userAction: "edit_account",
-        requestId: input.requestId,
-      });
-    }
-    let handle = (
-      input.account.providerAccountKey ??
-      input.account.identifier ??
-      ""
-    ).trim();
-    if (authMode === "manual-cookie" && !handle && manualCookie) {
-      try {
-        const identityResponse = await input.http.request(
-          "atcoder",
-          atcoderHomeUrl(),
-          {
-            credentials: "omit",
-            headers: { Accept: "text/html" },
-            atcoderSessionCookie: manualCookie,
-            signal: input.signal,
-          },
-        );
-        if (
-          identityResponse.status < 200 ||
-          identityResponse.status >= 300 ||
-          /Sign In|ログイン|login\?continue/i.test(identityResponse.text)
-        ) {
-          throw new AdapterFailure({
-            kind: "auth_required",
-            source: "atcoder",
-            stage: "identity",
-            messageKey: "source.authRequired",
-            retryable: false,
-            userAction: "open_site_login",
-            httpStatus: identityResponse.status,
-            requestId: input.requestId,
-          });
-        }
-        handle = parseAtCoderUsername(identityResponse.text) ?? "";
-      } catch (error) {
-        if (error instanceof AdapterFailure) throw error;
-        throw AdapterFailure.fromTransport(error, "atcoder", input.requestId);
-      }
-    }
-    if (!handle)
-      throw new AdapterFailure({
-        kind: "invalid_response",
-        source: "atcoder",
-        stage: "identity",
-        messageKey: "account.identityFromCookieRequired",
-        retryable: false,
-        userAction: "edit_account",
-        requestId: input.requestId,
-      });
-    let response;
-    try {
-      response = await input.http.request(
-        "atcoder",
-        atcoderUserSubmissionsUrl(
-          handle,
-          input.since === undefined ? 0 : input.since / 1_000,
-        ),
-        {
-          // AtCoder Problems is a public cross-origin API. Sending browser
-          // credentials here triggers CORS failures because it uses a
-          // wildcard Access-Control-Allow-Origin header, and it is not needed
-          // for public submission data.
-          credentials: "omit",
-          atcoderProblemsApi: true,
-          signal: input.signal,
-          headers: {
-            Accept: "application/json",
-          },
-        },
-      );
-    } catch (error) {
-      throw AdapterFailure.fromTransport(error, "atcoder", input.requestId);
-    }
-    if (
-      response.status === 401 ||
-      /Sign In|ログイン|login\?continue/i.test(response.text)
-    )
-      throw new AdapterFailure({
-        kind: "auth_required",
-        source: "atcoder",
-        stage: "request",
-        messageKey: "source.authRequired",
-        retryable: false,
-        userAction: "open_site_login",
-        httpStatus: response.status,
-        requestId: input.requestId,
-      });
-    if (response.status === 403 || response.status === 429)
-      throw new AdapterFailure({
-        kind: response.status === 403 ? "blocked" : "rate_limited",
-        source: "atcoder",
-        stage: "request",
-        messageKey:
-          response.status === 403 ? "source.blocked" : "source.rateLimited",
-        retryable: response.status >= 500,
-        userAction: "retry_later",
-        httpStatus: response.status,
-        requestId: input.requestId,
-      });
-    if (response.status < 200 || response.status >= 300)
-      throw new AdapterFailure({
-        kind: "network",
-        source: "atcoder",
-        stage: "request",
-        messageKey: "source.httpError",
-        retryable: response.status >= 500,
-        httpStatus: response.status,
-        requestId: input.requestId,
-      });
-    let raw;
-    try {
-      raw = parseAtCoderSubmissions(response.text);
-    } catch {
-      throw new AdapterFailure({
-        kind: "parse_failed",
-        source: "atcoder",
-        stage: "parse",
-        messageKey: "source.invalidResponse",
-        retryable: false,
-        requestId: input.requestId,
-      });
-    }
+    reportProgress(input.onProgress, {
+      phase: "identity",
+      pagesFetched: 0,
+      recordsFetched: 0,
+    });
+    const handle = await resolveAtCoderHandle(input);
+    const { rows, pagesFetched, outcome } = await collectAtCoderSubmissions(
+      input,
+      handle,
+    );
+    const diagnostics: Diagnostic[] = [];
+    let enrichmentStopped = false;
+    let enrichmentIncomplete = false;
     let problemNames = new Map<string, string>();
-    try {
-      const metadata = await input.http.request(
-        "atcoder",
-        atcoderProblemsUrl(),
-        {
-          atcoderProblemMetadataApi: true,
-          credentials: "omit",
-          signal: input.signal,
-          headers: { Accept: "application/json" },
-        },
-      );
-      if (metadata.status >= 200 && metadata.status < 300) {
-        problemNames = new Map(
-          parseAtCoderProblems(metadata.text).flatMap((problem) => {
-            const name = problem.title ?? problem.name;
-            return name ? [[problem.id, name] as const] : [];
-          }),
+    if (rows.length > 0)
+      try {
+        const metadata = await input.http.request(
+          "atcoder",
+          atcoderProblemsUrl(),
+          {
+            atcoderProblemMetadataApi: true,
+            credentials: "omit",
+            signal: input.signal,
+            headers: { Accept: "application/json" },
+          },
         );
+        if (metadata.status < 200 || metadata.status >= 300)
+          enrichmentIncomplete = true;
+        if (metadata.status >= 200 && metadata.status < 300) {
+          problemNames = new Map(
+            parseAtCoderProblems(metadata.text).flatMap((problem) => {
+              const name = problem.title ?? problem.name;
+              return name ? [[problem.id, name] as const] : [];
+            }),
+          );
+        }
+      } catch {
+        enrichmentIncomplete = true;
+        // Metadata is optional; records remain usable with problem IDs.
       }
-    } catch {
-      // Metadata is optional; records remain usable with problem IDs.
-    }
-    const rows = raw
-      .filter(
-        (item) =>
-          input.since === undefined || item.epochSecond * 1_000 >= input.since,
-      )
-      .sort((left, right) => right.epochSecond - left.epochSecond)
-      .slice(0, Math.min(input.limit, 1_000));
+    let detailsCompleted = 0;
+    reportProgress(input.onProgress, {
+      phase: "details",
+      pagesFetched,
+      recordsFetched: rows.length,
+      detailsTotal: rows.length,
+      detailsCompleted,
+    });
     const details = await mapConcurrent(rows, 4, async (item) => {
+      if (enrichmentStopped || input.signal.aborted) return {};
       try {
         const page = await input.http.request(
           "atcoder",
@@ -344,13 +297,47 @@ export const atcoderAdapter: OJAdapter = {
             headers: { Accept: "text/html" },
           },
         );
+        if (page.status === 429) enrichmentStopped = true;
+        if (page.status < 200 || page.status >= 300)
+          enrichmentIncomplete = true;
         return page.status >= 200 && page.status < 300
           ? parseAtCoderSubmissionDetails(page.text)
           : {};
-      } catch {
+      } catch (error) {
+        enrichmentIncomplete = true;
+        if (
+          input.signal.aborted ||
+          (error instanceof Error &&
+            "code" in error &&
+            error.code === "rate_limited")
+        )
+          enrichmentStopped = true;
         return {};
+      } finally {
+        detailsCompleted += 1;
+        reportProgress(input.onProgress, {
+          phase: "details",
+          pagesFetched,
+          recordsFetched: rows.length,
+          detailsTotal: rows.length,
+          detailsCompleted,
+        });
       }
     });
+    if (
+      input.signal.aborted &&
+      (input.signal.reason as { kind?: string } | undefined)?.kind !==
+        "deadline"
+    )
+      throw input.signal.reason;
+    if (enrichmentStopped || enrichmentIncomplete || input.signal.aborted)
+      diagnostics.push({
+        source: "atcoder",
+        code: "enrichment-incomplete",
+        severity: "warning",
+        messageKey: "sync.enrichmentIncomplete",
+        retryable: true,
+      });
     const records = rows.map((item, index) =>
       normalizeAtCoderSubmission(
         { ...item, ...details[index] },
@@ -360,6 +347,12 @@ export const atcoderAdapter: OJAdapter = {
         problemNames.get(item.problemId),
       ),
     );
+    const coverage = finalizeCoverage(
+      input,
+      pagesFetched,
+      records.length,
+      outcome,
+    );
     return {
       account: {
         accountId: input.account.accountId,
@@ -368,8 +361,8 @@ export const atcoderAdapter: OJAdapter = {
         displayName: handle,
       },
       records,
-      diagnostics: [],
-      hasMore: raw.length > records.length,
+      diagnostics,
+      coverage,
     };
   },
 };

@@ -1,3 +1,5 @@
+import type { ActivityScheduleRecord } from "./activity-schedule";
+
 export const STORAGE_SCHEMA_VERSION = 2 as const;
 export const MESSAGE_SCHEMA_VERSION = 2 as const;
 
@@ -26,11 +28,14 @@ export interface AccountConfig {
   source: SourceId;
   /** Authorization input only; persisted identity uses providerAccountKey. */
   identifier?: string;
+  /** User-facing instance name for HydroOJ; defaults to HydroOJ. */
   label?: string;
   enabled: boolean;
   authMode: AccountAuthMode;
   /** Exact HydroOJ instance origin, required for HydroOJ accounts. */
   origin?: string;
+  /** Explicit Hydro internal domain; omitted means the host's default domain. */
+  domainId?: string;
   providerAccountKey?: string;
   providerDisplayName?: string;
   identityKey?: string;
@@ -71,6 +76,7 @@ export interface Submission {
   accountId: string;
   providerAccountKey?: string;
   origin?: string;
+  domainId?: string;
   submissionId: string;
   identityQuality: IdentityQuality;
   problemId: string;
@@ -132,6 +138,8 @@ export interface AdapterError {
   userAction?:
     "grant_permission" | "open_site_login" | "retry_later" | "edit_account";
   httpStatus?: number;
+  /** Remaining origin cooldown supplied by the transport layer. */
+  retryAfterMs?: number;
   requestId: string;
 }
 
@@ -143,7 +151,6 @@ export interface SyncState {
 }
 
 export interface Preferences {
-  enabledSources: SourceId[];
   retentionPerAccount: number;
   freshnessCooldownMs: number;
   /**
@@ -171,6 +178,7 @@ export interface StoredData {
   accounts: AccountRecord[];
   credentials: CredentialRecord[];
   instanceBranding: Record<string, InstanceBrandingRecord>;
+  activitySchedules: Record<string, ActivityScheduleRecord>;
   submissions: Submission[];
   syncStates: Record<string, SyncState>;
   preferences: Preferences;
@@ -179,6 +187,7 @@ export interface StoredData {
 export interface InstanceBrandingRecord {
   source: SourceId;
   origin: string;
+  domainId?: string;
   name: string;
   iconDataUrl?: string;
   fetchedAt: number;
@@ -186,7 +195,6 @@ export interface InstanceBrandingRecord {
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
-  enabledSources: ["codeforces"],
   retentionPerAccount: 2_000,
   freshnessCooldownMs: 2 * 60 * 1_000,
 };

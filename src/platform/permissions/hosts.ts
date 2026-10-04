@@ -1,5 +1,6 @@
 import type { SourceId } from "../../domain";
 import { adapterBySource } from "../../adapters";
+import { isHydroScopeUrl } from "../../domain/hydro-scope";
 import {
   exactOriginPermissionPattern,
   normalizeCustomHttpsOrigin,
@@ -17,12 +18,6 @@ export async function hasSourcePermission(source: SourceId): Promise<boolean> {
   return browser.permissions.contains({ origins: SOURCE_ORIGINS[source] });
 }
 
-export async function requestSourcePermission(
-  source: SourceId,
-): Promise<boolean> {
-  return browser.permissions.request({ origins: SOURCE_ORIGINS[source] });
-}
-
 export async function hasExactOriginPermission(
   origin: string,
 ): Promise<boolean> {
@@ -34,26 +29,6 @@ export async function hasExactOriginPermission(
       ),
     ],
   });
-}
-
-export async function requestExactOriginPermission(
-  origin: string,
-): Promise<boolean> {
-  return browser.permissions.request({
-    origins: [
-      exactOriginPermissionPattern(
-        normalizeCustomHttpsOrigin(origin, { allowHttp: true }),
-        { allowHttp: true },
-      ),
-    ],
-  });
-}
-
-export async function ensureSourcePermission(
-  source: SourceId,
-): Promise<boolean> {
-  if (await hasSourcePermission(source)) return true;
-  return requestSourcePermission(source);
 }
 
 /** The same permission plan is used by user-gesture requests and background checks. */
@@ -116,11 +91,18 @@ export function isAllowedOriginNavigation(
   source: SourceId,
   origin: string,
   rawUrl: string,
+  domainId?: string,
 ): boolean {
   try {
     return (
-      new URL(rawUrl).origin ===
-      normalizeCustomHttpsOrigin(origin, { allowHttp: true })
+      source === "hydroj" &&
+      isHydroScopeUrl(
+        {
+          origin: normalizeCustomHttpsOrigin(origin, { allowHttp: true }),
+          domainId,
+        },
+        rawUrl,
+      )
     );
   } catch {
     return false;

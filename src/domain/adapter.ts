@@ -8,22 +8,15 @@ import type {
   SourceId,
   Submission,
 } from "./types";
-
-export interface AdapterCapabilities {
-  accountLookup: boolean;
-  stableSubmissionId: boolean;
-  directSubmissionUrl: boolean;
-  requiresBrowserSession: boolean;
-  supportsAnonymous: boolean;
-  supportsContentScriptFallback: boolean;
-}
+import type { SyncWindow } from "./sync-range";
+import type { ProgressObserver } from "./sync-progress";
+import type { ActivityScheduleRecord } from "./activity-schedule";
 
 export interface AdapterMetadata {
   id: SourceId;
   displayName: string;
   availability: Availability;
   authModes: AuthModeDefinition[];
-  capabilities: AdapterCapabilities;
   /** Additional origins used for public data requests by this adapter. */
   dataOrigins?: readonly string[];
 }
@@ -71,44 +64,89 @@ export interface CanonicalAccount {
   displayName?: string;
 }
 
-export interface FetchInput {
+/** Context shared by identity checks and submission collection. */
+export interface AdapterContext {
   account: AccountConfig;
   /** Credentials are injected by the application for this request only. */
   credentials?: AccountCredentials;
-  limit: number;
-  /** Only fetch submissions at or after this timestamp when provided. */
-  since?: number;
   signal: AbortSignal;
   now: number;
   requestId: string;
   http: HttpClient;
 }
 
+/** Identity validation must not depend on submission history or sync windows. */
+export type AuthorizeInput = AdapterContext;
+
+export interface PaginationRuntime {
+  runPage<T>(input: {
+    origin: string;
+    signal: AbortSignal;
+    request: () => Promise<T>;
+  }): Promise<T>;
+}
+
+export interface FetchInput extends AdapterContext, SyncWindow {
+  limit: number;
+  pagination: PaginationRuntime;
+  onProgress?: ProgressObserver;
+  activitySchedules?: readonly ActivityScheduleRecord[];
+  recheckActivities?: boolean;
+}
+
+export type PartialReason =
+  | "record-limit"
+  | "page-limit"
+  | "activity-limit"
+  | "deadline"
+  | "pagination-repeated"
+  | "unverified-coverage"
+  | "invalid-record"
+  | "rate-limited"
+  | "activity-cache"
+  | "unavailable";
+
+export type CoverageOutcome =
+  | {
+      status: "complete";
+      evidence: "exhausted" | "window-boundary" | "all-streams";
+    }
+  | {
+      status: "partial";
+      reasons: readonly [PartialReason, ...PartialReason[]];
+    };
+
+export interface SyncCoverage {
+  window: SyncWindow;
+  outcome: CoverageOutcome;
+  /** Dispatched logical pages, including failed pages; retries count once. */
+  pagesFetched: number;
+  /** Unique, in-window records returned by this collection. */
+  acceptedRecords: number;
+}
+
 export interface FetchResult {
   account: CanonicalAccount;
   records: Submission[];
   diagnostics: Diagnostic[];
-  instanceMetadata?: {
-    branding?: InstanceBrandingRecord;
-  };
-  hasMore: boolean;
+  coverage: SyncCoverage;
+  activitySchedules?: ActivityScheduleRecord[];
 }
 
 export interface BrowserSessionInput {
   signal: AbortSignal;
   requestId: string;
   http: HttpClient;
-  pageIdentity?: string;
   origin?: string;
+  domainId?: string;
 }
 
 export interface OJAdapter {
   readonly metadata: AdapterMetadata;
-  authorize(input: FetchInput): Promise<CanonicalAccount>;
+  authorize(input: AuthorizeInput): Promise<CanonicalAccount>;
   detectBrowserSession?(
     input: BrowserSessionInput,
   ): Promise<BrowserSessionAccount>;
-  validateAccount?(input: FetchInput): Promise<CanonicalAccount>;
   fetchRecent(input: FetchInput): Promise<FetchResult>;
   fetchInstanceBranding?(input: InstanceMetadataInput): Promise<{
     branding?: InstanceBrandingRecord;
@@ -116,14 +154,7 @@ export interface OJAdapter {
   }>;
 }
 
-export interface InstanceMetadataInput {
-  account: AccountConfig;
-  credentials?: AccountCredentials;
-  signal: AbortSignal;
-  now: number;
-  requestId: string;
-  http: HttpClient;
-}
+export type InstanceMetadataInput = AdapterContext;
 
 export interface HttpRequestOptions {
   method?: "GET" | "POST";

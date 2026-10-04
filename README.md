@@ -1,67 +1,51 @@
-# OJTrace · 题迹
+<h1 align="center">OJTrace · 题迹</h1>
 
-![OJTrace Logo](./public/icons/ojtrace-128.png)
+<p align="center">
+  <img src="./public/icons/ojtrace-128.png" alt="OJTrace Logo" width="128" height="128" />
+</p>
 
-[![Manifest V3](https://img.shields.io/badge/Manifest-V3-2f6feb)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
-[![Chrome / Edge](https://img.shields.io/badge/Chrome%20%2F%20Edge-supported-5b8def)](https://developer.chrome.com/docs/extensions/)
+<p align="center">
+  <a href="https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3">
+    <img src="https://img.shields.io/badge/Manifest-V3-2f6feb" alt="Manifest V3" />
+  </a>
+  <a href="https://developer.chrome.com/docs/extensions/">
+    <img src="https://img.shields.io/badge/Chrome%20%2F%20Edge-supported-5b8def" alt="Chrome / Edge" />
+  </a>
+</p>
 
 > 跨 OJ 聚合提交轨迹，让赛后复盘更简单。
 
-OJTrace 是一个面向 Chrome 和 Edge 的 Chromium Manifest V3 扩展。它把多个在线评测系统（OJ）的提交记录整理到一条本地时间线上，帮助你快速回顾做题记录，提高复盘效率。
+OJTrace 是一个 Chrome / Edge 扩展，将多个在线评测系统（OJ）的提交记录汇总为时间线，方便做题回顾和训练复盘。
 
 ## 为什么做 OJTrace
 
-竞赛选手往往会同时使用 Codeforces、洛谷、AtCoder、HydroOJ、QOJ 等平台。单独查看一个 OJ 的提交历史并不困难，真正耗时的是查看分散在不同网站的记录。如果要整理复盘则需要打开很多页面比较混乱繁琐。
+做题记录分散在多个 OJ。复盘时需要分别打开各站的 Submission History，再对照题目和提交时间，很难快速还原一段时间内做过哪些题、经历了怎样的提交过程。
 
-OJTrace 把这些提交记录重新放回同一条时间线。你可以按日期、OJ 和结果筛选，直接打开原题或提交记录继续复盘，亦可以直接复制 Markdown 的题目链接和提交记录。
-
-### 适用场景
-
-#### 做题复盘
-
-一段时间在多个 OJ 上做题后，按真实提交时间回顾解题过程。
-
-#### 整理学习笔记
-
-对单条记录复制复盘 Markdown。可用链接会被保留为类似下面的格式：
-
-```md
-[题号 题名](problemUrl) [(code)](submissionUrl)
-```
+OJTrace 将这些记录按时间统一整理，方便每日回顾、比赛或训练后的复盘，也便于将题目和提交链接整理到学习笔记。
 
 ## 核心功能
 
-- 聚合 Codeforces、洛谷、AtCoder、HydroOJ 和 QOJ 的提交记录；
-- 按 OJ、日期时间范围、Accepted / Unaccepted 筛选；
-- 在全部提交和“每题最后一次”之间切换；
-- 管理多个 OJ 账号，并选择本次要同步的账号；
-- 手动选择采集时间范围（当前最多回看 35 天）；
-- 点击记录跳转到原题、提交详情或 HydroOJ 活动页面；
-- 复制单条记录的复盘 Markdown；
-- 本地优先存储；某个来源暂时失败时保留已有缓存并展示诊断信息；
-- 支持 Chrome 和 Edge 的 Chromium Manifest V3 扩展。
+- 跨 OJ 统一时间线，按提交时间回顾做题过程。
+- 按 OJ、日期时间和结果（Accepted / Unaccepted）筛选。
+- 在“全部提交”和“每题最后一次”之间切换。
+- 管理多个账号，自定义同步账号和采集范围（最近 35 天内）。
+- 跳转到原题或提交记录，复制单条记录的复盘 Markdown。
 
-## 支持
+## 支持的 OJ
 
+| OJ         | 状态      | 添加账号方式                                      | 备注                                    |
+| ---------- | --------- | ------------------------------------------------- | --------------------------------------- |
+| Codeforces | ✅ 可用   | 输入用户名、使用浏览器登录态或手动配置 Cookie     | 输入用户名时无需登录                    |
+| 洛谷       | ✅ 可用   | 使用浏览器登录态或手动配置 Cookie                 | 需要登录                                |
+| AtCoder    | ✅ 可用   | 使用浏览器登录态或手动配置 Cookie                 | 需要登录；提交列表依赖 AtCoder Problems |
+| HydroOJ    | ✅ 可用   | 填写实例地址，使用浏览器登录态、Cookie 或账号密码 | 支持自部署实例及普通、比赛、作业提交    |
+| QOJ        | 🧪 实验性 | 使用浏览器登录态或手动配置 Cookie                 | 需要登录，可能受站点访问限制影响        |
 
-| OJ         | 状态      | 数据来源 / 认证方式                                                              | 备注                                       |
-| ---------- | --------- | -------------------------------------------------------------------------------- | ------------------------------------------ |
-| Codeforces | ✅ 可用   | 官方 `user.status` API；公开用户名、浏览器会话或手动 `JSESSIONID`                | 公开用户名模式不要求登录                   |
-| 洛谷       | ✅ 可用   | `record/list`；浏览器会话或手动配置 `__client_id` 与 `_uid`                      | 需要洛谷登录态                             |
-| AtCoder    | ✅ 可用   | AtCoder 账号身份页 + AtCoder Problems 公共提交 API；浏览器会话或 `REVEL_SESSION` | 提交列表依赖 `kenkoooo.com`                |
-| HydroOJ    | ✅ 可用   | 用户输入并校验后的精确实例 origin；浏览器会话、`sid` / `sid.sig` 或账号密码      | 支持普通提交、比赛和作业活动               |
-| QOJ        | 🧪 实验性 | `qoj.ac` 的 UOJ 风格 HTML 提交列表；浏览器会话或手动 Cookie                      | 需要登录；可能受 Cloudflare 和页面变更影响 |
+数据来源和站点适配细节见 [docs/research/](./docs/research/)。
 
 ## 安装
 
-当前仓库还没有商店版或可引用的 Release 下载包，推荐从源码构建安装。
-
-### 从源码构建
-
-环境要求：
-
-- Node.js 24 或更高版本；
-- pnpm 11.x。
+当前采用源码构建、加载已解压扩展的方式安装。构建需要 Node.js 24 或更高版本，以及 pnpm 11.x。
 
 ```bash
 git clone https://github.com/hardyz0517/OJTrace.git
@@ -70,53 +54,33 @@ pnpm install --frozen-lockfile
 pnpm build
 ```
 
-构建完成后：
-
-1. 打开 `chrome://extensions`，或在 Edge 中打开 `edge://extensions`；
-2. 开启“开发者模式”；
-3. 选择“加载已解压的扩展程序”；
-4. 选择构建产物目录 `.output/chrome-mv3`。
-
-开发时可以使用 `pnpm dev`，WXT 会生成开发构建。
+1. 构建完成后，打开 `chrome://extensions` 或 `edge://extensions`。
+2. 开启“开发者模式”，选择“加载已解压的扩展程序”。
+3. 选择仓库下的 `.output/chrome-mv3` 目录。
 
 ## 快速使用
 
-1. 点击扩展图标打开 Timeline；首次使用时进入设置页添加账号。
-2. 选择 OJ 和认证方式。浏览器会话模式需要先在对应 OJ 登录；HydroOJ 还需要填写实例地址。
-3. 按提示授予对应站点的 host permission。
-4. 选择要同步的账号和采集时间范围，点击“同步”。
-5. 在 Timeline 中按 OJ、时间和结果筛选；点击记录打开原站，或复制复盘 Markdown。
-
-每个 OJ 的数据来源和登录态差异见 [隐私说明](./docs/privacy.md) 及 `docs/research/` 中的站点记录。
+1. 点击扩展图标打开 Timeline，进入设置页添加账号。
+2. 选择 OJ 和添加方式，按提示登录或填写凭证，并授予站点访问权限；HydroOJ 需填写实例地址。
+3. 回到 Timeline，选择同步账号和采集范围，点击“同步”。
+4. 筛选并浏览记录，点击原题或提交链接，或复制复盘 Markdown。
 
 ## 隐私与权限
 
-OJTrace 是 local-first 扩展：没有 OJTrace 后端账号系统，账号配置、提交记录、同步状态、站点品牌、筛选偏好和用户主动填写的凭证都保存在当前浏览器的 `chrome.storage.local` 中。扩展不会把完整 Cookie、密码、提交记录或代码上传到开发者服务器；请求仍会直接发送到对应 OJ，或 AtCoder 的公开提交数据服务。
+OJTrace 采用本地优先（local-first）存储：账号配置、提交记录和手动填写的凭证保存在当前浏览器，可在设置中清除。项目没有后端账号系统。
 
-认证相关行为如下：
+扩展不会向开发者服务器上传 Cookie、密码、提交记录或代码。数据请求只发往已连接的 OJ 或 AtCoder Problems（`kenkoooo.com`）公开数据服务；登录凭证仅用于对应 OJ 的认证。
 
-- 浏览器会话模式使用浏览器已有的 OJ 登录态；
-- 手动 Cookie 和 HydroOJ 密码只在用户主动填写后保存为本地凭证；
-- 需要 Cookie fallback 时，扩展只读取来源限定的 Cookie，并在请求期间临时注入，完成后恢复或删除；
-- AtCoder 的 `REVEL_SESSION` 不会发送到 `kenkoooo.com`；
-- QOJ 可能临时复用同域的登录或 Cloudflare 通行 Cookie，但不会保存或上传这些值；
-- 设置页可以分别清除账号、提交记录或全部本地数据。
+| 权限             | 用途                                |
+| ---------------- | ----------------------------------- |
+| `storage`        | 保存本地数据                        |
+| `tabs`           | 打开或聚焦 OJTrace 页面             |
+| `cookies`        | 在需要登录态的 OJ 上处理对应 Cookie |
+| host permissions | 访问对应 OJ 和所需的公开数据服务    |
 
-扩展声明的权限及用途：
-
-- `storage`：保存本地状态和凭证；
-- `tabs`：打开或聚焦 Timeline；
-- `cookies`：读取来源限定的认证 Cookie，或临时注入用户主动提供的 Cookie；
-- host permissions：访问已连接的 OJ。QOJ 使用固定的 `https://qoj.ac/*`；Codeforces、洛谷、AtCoder 和 AtCoder Problems 通过可选权限按需申请；HydroOJ 按用户输入并通过校验的精确实例 origin 申请。
-
-HydroOJ 的 Chrome 兼容方案需要在 manifest 中声明 HTTP/HTTPS 通配 host pattern，才能申请运行时权限；实际请求仍经过精确 origin 校验，不会请求 `<all_urls>`，也不使用 `webRequest`。更详细的边界和数据处理见 [docs/privacy.md](./docs/privacy.md) 与 [权限研究记录](./docs/research/permission-matrix.md)。
+站点授权范围和 Cookie 处理细节见 [隐私说明](./docs/privacy.md)。
 
 ## 开发
-
-### 环境要求
-
-- Node.js 24 或更高版本；
-- pnpm 11.x。
 
 ### 本地开发
 
@@ -126,8 +90,6 @@ pnpm dev
 ```
 
 ### 检查与构建
-
-以下命令直接对应仓库当前的 package scripts：
 
 ```bash
 pnpm typecheck
@@ -143,4 +105,4 @@ pnpm audit:manifest
 
 ## License
 
-`package.json` 当前声明许可证为 MIT；仓库根目录尚未提交独立的 `LICENSE` 文件。
+[MIT](./LICENSE)

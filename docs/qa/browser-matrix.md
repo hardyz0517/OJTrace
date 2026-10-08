@@ -67,6 +67,18 @@ Chrome 和 Edge 分别记录版本、扩展构建与脱敏 Network 时间戳；�
 - [ ] AtCoder 空入选集不请求题名表/详情，详情 429 后不领取新任务；CF 满 1000 条未到窗口时显示 partial。
 - [ ] AtCoder 有效空批或不足 500 条的批次显示 complete；满批按尾秒包含式游标翻页并去重，跨 until 后停止；同秒满批无法前进时显示未验证，不无限翻页。
 
+## 采集节奏整链回归（2026-10-08）
+
+`tests/integration/pagination-settings-collection.test.tsx` 新增 27 项测试，执行真实设置组件、后台消息处理器、存储事务、同步服务、五个 OJ Adapter、浏览器 HTTP 传输和分页计时器，仅模拟浏览器 API、网站响应与时钟。验证逐 OJ 保存 3.2 秒后派发时间、±0.8 秒浮动的 2.4/4 秒边界、恢复默认、后台重新创建后读取配置、同步中修改的冻结策略、Hydro 同源账号/域共享与不同实例独立队列、600 秒等待及 15 分钟超时保留已采记录，以及 force 不绕过 429 冷却。
+
+整链回归发现并修复队列级冷却错误未转换为 Adapter 错误的问题：原本部分来源再次同步会显示 `source.unknownError`，现在五个来源均报告 `source.rateLimited`，不会派发冷却中的 HTTP 请求，已有记录保留。Codeforces 保留已经分类的 Adapter 错误，避免将限流再次转换为网络错误。
+
+Chrome 154.0.8037.98 在独立临时 profile 中加载生产扩展，使用实际设置页保存 Hydro 基础间隔 35 秒、浮动 0，再通过真正的 runtime 消息同步本地 Hydro HTTP fixture。两次服务端请求间隔分别为 35003ms、35005ms，3 张逻辑页完成，1 条记录和成功状态落入 `storage.local`。测试没有附加 worker 调试器；脚本和脱敏结果分别位于 `.output/qa/pagination-worker-lifetime.mjs`、`.output/qa/runtime-35-result.json`。QA 副本只为本地 fixture 增加精确站点权限，生产 manifest 不变。
+
+同一构建另测关闭发起同步的扩展页面：后台继续完成 3 张逻辑页并落库 1 条记录，同步状态为成功；两次服务端间隔为 35010ms、35014ms。结果位于 `.output/qa/runtime-closed-sender-result.json`。600 秒间隔和 15 分钟截止的精确派发/中止断言来自受控时钟集成测试，本次未完成这两个时长的真实时间浏览器验收。
+
+530 项自动测试通过，1 项真实 Hydro HTTP 集成默认跳过；类型、lint、格式和构建通过。上述证据不等同于五个真实 OJ 的登录态、Cookie 交换、Edge 或完整 15 分钟 worker 生命周期验收。
+
 ## 当前阻塞
 
 2026-10-08 单账号时限调整：默认任务预算从 240 秒改为 900 秒（15 分钟），运行时和设置页提示共用 `ACCOUNT_COLLECTION_DEADLINE_MS`。491 项自动测试通过，1 项真实 Hydro 集成默认跳过；新增 fake timer 回归确认任务超过原 4 分钟时仍运行，在第 900 秒中止并保留 partial，计时器正常清理；原有自定义 deadline、取消与提交回归继续通过。类型、lint、格式、构建和权限审计通过。15 分钟真实扩展的 worker 存活与长任务行为仍待 Chrome/Edge 验收。

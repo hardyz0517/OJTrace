@@ -69,6 +69,17 @@ Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck `
 
 最后验证证据：上述官方 API 文档、2026-09-28 的真实 200/400 响应及脱敏 fixtures。
 
+## 2026-10-07 浏览器登录检测排查
+
+- 用户在 Edge 中能打开首页并确认已登录，但 OJTrace 显示 `site-error`，没有诊断文字。当前实现通过扩展后台 `fetch` 请求首页（`credentials: include`）识别账号，不读取已打开网页的 DOM。浏览器会话请求不手动注入或选择 `JSESSIONID`。
+- 同机匿名 PowerShell 探针：`GET https://codeforces.com/` 返回 HTTP 403、`server: cloudflare`、`cf-mitigated: challenge`，HTML 标题为 `Just a moment...`；`GET /api/user.info?handles=tourist` 返回 HTTP 200 JSON、`status: OK`。这是匿名 HTTP 证据，不能冒充用户已登录 Edge 的实际后台响应。
+- 用户 Cookie 截图显示两个 `JSESSIONID`，分别在 `codeforces.com` 和 `.codeforces.com`，路径均为 `/`；不同作用域可共存。截图无法证明两个 Cookie 分别由谁设置，也无法确定服务端接受哪一个。
+- 截图中的 `cf_clearance` 有分区键。Cloudflare 的 [CHIPS 说明](https://developers.cloudflare.com/waf/troubleshooting/samesite-cookie-interaction/#partitioned-cookies-chips-and-cf_clearance)指出，通行状态按顶层上下文分区。用户重新检测后的真实 Edge 诊断为 `http=403; codeforces-cloudflare-challenge; clearance-unpartitioned=false; clearance-first-party-partitioned=true`：已经确认后台请求被验证页拦截，网页分区里有通行 Cookie。分区状态未复用是现有实现的主要兼容缺口；仍不能排除 Cloudflare 的其他请求环境检查。
+- 同次诊断的 `jsessionid-count=0` 不表示网页登录 Cookie 消失。截图中两份 `JSESSIONID` 均未设置 `Secure`，而扩展仅申请 HTTPS host permission。[Chromium Cookie 查询实现](https://github.com/chromium/chromium/blob/main/extensions/browser/api/cookies/cookies_helpers.cc)根据 Cookie 的 Secure 属性构造 HTTP/HTTPS URL，再检查该 URL 的 host permission；非 Secure Cookie 因缺少 HTTP 权限被过滤。诊断字段已改为 `jsessionid-visible-count`。未扩大权限去读取这些 Cookie，浏览器 `fetch` 是否发送它们与 Cookie API 的可见性是不同问题。
+- Chrome 的 [Cookie 行为说明](https://developer.chrome.com/docs/extensions/develop/concepts/storage-and-cookies#partitioning-and-samesite-behavior)指出，具有 host permission 的扩展请求存在 SameSite 特例，因此不能仅凭 `JSESSIONID` 的 `SameSite=Lax` 就判断它无法发送。
+- 已修复错误详情被吞掉的问题：失败诊断保留 HTTP 状态、拦截/限流/未登录原因和 requestId；可选的只读 Cookie 元数据探针保留同名 Cookie 的 domain/path/hostOnly/SameSite，以及非分区、Codeforces 顶层分区的 clearance 是否存在。诊断不包含 Cookie 值，不修改 Cookie，也不新增权限。
+- 本次只补充检测和诊断，没有把第一方分区的通行 Cookie 复制到其他分区。真实 Edge 复测仍需重新加载构建产物，查看检测诊断；公开用户名模式可以避开首页身份识别，继续使用公开 API。
+
 
 ## 固定验证字段（P0-A）
 

@@ -2,6 +2,192 @@ import { describe, expect, it } from "vitest";
 import { normalizeCodeforcesSubmission } from "../../src/adapters/codeforces/normalizer";
 import { parseCodeforcesResponse } from "../../src/adapters/codeforces/parser";
 import { codeforcesAdapter } from "../../src/adapters/codeforces";
+import { HttpClientError } from "../../src/platform/network/http-client";
+import type { HttpClient } from "../../src/domain";
+
+function detectSession(http: HttpClient) {
+  return codeforcesAdapter.detectBrowserSession!({
+    signal: new AbortController().signal,
+    requestId: "request",
+    http,
+  });
+}
+
+function homeResponse(status: number, text: string, headers = new Headers()) {
+  return {
+    status,
+    url: "https://codeforces.com/",
+    contentType: "text/html",
+    text,
+    headers,
+  };
+}
+
+describe("Codeforces browser session diagnostics", () => {
+  it.each([
+    [403, "<title>Just a moment...</title>", new Headers()],
+    [200, "<title>Just a moment...</title>", new Headers()],
+    [403, "challenge", new Headers({ "cf-mitigated": "challenge" })],
+    [200, "<script>window._cf_chl_opt = {};</script>", new Headers()],
+  ])(
+    "reports a Cloudflare challenge with HTTP %i",
+    async (status, text, headers) => {
+      const result = await detectSession({
+        async request() {
+          return homeResponse(status, text, headers);
+        },
+      });
+      expect(result).toMatchObject({
+        authenticated: false,
+        status: "site-error",
+      });
+      expect(result.diagnostic).toContain("codeforces-cloudflare-challenge");
+      expect(result.diagnostic).toContain(`http=${status}`);
+      expect(result.diagnostic).toContain("requestId=request");
+    },
+  );
+
+  it.each([
+    [401, "", "unauthenticated", "codeforces-login-required"],
+    [
+      200,
+      '<a href="/enter">Enter</a>',
+      "unauthenticated",
+      "codeforces-login-required",
+    ],
+    [
+      200,
+      "<html>unrecognized page</html>",
+      "unauthenticated",
+      "codeforces-identity-missing",
+    ],
+    [403, '<a href="/enter">Enter</a>', "site-error", "codeforces-forbidden"],
+    [
+      429,
+      '<a href="/enter">Enter</a>',
+      "site-error",
+      "codeforces-rate-limited",
+    ],
+    [503, "unavailable", "network-error", "codeforces-http-error"],
+  ])(
+    "preserves the failure reason for HTTP %i",
+    async (status, text, expectedStatus, diagnostic) => {
+      const result = await detectSession({
+        async request() {
+          return homeResponse(status, text);
+        },
+      });
+      expect(result.status).toBe(expectedStatus);
+      expect(result.diagnostic).toContain(diagnostic);
+    },
+  );
+
+  it.each([
+    [
+      new HttpClientError("network", "secret must not be logged"),
+      "network-error",
+      "kind=network",
+    ],
+    [
+      new HttpClientError("timeout", "secret must not be logged"),
+      "network-error",
+      "kind=timeout",
+    ],
+    [
+      new HttpClientError("rate_limited", "cooldown", 1000, 429),
+      "site-error",
+      "codeforces-rate-limited",
+    ],
+  ])(
+    "diagnoses transport errors without exposing error messages",
+    async (error, expectedStatus, diagnostic) => {
+      const result = await detectSession({
+        async request() {
+          throw error;
+        },
+      });
+      expect(result.status).toBe(expectedStatus);
+      expect(result.diagnostic).toContain(diagnostic);
+      expect(result.diagnostic).not.toContain("secret");
+    },
+  );
+
+  it("keeps duplicate session scopes and first-party clearance metadata in a failure", async () => {
+    const result = await detectSession({
+      async request() {
+        return homeResponse(403, "<title>Just a moment...</title>");
+      },
+      async getCookieMetadata() {
+        return [
+          {
+            name: "JSESSIONID",
+            domain: "codeforces.com",
+            path: "/",
+            hostOnly: true,
+            sameSite: "lax",
+          },
+          {
+            name: "JSESSIONID",
+            domain: ".codeforces.com",
+            path: "/",
+            hostOnly: false,
+            sameSite: "lax",
+          },
+          {
+            name: "cf_clearance",
+            domain: ".codeforces.com",
+            path: "/",
+            hostOnly: false,
+            sameSite: "no_restriction",
+            partitionTopLevelSite: "https://codeforces.com",
+          },
+        ];
+      },
+    });
+    expect(result.diagnostic).toContain("jsessionid-visible-count=2");
+    expect(result.diagnostic).toContain(
+      "session-scope=codeforces.com/,hostOnly=true",
+    );
+    expect(result.diagnostic).toContain(
+      "session-scope=.codeforces.com/,hostOnly=false",
+    );
+    expect(result.diagnostic).toContain("clearance-unpartitioned=false");
+    expect(result.diagnostic).toContain(
+      "clearance-first-party-partitioned=true",
+    );
+  });
+
+  it("still detects the account if optional cookie inspection fails", async () => {
+    const result = await detectSession({
+      async getCookieMetadata() {
+        throw new Error("cookie read failure");
+      },
+      async request() {
+        return homeResponse(
+          200,
+          '<a class="user-link" href="/profile/tester">tester</a><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>',
+        );
+      },
+    });
+    expect(result).toEqual({
+      authenticated: true,
+      status: "authenticated",
+      username: "tester",
+    });
+  });
+
+  it("does not mistake passive Cloudflare scripts for a challenge", async () => {
+    const result = await detectSession({
+      async request() {
+        return homeResponse(
+          200,
+          '<a class="user-link" href="/profile/tester">tester</a><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>',
+        );
+      },
+    });
+    expect(result.authenticated).toBe(true);
+  });
+});
 
 describe("Codeforces parser and normalizer", () => {
   it("advertises browser, cookie, and direct username modes", () => {

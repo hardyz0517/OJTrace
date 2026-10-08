@@ -190,6 +190,16 @@ export interface HttpResponse {
   headers: Headers;
 }
 
+/** Cookie scope information for diagnostics; never contains credential values. */
+export interface HttpCookieMetadata {
+  name: string;
+  domain: string;
+  path: string;
+  hostOnly: boolean;
+  sameSite: string;
+  partitionTopLevelSite?: string;
+}
+
 export interface HttpClient {
   request(
     source: SourceId,
@@ -204,4 +214,9 @@ export interface HttpClient {
   ): Promise<string | undefined>;
   /** Read the small, source-scoped set of browser cookies needed for auth fallback. */
   getCookies?(source: SourceId, url: string): Promise<Record<string, string>>;
+  /** Inspect relevant session cookie scopes without returning their values. */
+  getCookieMetadata?(
+    source: SourceId,
+    url: string,
+  ): Promise<HttpCookieMetadata[]>;
 }

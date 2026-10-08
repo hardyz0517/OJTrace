@@ -3,6 +3,7 @@ import type { RateLimitRegistry } from "./rate-limit";
 import { withCookieScope, withTemporaryCookies } from "./temporary-cookies";
 import {
   normalizeCookieHeader,
+  type HttpCookieMetadata,
   type HttpRequestOptions,
   type SourceId,
 } from "../../domain";
@@ -110,6 +111,49 @@ export function createBrowserHttpClient(
           if (cookie.value) result[cookie.name] = cookie.value;
         }
         return result;
+      });
+    },
+    async getCookieMetadata(
+      source: SourceId,
+      url: string,
+    ): Promise<HttpCookieMetadata[]> {
+      const origin = new URL(url).origin;
+      if (source !== "codeforces" || origin !== FIXED_ORIGINS.codeforces)
+        return [];
+      return withCookieScope(origin, async () => {
+        // cookies.getAll() defaults to unpartitioned cookies. Also inspect
+        // clearance obtained while Codeforces was the top-level site.
+        const [unpartitioned, firstParty] = await Promise.all([
+          browser.cookies.getAll({ url }),
+          browser.cookies.getAll({
+            url,
+            partitionKey: {
+              topLevelSite: origin,
+              hasCrossSiteAncestor: false,
+            },
+          }),
+        ]);
+        const metadata = [...unpartitioned, ...firstParty]
+          .filter((cookie) =>
+            /^(?:JSESSIONID|cf_clearance|__cf_bm)$/.test(cookie.name),
+          )
+          .map((cookie) => ({
+            name: cookie.name,
+            domain: cookie.domain,
+            path: cookie.path,
+            hostOnly: cookie.hostOnly,
+            sameSite: cookie.sameSite,
+            ...(cookie.partitionKey?.topLevelSite
+              ? { partitionTopLevelSite: cookie.partitionKey.topLevelSite }
+              : {}),
+          }));
+        // Some implementations ignore the partition filter. Do not count
+        // the same scope twice if both queries return an unpartitioned cookie.
+        return [
+          ...new Map(
+            metadata.map((cookie) => [JSON.stringify(cookie), cookie]),
+          ).values(),
+        ];
       });
     },
   };

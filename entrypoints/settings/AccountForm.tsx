@@ -25,6 +25,14 @@ function sessionStatusText(
   if (session?.status === "permission-denied")
     return "请授予该站点的访问权限。";
   const diagnostic = session?.diagnostic ?? "";
+  if (diagnostic.includes("codeforces-cloudflare-challenge"))
+    return "Codeforces 的 Cloudflare 验证拦截了后台请求；可选择直接输入用户名。";
+  if (diagnostic.includes("codeforces-forbidden"))
+    return "Codeforces 拒绝了后台检测请求（HTTP 403）。";
+  if (diagnostic.includes("codeforces-rate-limited"))
+    return "Codeforces 请求过于频繁，请稍后重试。";
+  if (diagnostic.includes("codeforces-identity-missing"))
+    return "Codeforces 页面已返回，但无法解析登录账号，请查看诊断信息。";
   if (diagnostic.includes("code=cookie-restoration"))
     return "请求后恢复 Cookie 失败，请查看诊断信息。";
   if (diagnostic.includes("code=cookie-injection"))

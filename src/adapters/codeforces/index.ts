@@ -2,6 +2,7 @@ import { finalizeCoverage } from "../shared/submission-window";
 import {
   cookieHeaderFromCredentials,
   credentialValue,
+  type BrowserSessionAccount,
   type BrowserSessionInput,
   type FetchInput,
   type OJAdapter,
@@ -12,6 +13,16 @@ import { normalizeCodeforcesSubmission } from "./normalizer";
 import { parseCodeforcesResponse } from "./parser";
 
 const CODEFORCES_HOME_URL = "https://codeforces.com/";
+
+function isCodeforcesChallenge(text: string, headers: Headers): boolean {
+  return (
+    headers.get("cf-mitigated")?.toLowerCase() === "challenge" ||
+    /<title\b[^>]*>\s*(?:just a moment(?:\.{3}|…)?|attention required!?(?:\s*\|\s*cloudflare)?)\s*<\/title>/i.test(
+      text,
+    ) ||
+    /(?:window\.)?_cf_chl_opt\s*=/.test(text)
+  );
+}
 
 function parseCodeforcesUsername(text: string): string | undefined {
   const directIdentity = text.match(
@@ -45,6 +56,7 @@ async function currentCodeforcesUser(
   input:
     Pick<FetchInput, "http" | "signal" | "requestId"> | BrowserSessionInput,
   cookie?: string,
+  trace?: (diagnostic: string) => void,
 ) {
   const identityMessageKey = cookie
     ? "account.identityFromCookieRequired"
@@ -62,7 +74,22 @@ async function currentCodeforcesUser(
     if (input.signal.aborted) throw input.signal.reason;
     throw AdapterFailure.fromTransport(error, "codeforces", input.requestId);
   }
-  if (response.status === 401 || isCodeforcesLoginPage(response.text)) {
+  trace?.(`http=${response.status}`);
+  if (isCodeforcesChallenge(response.text, response.headers)) {
+    trace?.("codeforces-cloudflare-challenge");
+    throw new AdapterFailure({
+      kind: "blocked",
+      source: "codeforces",
+      stage: "identity",
+      messageKey: "source.blocked",
+      retryable: false,
+      userAction: "open_site_login",
+      httpStatus: response.status,
+      requestId: input.requestId,
+    });
+  }
+  if (response.status === 401) {
+    trace?.("codeforces-login-required");
     throw new AdapterFailure({
       kind: "auth_required",
       source: "codeforces",
@@ -75,6 +102,7 @@ async function currentCodeforcesUser(
     });
   }
   if (response.status === 403) {
+    trace?.("codeforces-forbidden");
     throw new AdapterFailure({
       kind: "blocked",
       source: "codeforces",
@@ -87,6 +115,7 @@ async function currentCodeforcesUser(
     });
   }
   if (response.status === 429) {
+    trace?.("codeforces-rate-limited");
     throw new AdapterFailure({
       kind: "rate_limited",
       source: "codeforces",
@@ -99,6 +128,7 @@ async function currentCodeforcesUser(
     });
   }
   if (response.status < 200 || response.status >= 300) {
+    trace?.("codeforces-http-error");
     throw new AdapterFailure({
       kind: "network",
       source: "codeforces",
@@ -109,8 +139,22 @@ async function currentCodeforcesUser(
       requestId: input.requestId,
     });
   }
+  if (isCodeforcesLoginPage(response.text)) {
+    trace?.("codeforces-login-required");
+    throw new AdapterFailure({
+      kind: "auth_required",
+      source: "codeforces",
+      stage: "identity",
+      messageKey: identityMessageKey,
+      retryable: false,
+      userAction: "open_site_login",
+      httpStatus: response.status,
+      requestId: input.requestId,
+    });
+  }
   const username = parseCodeforcesUsername(response.text);
   if (!username) {
+    trace?.("codeforces-identity-missing");
     throw new AdapterFailure({
       kind: "auth_required",
       source: "codeforces",
@@ -304,8 +348,53 @@ export const codeforcesAdapter: OJAdapter = {
   },
 
   async detectBrowserSession(input: BrowserSessionInput) {
+    const trace: string[] = [];
+    const failed = (
+      status: BrowserSessionAccount["status"],
+    ): BrowserSessionAccount => ({
+      authenticated: false,
+      status,
+      diagnostic: [
+        "codeforces-session",
+        ...trace,
+        `requestId=${input.requestId}`,
+      ].join("; "),
+    });
+    if (input.http.getCookieMetadata) {
+      try {
+        const cookies = await input.http.getCookieMetadata(
+          "codeforces",
+          CODEFORCES_HOME_URL,
+        );
+        const sessions = cookies.filter(
+          (cookie) => cookie.name === "JSESSIONID",
+        );
+        // getAll() filters non-Secure cookies against HTTP host permissions,
+        // even when queried with an HTTPS URL. This is visibility, not login.
+        trace.push(`jsessionid-visible-count=${sessions.length}`);
+        for (const cookie of sessions) {
+          trace.push(
+            `session-scope=${cookie.domain}${cookie.path},hostOnly=${cookie.hostOnly},sameSite=${cookie.sameSite}`,
+          );
+        }
+        trace.push(
+          `clearance-unpartitioned=${cookies.some((cookie) => cookie.name === "cf_clearance" && !cookie.partitionTopLevelSite)}`,
+        );
+        trace.push(
+          `clearance-first-party-partitioned=${cookies.some((cookie) => cookie.name === "cf_clearance" && cookie.partitionTopLevelSite === "https://codeforces.com")}`,
+        );
+      } catch {
+        if (input.signal.aborted) throw input.signal.reason;
+        // Cookie inspection is optional and must not prevent the real request.
+        trace.push("cookie-metadata-read-failed");
+      }
+    }
     try {
-      const username = await currentCodeforcesUser(input);
+      const username = await currentCodeforcesUser(
+        input,
+        undefined,
+        (diagnostic) => trace.push(diagnostic),
+      );
       return {
         authenticated: true,
         status: "authenticated" as const,
@@ -314,18 +403,25 @@ export const codeforcesAdapter: OJAdapter = {
     } catch (error) {
       if (input.signal.aborted) throw input.signal.reason;
       if (!(error instanceof AdapterFailure)) {
-        return { authenticated: false, status: "site-error" as const };
+        trace.push("codeforces-unexpected-error");
+        return failed("site-error");
       }
+      trace.push(
+        `kind=${error.error.kind}`,
+        `stage=${error.error.stage}`,
+        `key=${error.error.messageKey}`,
+      );
       switch (error.error.kind) {
         case "auth_required":
-          return { authenticated: false, status: "unauthenticated" as const };
+          return failed("unauthenticated");
         case "network":
         case "timeout":
-          return { authenticated: false, status: "network-error" as const };
-        case "blocked":
-          return { authenticated: false, status: "site-error" as const };
+          return failed("network-error");
+        case "rate_limited":
+          trace.push("codeforces-rate-limited");
+          return failed("site-error");
         default:
-          return { authenticated: false, status: "site-error" as const };
+          return failed("site-error");
       }
     }
   },

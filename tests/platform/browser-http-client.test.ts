@@ -26,6 +26,110 @@ afterEach(() => {
   cookieApi.remove.mockReset();
 });
 
+describe("BrowserHttpClient Codeforces cookie metadata", () => {
+  it("reads both session scopes and first-party clearance without returning values or writing cookies", async () => {
+    const session = {
+      name: "JSESSIONID",
+      value: "private-session",
+      domain: "codeforces.com",
+      path: "/",
+      hostOnly: true,
+      sameSite: "lax",
+    };
+    cookieApi.getAll.mockImplementation(async (details) =>
+      details.partitionKey
+        ? [
+            {
+              name: "cf_clearance",
+              value: "private-clearance",
+              domain: ".codeforces.com",
+              path: "/",
+              hostOnly: false,
+              sameSite: "no_restriction",
+              partitionKey: { topLevelSite: "https://codeforces.com" },
+            },
+          ]
+        : [
+            session,
+            { ...session, domain: ".codeforces.com", hostOnly: false },
+            { ...session, name: "_ga", value: "tracking" },
+          ],
+    );
+
+    const metadata = await createBrowserHttpClient().getCookieMetadata(
+      "codeforces",
+      "https://codeforces.com/",
+    );
+    expect(metadata).toHaveLength(3);
+    expect(metadata[0]).toEqual({
+      name: "JSESSIONID",
+      domain: "codeforces.com",
+      path: "/",
+      hostOnly: true,
+      sameSite: "lax",
+    });
+    expect(metadata[1]?.domain).toBe(".codeforces.com");
+    expect(metadata[2]?.partitionTopLevelSite).toBe("https://codeforces.com");
+    expect(JSON.stringify(metadata)).not.toContain("private");
+    expect(cookieApi.getAll).toHaveBeenCalledWith({
+      url: "https://codeforces.com/",
+      partitionKey: {
+        topLevelSite: "https://codeforces.com",
+        hasCrossSiteAncestor: false,
+      },
+    });
+    expect(cookieApi.set).not.toHaveBeenCalled();
+    expect(cookieApi.remove).not.toHaveBeenCalled();
+  });
+
+  it("does not inspect an unrelated origin or source", async () => {
+    const client = createBrowserHttpClient();
+    expect(
+      await client.getCookieMetadata("codeforces", "https://evil.example/"),
+    ).toEqual([]);
+    expect(
+      await client.getCookieMetadata("qoj", "https://codeforces.com/"),
+    ).toEqual([]);
+    expect(cookieApi.getAll).not.toHaveBeenCalled();
+  });
+
+  it("does not double-count cookie scopes when the partition filter is ignored", async () => {
+    cookieApi.getAll.mockResolvedValue([
+      {
+        name: "JSESSIONID",
+        value: "secret",
+        domain: "codeforces.com",
+        path: "/",
+        hostOnly: true,
+        sameSite: "lax",
+      },
+    ]);
+    const metadata = await createBrowserHttpClient().getCookieMetadata(
+      "codeforces",
+      "https://codeforces.com/",
+    );
+    expect(metadata).toHaveLength(1);
+  });
+
+  it("uses existing browser cookies directly for Codeforces browser-session requests", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("ok"));
+    await createBrowserHttpClient().request(
+      "codeforces",
+      "https://codeforces.com/",
+      { credentials: "include", followRedirects: true },
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://codeforces.com/",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(cookieApi.get).not.toHaveBeenCalled();
+    expect(cookieApi.set).not.toHaveBeenCalled();
+    expect(cookieApi.remove).not.toHaveBeenCalled();
+  });
+});
+
 describe("BrowserHttpClient manual AtCoder session", () => {
   it("restores the existing AtCoder cookie after a successful request", async () => {
     const existing = {

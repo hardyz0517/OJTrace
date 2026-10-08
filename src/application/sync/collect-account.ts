@@ -27,6 +27,7 @@ import type {
 import { reportProgress } from "../../domain/sync-progress";
 import { mergeSubmission, submissionKey } from "../../domain/merge";
 import { createPaginationRuntime } from "../../platform/network/pagination-throttle";
+import { RateLimitError } from "../../platform/network/rate-limit";
 import type { StoragePort } from "../storage/store";
 import { refreshInstanceBranding } from "./instance-branding";
 import { finalizeCoverage } from "../../adapters/shared/submission-window";
@@ -293,7 +294,18 @@ export function createAccountCollector(
         ...window,
         limit,
         pagination: {
-          runPage: (page) => pagination.runPage({ ...page, policy }),
+          runPage: (page) =>
+            pagination.runPage({ ...page, policy }).catch((error: unknown) => {
+              // Queue-level cooldown rejects before the HTTP callback. Give
+              // adapters the same failure contract as a physical HTTP 429.
+              if (error instanceof RateLimitError)
+                throw AdapterFailure.fromTransport(
+                  error,
+                  active.source,
+                  requestId,
+                );
+              throw error;
+            }),
         },
         onProgress,
         recheckActivities,

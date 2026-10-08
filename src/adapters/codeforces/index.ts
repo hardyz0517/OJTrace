@@ -508,6 +508,7 @@ export const codeforcesAdapter: OJAdapter = {
       });
     } catch (error) {
       if (input.signal.aborted) throw input.signal.reason;
+      if (error instanceof AdapterFailure) throw error;
       throw AdapterFailure.fromTransport(error, "codeforces", input.requestId);
     }
     if (response.status === 429) {

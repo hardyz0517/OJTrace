@@ -400,4 +400,158 @@ describe("Settings -> background -> persisted policy -> real collection -> timed
     expect(pages.map((page) => page.at - now)).toEqual([0, 600_000]);
     expectCollected(await operation, testCase);
   });
+
+  it("reloads saved cadence after the background worker is recreated", async () => {
+    const testCase = sources[1];
+    await setup(testCase);
+    await saveFromSettings(testCase, "4.2", "0");
+    vi.resetModules();
+    await import("../../entrypoints/background");
+    const operation = sync();
+    await vi.advanceTimersByTimeAsync(4_199);
+    expect(pages).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(pages.map((page) => page.at - now)).toEqual([0, 4_200]);
+    expectCollected(await operation, testCase);
+  });
+
+  it("shares Hydro domain/account pacing by origin and applies the same setting independently to other instances", async () => {
+    const testCase = sources[4];
+    await setup(testCase);
+    await saveFromSettings(testCase, "3.2", "0");
+    const otherOrigin = "https://other-pagination.example.org";
+    const original = stored.accounts[0]!;
+    stored.accounts = [
+      accountRecord({ ...original, accountId: "domain-a", domainId: "alpha" }),
+      accountRecord({ ...original, accountId: "domain-b", domainId: "beta" }),
+      accountRecord({
+        ...original,
+        accountId: "other-instance",
+        origin: otherOrigin,
+      }),
+    ];
+    stored.instanceBranding = Object.fromEntries(
+      stored.accounts.map((account) => [
+        instanceBrandingKey("hydroj", account.origin!, account.domainId),
+        {
+          source: "hydroj",
+          origin: account.origin!,
+          domainId: account.domainId,
+          name: "Test Hydro",
+          fetchedAt: now,
+        },
+      ]),
+    );
+    const operation = sync();
+    await vi.advanceTimersByTimeAsync(16_000);
+    const dispatches = (origin: string) =>
+      pages
+        .filter((page) => new URL(page.url).origin === origin)
+        .map((page) => page.at - now);
+    expect(dispatches(hydroOrigin)).toEqual([
+      0, 3_200, 6_400, 9_600, 12_800, 16_000,
+    ]);
+    expect(dispatches(otherOrigin)).toEqual([0, 3_200, 6_400]);
+    const response = await operation;
+    expect(
+      response.ok &&
+        response.type === "SYNC_RESULT" &&
+        response.result.progress.map((progress) => progress.status),
+    ).toEqual(["complete", "complete", "complete"]);
+    expect(stored.submissions).toHaveLength(3);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("retains collected records when a 600-second cadence reaches the actual 15-minute deadline", async () => {
+    const testCase = sources[4];
+    await setup(testCase);
+    await saveFromSettings(testCase, "600", "0");
+    const operation = sync();
+    await vi.advanceTimersByTimeAsync(899_999);
+    expect(pages.map((page) => page.at - now)).toEqual([0, 600_000]);
+    await vi.advanceTimersByTimeAsync(1);
+    const response = await operation;
+    expect(response.ok).toBe(true);
+    if (!response.ok || response.type !== "SYNC_RESULT")
+      throw new Error("Expected sync result");
+    expect(response.result.progress).toMatchObject([
+      { status: "partial", reasons: ["deadline"], pagesFetched: 2 },
+    ]);
+    expect(stored.submissions).toHaveLength(1);
+    expect(pages).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("a forced sync with custom cadence cannot bypass a real HTTP 429 cooldown", async () => {
+    const testCase = sources[1];
+    await setup(testCase);
+    await saveFromSettings(testCase, "3.2", "0");
+    const serve = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (url, options) => {
+      if (new URL(String(url)).searchParams.get("page") === "2") {
+        pages.push({ url: String(url), at: Date.now() });
+        return new Response("Rate limited", {
+          status: 429,
+          headers: { "retry-after": "120" },
+        });
+      }
+      return serve(url, options);
+    });
+    const first = sync();
+    await vi.advanceTimersByTimeAsync(3_200);
+    const response = await first;
+    expect(
+      response.ok &&
+        response.type === "SYNC_RESULT" &&
+        response.result.progress,
+    ).toMatchObject([{ status: "partial", reasons: ["rate-limited"] }]);
+    expect(stored.submissions).toHaveLength(1);
+    const second = await sync();
+    expect(
+      second.ok && second.type === "SYNC_RESULT" && second.result.progress,
+    ).toMatchObject([{ status: "failed", messageKey: "source.rateLimited" }]);
+    expect(pages.map((page) => page.at - now)).toEqual([0, 3_200]);
+    expect(stored.submissions).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(sources)(
+    "$name reports queue-level cooldown as rate limiting on subsequent forced syncs",
+    async (testCase) => {
+      await setup(testCase);
+      await saveFromSettings(testCase, "3.2", "0");
+      const serve = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (url, options) => {
+        const parsed = new URL(String(url));
+        if (testCase.source === "hydroj" && parsed.pathname === "/")
+          return serve(url, options);
+        return new Response("Rate limited", {
+          status: 429,
+          headers: { "retry-after": "120" },
+        });
+      });
+      const first = await sync();
+      expect(
+        first.ok &&
+          first.type === "SYNC_RESULT" &&
+          first.result.sources.every(
+            (source) => source.error?.kind === "rate_limited",
+          ),
+      ).toBe(true);
+      const count = vi.mocked(fetch).mock.calls.length;
+      const second = await sync();
+      expect(
+        second.ok &&
+          second.type === "SYNC_RESULT" &&
+          second.result.sources.every(
+            (source) =>
+              source.error?.kind === "rate_limited" &&
+              source.error.messageKey === "source.rateLimited",
+          ),
+      ).toBe(true);
+      expect(vi.mocked(fetch).mock.calls).toHaveLength(count);
+      expect(stored.submissions).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
 });

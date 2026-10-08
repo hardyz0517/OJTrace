@@ -10,9 +10,6 @@ import type {
   StoredData,
   HttpClient,
   SourceId,
-  AdapterError,
-  Diagnostic,
-  SyncCoverage,
 } from "../../domain";
 import { adapterBySource } from "../../adapters";
 import { createHydroOJInstance } from "../../adapters/hydroj/instance";
@@ -21,10 +18,7 @@ import type { StoragePort } from "../storage/store";
 import {
   accountCollectorFor,
   type AccountCollector,
-  type AccountCollection,
 } from "../sync/collect-account";
-import { commitCollections } from "../sync/commit-collection";
-import { resolveSyncWindow, SyncRangeError } from "../../domain";
 import { updateBrandingCache } from "../../domain/instance-branding";
 
 export interface AuthorizedAccountInput {
@@ -39,9 +33,6 @@ export interface AccountService {
   authorize(command: AuthorizeAccountCommand): Promise<{
     data: StoredData;
     account: AccountRecord;
-    syncError?: AdapterError;
-    diagnostics: Diagnostic[];
-    coverage?: SyncCoverage;
     superseded: boolean;
   }>;
   upsertAuthorized(input: AuthorizedAccountInput): Promise<{
@@ -208,78 +199,15 @@ export function createAccountService(
         dependencies.collector ??
         accountCollectorFor(storage, dependencies.http)
       ).invalidate(saved.account.accountId, saved.account.credentialRevision);
-      let collection: AccountCollection | undefined;
-      let diagnostics: Diagnostic[] = [];
-      try {
-        const window = resolveSyncWindow({
-          now,
-          preference: saved.data.preferences.syncRange,
-        });
-        collection = await (
-          dependencies.collector ??
-          accountCollectorFor(storage, dependencies.http)
-        ).collect({ account: saved.account, window, now });
-        diagnostics = collection.result.diagnostics;
-        if (collection.result.skipped)
-          diagnostics = [
-            ...diagnostics,
-            {
-              source: command.source,
-              code: "sync-skipped",
-              severity: "info",
-              messageKey: `sync.${collection.result.skipped}`,
-              retryable: false,
-            },
-          ];
-      } catch (error) {
-        if (!(error instanceof SyncRangeError)) throw error;
-        diagnostics = [
-          {
-            source: command.source,
-            code: "invalid-sync-range",
-            severity: "warning",
-            messageKey: "sync.invalidRange",
-            retryable: false,
-          },
-        ];
-      }
-      const data = await storage.transact((current) =>
-        collection &&
-        (
-          dependencies.collector ??
-          accountCollectorFor(storage, dependencies.http)
-        ).isCurrent(collection)
-          ? commitCollections(current, [collection])
-          : current,
-      );
-      const collectionCurrent =
-        !collection ||
-        (
-          dependencies.collector ??
-          accountCollectorFor(storage, dependencies.http)
-        ).isCurrent(collection);
+      const data = await storage.load();
       return {
         data,
         account:
           data.accounts.find(
             (item) => item.accountId === saved.account.accountId,
           ) ?? saved.account,
-        syncError: collectionCurrent ? collection?.result.error : undefined,
-        coverage: collectionCurrent ? collection?.result.coverage : undefined,
-        diagnostics: collectionCurrent
-          ? diagnostics
-          : [
-              ...diagnostics,
-              {
-                source: command.source,
-                code: "sync-cancelled",
-                severity: "warning",
-                messageKey: "sync.cancelled",
-                retryable: false,
-              },
-            ],
         superseded:
-          !collectionCurrent ||
+          generation !== authorizationGeneration ||
           !data.accounts.some(
             (item) =>
               item.accountId === saved.account.accountId &&

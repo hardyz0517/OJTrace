@@ -320,14 +320,9 @@ export const codeforcesAdapter: OJAdapter = {
       {
         type: "browser-session",
         recommended: true,
-        label: "使用当前浏览器登录状态",
-        description: "使用当前浏览器中已经登录的 Codeforces 账号。",
       },
       {
         type: "manual-cookie",
-        label: "手动配置",
-        description:
-          "粘贴 Codeforces Cookie（至少包含 JSESSIONID，建议完整复制），自动识别当前账号。也可只填 JSESSIONID 的值。",
         credentialFields: [
           {
             key: "cookie",

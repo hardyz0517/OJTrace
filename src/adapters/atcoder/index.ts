@@ -177,15 +177,9 @@ export const atcoderAdapter: OJAdapter = {
       {
         type: "browser-session",
         recommended: true,
-        label: "使用当前浏览器登录状态",
-        description:
-          "使用当前浏览器中已经登录的 AtCoder 账号，无需手动复制 Cookie。",
       },
       {
         type: "manual-cookie",
-        label: "手动配置",
-        description:
-          "浏览器登录态无法检测时，仅使用 REVEL_SESSION 配置；账号 Handle 会从登录态自动识别。",
         credentialFields: [
           {
             key: "REVEL_SESSION",

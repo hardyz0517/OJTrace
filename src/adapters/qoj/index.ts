@@ -301,15 +301,9 @@ export const qojAdapter: OJAdapter = {
       {
         type: "browser-session",
         recommended: true,
-        label: "使用当前浏览器登录状态",
-        description:
-          "QOJ/UOJ 的提交列表需要登录；使用当前浏览器中的 QOJ 会话。",
       },
       {
         type: "manual-cookie",
-        label: "手动配置",
-        description:
-          "自动检测失败时，粘贴 QOJ Cookie；仅保存在本地，用于读取提交记录。",
         credentialFields: [
           {
             key: "cookie",

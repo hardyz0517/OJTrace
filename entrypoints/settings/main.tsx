@@ -4,8 +4,8 @@ import { adapterBySource } from "../../src/adapters";
 import type { RuntimeResponse } from "../../src/application/messaging/messages";
 import { AppHeader } from "../shared/AppHeader";
 import { OJName } from "../shared/OJName";
-import { SyncDiagnostics } from "../shared/SyncDiagnostics";
-import { AccountForm, modeLabel } from "./AccountForm";
+import { AccountForm } from "./AccountForm";
+import { modeLabel } from "./AccountAuthContent";
 import {
   instanceBrandingFor,
   type PublicStoredData,
@@ -19,9 +19,6 @@ function send<T extends RuntimeResponse>(message: object): Promise<T> {
 function App() {
   const [data, setData] = useState<PublicStoredData | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [authorizationSources, setAuthorizationSources] = useState<
-    Extract<RuntimeResponse, { type: "SYNC_RESULT" }>["result"]["sources"]
-  >([]);
   const [confirmClear, setConfirmClear] = useState<
     "accounts" | "submissions" | "all" | null
   >(null);
@@ -97,27 +94,11 @@ function App() {
             <h2>账号</h2>
           </div>
           <AccountForm
-            onAuthorized={(response) => {
-              setData(response.data);
-              setAuthorizationSources(
-                response.superseded
-                  ? []
-                  : [
-                      {
-                        accountId: response.account.accountId,
-                        source: response.account.source,
-                        records: [],
-                        diagnostics: response.diagnostics,
-                        coverage: response.coverage,
-                        error: response.syncError,
-                        stale: response.coverage?.outcome.status !== "complete",
-                      },
-                    ],
-              );
+            onAuthorized={() => {
+              void load();
             }}
           />
           {message && <p className="message">{message}</p>}
-          <SyncDiagnostics sources={authorizationSources} data={data} />
 
           <h3 className="connected-title">已连接账号</h3>
           {!data?.accounts.length && <p className="muted">还没有账号。</p>}
@@ -126,13 +107,16 @@ function App() {
               const adapter = adapterBySource.get(account.source);
               const branding = instanceBrandingFor(data, account);
               const syncState = data.syncStates[account.accountId];
-              const syncLabel = syncState?.stale
-                ? syncState.lastError
-                  ? "最近同步失败"
-                  : "范围未完整同步"
-                : syncState?.lastSuccessAt
-                  ? "最近同步成功"
-                  : "尚未同步";
+              const syncLabel =
+                syncState?.lastAttemptAt === undefined
+                  ? "尚未同步"
+                  : syncState.stale
+                    ? syncState.lastError
+                      ? "最近同步失败"
+                      : "范围未完整同步"
+                    : syncState?.lastSuccessAt
+                      ? "最近同步成功"
+                      : "尚未同步";
               return (
                 <li key={account.accountId}>
                   <i

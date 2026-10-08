@@ -4,13 +4,11 @@ import {
   type AccountRecord,
   type BrowserSessionAccount,
   type SourceId,
-  type Diagnostic,
   type SyncRangePreference,
   isSyncRangePreference,
 } from "../../domain";
 import type { PublicStoredData } from "../accounts/account-queries";
 import type { SyncResult } from "../sync/sync-service";
-import type { SyncCoverage } from "../../domain";
 import type { AccountSyncProgress } from "../../domain/sync-progress";
 import { isHydroDomainId } from "../../domain/hydro-scope";
 
@@ -182,9 +180,6 @@ export type RuntimeResponse =
       type: "AUTHORIZED";
       data: PublicStoredData;
       account: AccountRecord;
-      diagnostics: Diagnostic[];
-      coverage?: SyncCoverage;
-      syncError?: import("../../domain").AdapterError;
       superseded: boolean;
     }
   | {

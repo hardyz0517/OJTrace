@@ -60,7 +60,6 @@ describe("account authorization UI", () => {
               ...defaultStoredData(),
               accounts: [account],
             }),
-            diagnostics: [],
             superseded: false,
           };
     });
@@ -91,7 +90,7 @@ describe("account authorization UI", () => {
     );
     expect(state.status).toBe("completed");
   });
-  it("reports saved records with unverified completeness without claiming records were lost", async () => {
+  it("directs the user to sync manually after connecting an account", async () => {
     const account = accountRecord({
       source: "atcoder",
       accountId: "a",
@@ -106,14 +105,7 @@ describe("account authorization UI", () => {
       type: "AUTHORIZED",
       account,
       data: publicStoredData({ ...defaultStoredData(), accounts: [account] }),
-      diagnostics: [],
       superseded: false,
-      coverage: {
-        window: { since: 0, until: 10 },
-        pagesFetched: 1,
-        acceptedRecords: 3,
-        outcome: { status: "partial", reasons: ["unverified-coverage"] },
-      },
     } as never);
     await act(async () => state.selectSource("atcoder"));
     await act(async () =>
@@ -124,8 +116,10 @@ describe("account authorization UI", () => {
     );
     await act(async () => state.authorize());
     expect(state.status).toBe("completed");
-    expect(state.message).toBe(
-      "账号已连接，已获取 3 条记录；所选范围的完整性尚未验证。",
+    expect(state.message).toBe("账号已连接，请到时间线点击“同步”采集记录。");
+    expect(browser.runtime.sendMessage).toHaveBeenCalledOnce();
+    expect(browser.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "AUTHORIZE_ACCOUNT" }),
     );
     expect(onAuthorized).toHaveBeenCalledOnce();
   });
@@ -162,7 +156,6 @@ describe("account authorization UI", () => {
       requestId: "r",
       account,
       data: publicStoredData({ ...defaultStoredData(), accounts: [account] }),
-      diagnostics: [],
       superseded: false,
     };
     let release!: (value: unknown) => void;

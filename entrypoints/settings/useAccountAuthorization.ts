@@ -231,16 +231,7 @@ export function useAccountAuthorization(
       setMessage(
         response.superseded
           ? "账号已被另一项操作更新或删除，请刷新后重试。"
-          : response.syncError
-            ? "账号已连接；首次同步失败，可稍后在时间线重试。"
-            : response.coverage?.outcome.status === "complete"
-              ? "账号已连接并完成首次同步。"
-              : response.coverage?.outcome.status === "partial"
-                ? response.coverage.outcome.reasons.length === 1 &&
-                  response.coverage.outcome.reasons[0] === "unverified-coverage"
-                  ? `账号已连接，已获取 ${response.coverage.acceptedRecords} 条记录；所选范围的完整性尚未验证。`
-                  : "账号已连接，首次同步未完整完成，请查看提示。"
-                : "账号已连接，首次同步覆盖状态未知，请查看提示。",
+          : "账号已连接，请到时间线点击“同步”采集记录。",
       );
       onAuthorized(response);
     } catch (error) {

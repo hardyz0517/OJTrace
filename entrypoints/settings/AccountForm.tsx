@@ -1,20 +1,12 @@
 import { adapters } from "../../src/adapters";
-import type { AccountAuthMode, BrowserSessionAccount } from "../../src/domain";
+import type { BrowserSessionAccount } from "../../src/domain";
 import { AnimatedSelect } from "../shared/AnimatedSelect";
 import { OJName } from "../shared/OJName";
+import { AccountAuthDescription, modeLabel } from "./AccountAuthContent";
 import {
   useAccountAuthorization,
   type AuthorizedResponse,
 } from "./useAccountAuthorization";
-
-export function modeLabel(mode: AccountAuthMode): string {
-  return {
-    "public-handle": "直接输入用户名",
-    "browser-session": "浏览器授权",
-    "manual-cookie": "手动配置",
-    password: "账号密码",
-  }[mode];
-}
 
 function sessionStatusText(
   session: "checking" | BrowserSessionAccount | null,
@@ -63,6 +55,9 @@ export function AccountForm({
 }) {
   const state = useAccountAuthorization(onAuthorized);
   const { form, mode, session, busy } = state;
+  const sourceName =
+    adapters.find((adapter) => adapter.metadata.id === form.source)?.metadata
+      .displayName ?? form.source;
   const canSubmit =
     !!mode &&
     (mode.type !== "browser-session" ||
@@ -153,9 +148,11 @@ export function AccountForm({
               <div className="auth-panel-heading">
                 <h4>{mode.label ?? modeLabel(mode.type)}</h4>
               </div>
-              {mode.description && (
-                <p className="auth-description">{mode.description}</p>
-              )}
+              <AccountAuthDescription
+                mode={mode}
+                source={form.source}
+                sourceName={sourceName}
+              />
               {mode.type === "browser-session" ? (
                 <div className="session-status-area">
                   <p
@@ -173,14 +170,6 @@ export function AccountForm({
                         诊断：{session.diagnostic}
                       </p>
                     )}
-                  <button
-                    type="button"
-                    className="text-button"
-                    disabled={session === "checking"}
-                    onClick={() => void state.detect(true)}
-                  >
-                    授权并重新检测
-                  </button>
                 </div>
               ) : (
                 <>
@@ -224,6 +213,16 @@ export function AccountForm({
                 </>
               )}
               <div className="auth-panel-actions">
+                {mode.type === "browser-session" && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={busy || session === "checking"}
+                    onClick={() => void state.detect(true)}
+                  >
+                    授权并重新检测
+                  </button>
+                )}
                 <button
                   type="submit"
                   className="primary-button"
@@ -232,7 +231,7 @@ export function AccountForm({
                   {state.status === "requesting-permission"
                     ? "正在申请权限…"
                     : busy
-                      ? "正在验证并同步…"
+                      ? "正在验证…"
                       : mode.type === "password"
                         ? "登录并添加"
                         : "添加账号"}

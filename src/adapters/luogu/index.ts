@@ -176,15 +176,9 @@ export const luoguAdapter: OJAdapter = {
       {
         type: "browser-session",
         recommended: true,
-        label: "使用当前浏览器登录状态",
-        description:
-          "使用当前浏览器中已经登录的洛谷账号，无需手动复制 Cookie。",
       },
       {
         type: "manual-cookie",
-        label: "手动配置",
-        description:
-          "自动检测失败时，分别填写洛谷的 __client_id 和 _uid Cookie 值。",
         credentialFields: [
           {
             key: "__client_id",

@@ -116,7 +116,9 @@ input {
 }
 .auth-panel-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 16px;
 }
 .auth-panel-heading {
@@ -135,6 +137,15 @@ input {
   color: #8a93a3;
   font-size: 12px;
   line-height: 1.6;
+}
+.auth-source-link {
+  color: #315b9f;
+  text-decoration: none;
+}
+.auth-source-link:hover,
+.auth-source-link:focus-visible {
+  color: #21477f;
+  text-decoration: underline;
 }
 .public-panel {
   display: grid;
@@ -166,19 +177,6 @@ input {
 }
 .session-status.is-unauthenticated {
   color: #8b6262;
-}
-.text-button {
-  width: max-content;
-  border: 0;
-  background: transparent;
-  color: #315b9f;
-  padding: 3px 0;
-  font-size: 12px;
-  cursor: pointer;
-}
-.text-button:hover {
-  color: #21477f;
-  text-decoration: underline;
 }
 .manual-panel {
   display: grid;
@@ -385,6 +383,19 @@ input {
   background: #fff;
   color: #526071;
 }
+.auth-panel-actions .secondary-button:hover:not(:disabled) {
+  border-color: #8ca7d1;
+  background: #f1f5fb;
+  color: #315b9f;
+}
+.auth-panel-actions .secondary-button:disabled {
+  opacity: 0.58;
+  cursor: default;
+}
+.auth-panel-actions button:focus-visible {
+  outline: 2px solid #8ca7d1;
+  outline-offset: 2px;
+}
 .danger-button {
   border: 1px solid #b54747;
   background: #b54747;
@@ -510,7 +521,7 @@ input {
     max-width: none;
     width: 100%;
   }
-  .primary-button {
+  .auth-panel-actions .primary-button:only-child {
     width: 100%;
   }
   .privacy-row {

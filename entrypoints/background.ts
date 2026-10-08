@@ -103,9 +103,6 @@ async function authorizeAccount(
     type: "AUTHORIZED",
     data: publicStoredData(saved.data),
     account: saved.account,
-    diagnostics: saved.diagnostics,
-    coverage: saved.coverage,
-    syncError: saved.syncError,
     superseded: saved.superseded,
   };
 }

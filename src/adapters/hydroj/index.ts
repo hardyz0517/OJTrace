@@ -32,12 +32,9 @@ const implementation: OJAdapter = {
       {
         type: "browser-session",
         recommended: true,
-        label: "使用当前浏览器登录状态",
-        description: "使用当前 HydroOJ 实例的浏览器登录状态。",
       },
       {
         type: "manual-cookie",
-        label: "手动配置",
         identifierRequired: false,
         credentialFields: [
           {

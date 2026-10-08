@@ -1,5 +1,6 @@
 :root {
   color-scheme: light;
+  overflow-x: auto;
   font-family:
     Inter,
     ui-sans-serif,
@@ -16,6 +17,8 @@
 }
 body {
   margin: 0;
+  /* Preserve all six timeline columns and let narrow viewports scroll. */
+  min-width: 900px;
   background: #f6f7f9;
 }
 button {
@@ -510,6 +513,7 @@ h2 {
   margin-top: 10px;
 }
 .row > .row-actions {
+  grid-column: 6;
   margin-top: 7px;
 }
 .row > .submission-metrics {
@@ -520,10 +524,6 @@ h2 {
 }
 .row:hover .problem-name {
   color: #111827;
-}
-.row-disabled {
-  cursor: default;
-  opacity: 0.72;
 }
 time {
   color: #8a93a3;
@@ -541,14 +541,17 @@ time {
   line-height: 16px;
 }
 .source-link {
-  position: relative;
-  z-index: 1;
   color: inherit;
   text-decoration: none;
+  transition: filter 120ms ease;
 }
 .source-link:hover {
-  border-color: #cbd2dc;
-  color: #2563eb;
+  filter: brightness(0.94);
+}
+.source-link:focus-visible,
+.verdict-link:focus-visible {
+  outline: 2px solid #b8c7e8;
+  outline-offset: 2px;
 }
 .oj-name {
   display: inline-flex;
@@ -589,18 +592,6 @@ time {
   cursor: pointer;
   text-decoration: none;
 }
-.row-target {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-}
-.row-target:focus-visible {
-  outline: 2px solid #2563eb;
-}
-.problem-cell a,
-.row-actions {
-  position: relative;
-}
 .activity-link:hover {
   color: #2563eb;
 }
@@ -637,12 +628,22 @@ time {
 }
 .verdict-cell {
   display: flex;
-  width: 190px;
+  width: max-content;
+  max-width: 100%;
   min-width: 0;
   flex-direction: column;
   align-items: flex-start;
   justify-self: start;
   gap: 2px;
+}
+.verdict-link {
+  border-radius: 3px;
+  color: inherit;
+  text-decoration: none;
+  transition: filter 120ms ease;
+}
+.verdict-link:hover {
+  filter: brightness(0.8);
 }
 .verdict {
   min-width: 0;
@@ -853,20 +854,7 @@ time {
     padding-left: 6px;
     padding-right: 6px;
   }
-  .row {
-    grid-template-columns:
-      56px 100px minmax(0, 1fr) 155px minmax(120px, auto)
-      34px;
-    gap: 7px;
-    padding-left: 8px;
-    padding-right: 8px;
-  }
   .filter-actions {
     min-width: 0;
-  }
-  .submission-metrics {
-    grid-column: 3 / 4;
-    margin-top: -7px;
-    padding-bottom: 5px;
   }
 }

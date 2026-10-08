@@ -582,17 +582,20 @@ function TimelineRow({
       {sourceDisplayName(data, item)}
     </OJName>
   );
-  return (
-    <div className={`row${recordUrl ? "" : " row-disabled"}`}>
-      {recordUrl && (
-        <a
-          className="row-target"
-          href={recordUrl}
-          target="_blank"
-          rel="noreferrer"
-          aria-label={`查看 ${item.problemId} 的提交记录`}
-        />
+  const verdictContent = (
+    <>
+      <span className={`verdict verdict-${item.verdict.code}`}>
+        {verdictLabel(item)}
+      </span>
+      {item.score !== undefined && (
+        <span className="score" aria-label={`得分 ${item.score}`}>
+          {item.score}
+        </span>
       )}
+    </>
+  );
+  return (
+    <div className="row">
       <time>{formatTime(item.submittedAt)}</time>
       {homeUrl ? (
         <a
@@ -634,16 +637,19 @@ function TimelineRow({
             <span className="activity-label">{activity}</span>
           ))}
       </span>
-      <span className="verdict-cell">
-        <span className={`verdict verdict-${item.verdict.code}`}>
-          {verdictLabel(item)}
-        </span>
-        {item.score !== undefined && (
-          <span className="score" aria-label={`得分 ${item.score}`}>
-            {item.score}
-          </span>
-        )}
-      </span>
+      {recordUrl ? (
+        <a
+          className="verdict-cell verdict-link"
+          href={recordUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`查看 ${item.problemId} 的提交记录`}
+        >
+          {verdictContent}
+        </a>
+      ) : (
+        <span className="verdict-cell">{verdictContent}</span>
+      )}
       <SubmissionMetrics item={item} />
       <span className="row-actions">
         <CopyReviewButton item={item} onCopied={onCopied} />

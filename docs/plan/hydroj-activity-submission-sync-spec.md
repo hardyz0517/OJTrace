@@ -87,7 +87,7 @@ Hydro canonical providerAccountKey 是真实数字 UID，用户名仅为 display
 
 同 origin（包含不同 domainId）的 authorize、fetchRecent、fetchInstanceBranding、detectBrowserSession 共用 session queue，避免两个密码账号在后台互相切换会话。账号服务在提交时校验 credentialRevision，删除/凭证替换不能被旧结果覆盖。
 
-普通/活动分页中的登录页可触发 password 重新登录一次，并确认返回 UID 未改变。活动发现会话失效同样可重试一次。取消信号贯穿请求；用户/owner 取消丢弃本轮结果，内部 240 秒 deadline 在已有验证页时返回 partial，首个有效页之前失败仍为账号级错误。
+普通/活动分页中的登录页可触发 password 重新登录一次，并确认返回 UID 未改变。活动发现会话失效同样可重试一次。取消信号贯穿请求；用户/owner 取消丢弃本轮结果，内部 900 秒（15 分钟） deadline 在已有验证页时返回 partial，首个有效页之前失败仍为账号级错误。
 
 ## 5. JSON 与 HTML 解析
 
@@ -126,9 +126,9 @@ verdict 与 score 分离。UI 对 Accepted/100 显示两行并复用统一状态
 | 实际探测的已参加活动数                   | 50（缓存排除不占名额）      |
 | 每活动页数                               | 5                           |
 | 全账号唯一输出记录                       | min(1000, FetchInput.limit) |
-| 单账号任务时限                           | 240 秒，包含各队列等待      |
+| 单账号任务时限                           | 900 秒（15 分钟），包含各队列等待      |
 
-每张逻辑页经过共用的 origin 分页器；同页 JSON→HTML fallback 与有限重登在一个回调中完成。该实例的第一张列表页入队后立即执行，后续页（包括另一账号、新活动第一页和用户活动发现）额外等待 1500ms ± 500ms。最后一页后不等待。锁顺序为 instance session → pagination → Cookie → HTTP，等待发生在临时 Cookie 注入前，取消不提前释放仍在收尾的请求锁。
+每张逻辑页经过共用的 origin 分页器；同页 JSON→HTML fallback 与有限重登在一个回调中完成。该实例的第一张列表页入队后立即执行，后续页（包括另一账号、新活动第一页和用户活动发现）按 HydroOJ 的分页策略额外等待，默认 1500ms ± 500ms。所有实例共用 HydroOJ 设置，不同 origin 的队列仍隔离；本轮配置冻结，设置修改从下一轮同步生效。最后一页后不等待。锁顺序为 instance session → pagination → Cookie → HTTP，等待发生在临时 Cookie 注入前，取消不提前释放仍在收尾的请求锁。
 
 HTML 使用明确 next 链接，JSON 使用明确分页信息或继续至有效空页；缺少 hasMore 或短页本身不能证明尾部。服务端只证明 `_id` 倒序，因此仅当归一化时间确实来自 ObjectId 创建时间、ID/时间顺序均未逆转时使用早于 since 的停止边界；submitAt、judgeAt 或排序异常路径不据此提前结束。晚于 until 的页面用于定位，不能直接停，否则会漏掉后面的目标记录。
 

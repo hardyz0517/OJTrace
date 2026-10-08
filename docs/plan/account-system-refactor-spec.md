@@ -113,7 +113,7 @@ Hydro 提交 guard 和存储加载均校验记录的 source、origin、domainId 
 
 清空数据或提交会中止采集并推进内存任务代际，阻止已完成但尚未提交的旧结果回填；新同步仍等待旧 HTTP/Cookie 收尾。首次授权回包也检查代际，不伪报已取消采集的完整覆盖。同一规范身份的较旧授权晚返回时不能覆盖已保存的新凭据；清空账号使待确认身份授权失效。这些控制不改变存储 schema。
 
-保留 per-account retention；采集为冻结毫秒闭区间、后台限制最近 35 天，非法范围在采集网络请求前拒绝。freshness 使用 lastAttemptAt 防止部分/失败后重复扫描。每账号任务时限 240 秒；用户取消丢弃本轮新结果，内部 deadline 可保留已验证页的 partial。手动 force 仅绕过 freshness，不能绕过分页、origin 限流或预算。某来源失败保留本地缓存和其他来源结果。
+保留 per-account retention；采集为冻结毫秒闭区间、后台限制最近 35 天，非法范围在采集网络请求前拒绝。freshness 使用 lastAttemptAt 防止部分/失败后重复扫描。每账号任务时限 900 秒（15 分钟）；用户取消丢弃本轮新结果，内部 deadline 可保留已验证页的 partial。手动 force 仅绕过 freshness，不能绕过分页、origin 限流或预算。某来源失败保留本地缓存和其他来源结果。
 
 ## 7. 权限与 Cookie 网络边界
 
@@ -130,7 +130,7 @@ Hydro 提交 guard 和存储加载均校验记录的 source、origin、domainId 
 
 禁止换行、属性段、无效 cookie name 和空值。恢复失败（包括 set 返回空结果）必须报错并继续恢复其他字段；remove 返回空结果时确认该 Cookie 已不存在。恢复成功/失败/并发路径都有测试。source 专属历史 request options 收敛到同一临时注入实现；新增 OJ 不复制新的注入循环。
 
-每个 origin 的后续逻辑列表页暂停 1500ms ± 500ms；身份/详情/品牌不附加列表暂停，但所有真实 HTTP 尝试均受统一 origin 冷却。429 在响应头返回时立即登记 Retry-After（无效时默认两分钟），只延长冷却。非敏感 `{origin, blockedUntil}` 通过 storage.session 恢复；内存同步更新、最新快照串行写入，存储失败保留内存保护并报告降级。
+每个 origin 的后续逻辑列表页按该 OJ 的分页策略暂停，默认 1500ms ± 500ms；设置页支持基础间隔和随机浮动，保存从下一轮同步生效，本轮配置冻结。策略绑定仍复用同一个 origin 队列；身份/详情/品牌不附加列表暂停，但所有真实 HTTP 尝试均受统一 origin 冷却。429 在响应头返回时立即登记 Retry-After（无效时默认两分钟），只延长冷却。非敏感 `{origin, blockedUntil}` 通过 storage.session 恢复；内存同步更新、最新快照串行写入，存储失败保留内存保护并报告降级。
 
 请求设置超时、取消和响应流大小上限。跟随跳转后仍校验最终 origin；这是一道最终响应校验，不宣称在浏览器 fetch 内预阻止所有跨 origin 跳转。
 

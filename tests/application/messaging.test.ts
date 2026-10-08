@@ -5,6 +5,34 @@ import {
 } from "../../src/application/messaging/messages";
 
 describe("runtime message validation", () => {
+  it("validates source pagination patches and explicit default resets", () => {
+    const message = {
+      schemaVersion: 2,
+      type: "UPDATE_PAGINATION_POLICY",
+      requestId: "pagination",
+      source: "qoj",
+    };
+    expect(
+      isRuntimeMessage({
+        ...message,
+        policy: { intervalMs: 3_000, jitterMs: 1_000 },
+      }),
+    ).toBe(true);
+    expect(isRuntimeMessage({ ...message, policy: null })).toBe(true);
+    for (const policy of [
+      undefined,
+      {},
+      [],
+      { intervalMs: 0, jitterMs: 0 },
+      { intervalMs: 1_500, jitterMs: 600 },
+      { intervalMs: "1500", jitterMs: 500 },
+      { intervalMs: 1_500, jitterMs: Infinity },
+    ])
+      expect(isRuntimeMessage({ ...message, policy })).toBe(false);
+    expect(
+      isRuntimeMessage({ ...message, source: "unknown", policy: null }),
+    ).toBe(false);
+  });
   it("accepts only a boolean full activity recheck flag", () => {
     const message = {
       schemaVersion: 2,

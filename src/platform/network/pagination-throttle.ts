@@ -1,4 +1,10 @@
-import type { PaginationRuntime } from "../../domain";
+import {
+  DEFAULT_PAGINATION_POLICY,
+  isPaginationPolicy,
+  paginationDelayMs,
+  type PaginationPolicy,
+  type PaginationRuntime,
+} from "../../domain";
 import { normalizeRequestOrigin, type RateLimitRegistry } from "./rate-limit";
 
 export interface PaginationRuntimeOptions {
@@ -64,12 +70,20 @@ export function createPaginationRuntime(
       origin,
       signal,
       request,
+      policy = DEFAULT_PAGINATION_POLICY,
     }: {
       origin: string;
       signal: AbortSignal;
       request: () => Promise<T>;
+      policy?: PaginationPolicy;
     }): Promise<T> {
       if (signal.aborted) return Promise.reject(abortError(signal));
+      if (!isPaginationPolicy(policy))
+        return Promise.reject(new RangeError("Invalid pagination policy"));
+      const snapshot = {
+        intervalMs: policy.intervalMs,
+        jitterMs: policy.jitterMs,
+      };
       let normalized: string;
       try {
         normalized = normalizeRequestOrigin(origin);
@@ -113,11 +127,7 @@ export function createPaginationRuntime(
           throwIfAborted(signal);
           options.rateLimits?.assertAvailable(normalized);
           if (state.hasDispatched) {
-            const sample = random();
-            const jitter = Number.isFinite(sample)
-              ? Math.max(0, Math.min(1, sample))
-              : 0.5;
-            await sleep(1_000 + jitter * 1_000, signal);
+            await sleep(paginationDelayMs(snapshot, random()), signal);
           }
           throwIfAborted(signal);
           options.rateLimits?.assertAvailable(normalized);

@@ -28,6 +28,7 @@ import {
 import { createPaginationRuntime } from "../src/platform/network/pagination-throttle";
 import { createAccountCollector } from "../src/application/sync/collect-account";
 import { SyncRangeError } from "../src/domain";
+import { updatePaginationPreference } from "../src/application/preferences/pagination-preferences";
 
 const TIMELINE_URL = () => browser.runtime.getURL("/timeline.html");
 const storage = createStoragePort(browser.storage.local);
@@ -212,6 +213,20 @@ async function handleMessage(
             syncRange: message.range,
           },
         }));
+        return {
+          schemaVersion: 2,
+          requestId: message.requestId,
+          ok: true,
+          type: "UPDATED",
+          data: publicStoredData(data),
+        };
+      }
+      case "UPDATE_PAGINATION_POLICY": {
+        const data = await updatePaginationPreference(
+          storage,
+          message.source,
+          message.policy,
+        );
         return {
           schemaVersion: 2,
           requestId: message.requestId,

@@ -6,6 +6,9 @@ import {
   type SourceId,
   type SyncRangePreference,
   isSyncRangePreference,
+  isPaginationPolicy,
+  isSourceId,
+  type PaginationPolicy,
 } from "../../domain";
 import type { PublicStoredData } from "../accounts/account-queries";
 import type { SyncResult } from "../sync/sync-service";
@@ -43,9 +46,7 @@ export function isSyncProgressEvent(
     count(event.sequence) &&
     progress &&
     typeof progress.accountId === "string" &&
-    ["codeforces", "luogu", "qoj", "hydroj", "atcoder"].includes(
-      progress.source,
-    ) &&
+    isSourceId(progress.source) &&
     [
       "running",
       "complete",
@@ -113,6 +114,14 @@ export type RuntimeMessage =
       type: "UPDATE_SYNC_RANGE";
       requestId: string;
       range: SyncRangePreference;
+    }
+  | {
+      schemaVersion: 2;
+      type: "UPDATE_PAGINATION_POLICY";
+      requestId: string;
+      source: SourceId;
+      /** null restores the source default. */
+      policy: PaginationPolicy | null;
     }
   | {
       schemaVersion: 2;
@@ -210,6 +219,7 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
       "SYNC_REQUEST",
       "UPDATE_SYNC_ACCOUNTS",
       "UPDATE_SYNC_RANGE",
+      "UPDATE_PAGINATION_POLICY",
       "DELETE_ACCOUNT",
       "CLEAR_DATA",
       "CLEAR_ACCOUNTS",
@@ -234,6 +244,12 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
     }
     if (item.type === "UPDATE_SYNC_RANGE") {
       return isSyncRangePreference((item as { range?: unknown }).range);
+    }
+    if (item.type === "UPDATE_PAGINATION_POLICY") {
+      return (
+        isSourceId(item.source) &&
+        (item.policy === null || isPaginationPolicy(item.policy))
+      );
     }
     if (item.type === "SYNC_REQUEST") {
       const accountIds = (item as { accountIds?: unknown }).accountIds;
@@ -263,9 +279,7 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
     }
     if (item.type === "DETECT_BROWSER_SESSION") {
       return (
-        ["codeforces", "luogu", "qoj", "atcoder", "hydroj"].includes(
-          (item as { source?: unknown }).source as string,
-        ) &&
+        isSourceId(item.source) &&
         (item.origin === undefined || typeof item.origin === "string") &&
         isDomainScopeValid(item.source, item.domainId)
       );
@@ -293,9 +307,7 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
               !/[\r\n]/.test(value),
           ));
       return (
-        ["codeforces", "luogu", "qoj", "atcoder", "hydroj"].includes(
-          account.source as string,
-        ) &&
+        isSourceId(account.source) &&
         [
           "public-handle",
           "browser-session",

@@ -4,6 +4,9 @@ import {
   instanceBrandingKey,
   isWithinSyncWindow,
   validateSyncWindow,
+  isPaginationPolicy,
+  resolvePaginationPolicy,
+  ACCOUNT_COLLECTION_DEADLINE_MS,
 } from "../../domain";
 import type {
   AccountRecord,
@@ -12,6 +15,7 @@ import type {
   HttpClient,
   InstanceBrandingRecord,
   PaginationRuntime,
+  PaginationPolicy,
   Submission,
   SyncCoverage,
   SyncWindow,
@@ -57,6 +61,8 @@ export interface AccountCollector {
     limit?: number;
     onProgress?: ProgressObserver;
     recheckActivities?: boolean;
+    /** Frozen at sync admission so queued accounts use the same batch snapshot. */
+    paginationPolicy?: PaginationPolicy;
   }): Promise<AccountCollection>;
   cancel(accountId: string): void;
   invalidate(accountId: string, revision: number): void;
@@ -218,7 +224,7 @@ export function createAccountCollector(
   const slots = new Map<string, Slot>();
   let generation = 0;
   const pagination = options.pagination ?? createPaginationRuntime();
-  const deadlineMs = options.deadlineMs ?? 240_000;
+  const deadlineMs = options.deadlineMs ?? ACCOUNT_COLLECTION_DEADLINE_MS;
 
   async function execute(
     account: AccountRecord,
@@ -228,6 +234,7 @@ export function createAccountCollector(
     controller: AbortController,
     onProgress: ProgressObserver,
     recheckActivities: boolean,
+    paginationPolicy?: PaginationPolicy,
   ): Promise<AccountCollection> {
     const base = (result: SyncSourceResult): AccountCollection => ({
       account,
@@ -275,11 +282,19 @@ export function createAccountCollector(
         requestId,
         http,
       };
+      const policy =
+        paginationPolicy ??
+        resolvePaginationPolicy(
+          active.source,
+          data.preferences.paginationBySource,
+        );
       const fetched = await adapter.fetchRecent({
         ...context,
         ...window,
         limit,
-        pagination,
+        pagination: {
+          runPage: (page) => pagination.runPage({ ...page, policy }),
+        },
         onProgress,
         recheckActivities,
         activitySchedules: Object.values(data.activitySchedules).filter(
@@ -402,12 +417,22 @@ export function createAccountCollector(
       limit = 1_000,
       onProgress,
       recheckActivities = false,
+      paginationPolicy,
     }) {
       const window = validateSyncWindow(requested, now);
       if (!Number.isSafeInteger(limit) || limit < 1)
         throw new RangeError("Collection limit must be a positive integer");
+      if (
+        paginationPolicy !== undefined &&
+        !isPaginationPolicy(paginationPolicy)
+      )
+        throw new RangeError("Invalid pagination policy");
+      const policy =
+        paginationPolicy === undefined
+          ? undefined
+          : Object.freeze({ ...paginationPolicy });
       const boundedLimit = Math.min(1_000, Math.max(1, Math.floor(limit)));
-      const key = `${generation}:${account.credentialRevision}:${window.since}:${window.until}:${boundedLimit}:${recheckActivities}`;
+      const key = `${generation}:${account.credentialRevision}:${window.since}:${window.until}:${boundedLimit}:${recheckActivities}:${policy?.intervalMs ?? "stored"}:${policy?.jitterMs ?? "stored"}`;
       const slot = slots.get(account.accountId);
       if (slot) {
         if (slot.queued?.controller.signal.aborted) slot.queued = undefined;
@@ -466,6 +491,7 @@ export function createAccountCollector(
               controller,
               (update) => publishTask(task, update),
               recheckActivities,
+              policy,
             )),
             generation: taskGeneration,
           };

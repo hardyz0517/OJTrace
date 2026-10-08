@@ -1,9 +1,22 @@
 import type { ActivityScheduleRecord } from "./activity-schedule";
+import type { PaginationPolicy } from "./pagination-policy";
 
 export const STORAGE_SCHEMA_VERSION = 2 as const;
 export const MESSAGE_SCHEMA_VERSION = 2 as const;
 
-export type SourceId = "codeforces" | "luogu" | "qoj" | "atcoder" | "hydroj";
+export const SOURCE_IDS = [
+  "codeforces",
+  "luogu",
+  "qoj",
+  "atcoder",
+  "hydroj",
+] as const;
+export type SourceId = (typeof SOURCE_IDS)[number];
+export function isSourceId(value: unknown): value is SourceId {
+  return (
+    typeof value === "string" && SOURCE_IDS.some((source) => source === value)
+  );
+}
 export type Availability = "stable" | "experimental" | "unsupported";
 export type AccountAuthMode =
   "public-handle" | "browser-session" | "manual-cookie" | "password";
@@ -153,6 +166,8 @@ export interface SyncState {
 export interface Preferences {
   retentionPerAccount: number;
   freshnessCooldownMs: number;
+  /** Only user overrides; missing sources inherit their default pagination policy. */
+  paginationBySource?: Partial<Record<SourceId, PaginationPolicy>>;
   /**
    * Accounts selected for manual and automatic sync. An omitted value keeps
    * the default behavior of syncing every enabled account; an empty
@@ -193,6 +208,9 @@ export interface InstanceBrandingRecord {
   fetchedAt: number;
   iconFetchedAt?: number;
 }
+
+/** Includes queue waits, pagination delays, requests and optional enrichment. */
+export const ACCOUNT_COLLECTION_DEADLINE_MS = 15 * 60 * 1_000;
 
 export const DEFAULT_PREFERENCES: Preferences = {
   retentionPerAccount: 2_000,

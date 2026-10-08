@@ -8,6 +8,91 @@ import { createRateLimitRegistry } from "../../src/platform/network/rate-limit";
 afterEach(() => vi.useRealTimers());
 
 describe("pagination runtime", () => {
+  it.each([0, 0.5, 1])(
+    "applies custom jitter within the same origin queue for random=%s",
+    async (random) => {
+      const sleep = vi.fn(async (_milliseconds: number) => undefined);
+      const runtime = createPaginationRuntime({ random: () => random, sleep });
+      const page = (policy: { intervalMs: number; jitterMs: number }) =>
+        runtime.runPage({
+          origin: "https://one.test",
+          signal: new AbortController().signal,
+          policy,
+          request: async () => 1,
+        });
+      await page({ intervalMs: 3_000, jitterMs: 1_000 });
+      await page({ intervalMs: 3_000, jitterMs: 1_000 });
+      await page({ intervalMs: 5_000, jitterMs: 0 });
+      expect(sleep.mock.calls.map(([delay]) => delay)).toEqual([
+        2_000 + random * 2_000,
+        5_000,
+      ]);
+    },
+  );
+
+  it("snapshots an enqueued policy and rejects unsafe policies before dispatch", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sleep = vi.fn(async (_milliseconds: number) => undefined);
+    const runtime = createPaginationRuntime({ random: () => 0.5, sleep });
+    const signal = new AbortController().signal;
+    const first = runtime.runPage({
+      origin: "https://one.test",
+      signal,
+      request: () => pending,
+    });
+    const policy = { intervalMs: 3_000, jitterMs: 0 };
+    const second = runtime.runPage({
+      origin: "https://one.test",
+      signal,
+      policy,
+      request: async () => 2,
+    });
+    policy.intervalMs = 9_000;
+    release();
+    await Promise.all([first, second]);
+    expect(sleep.mock.calls[0]?.[0]).toBe(3_000);
+    const request = vi.fn(async () => 3);
+    await expect(
+      runtime.runPage({
+        origin: "https://one.test",
+        signal,
+        policy: { intervalMs: 0, jitterMs: 0 },
+        request,
+      }),
+    ).rejects.toThrow(RangeError);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("cancels custom delays without releasing cleanup or dispatching a page", async () => {
+    vi.useFakeTimers();
+    const runtime = createPaginationRuntime();
+    const signal = new AbortController().signal;
+    const policy = { intervalMs: 5_000, jitterMs: 0 };
+    await runtime.runPage({
+      origin: "https://one.test",
+      signal,
+      policy,
+      request: async () => 1,
+    });
+    const controller = new AbortController();
+    const request = vi.fn(async () => 2);
+    const pending = runtime.runPage({
+      origin: "https://one.test",
+      signal: controller.signal,
+      policy,
+      request,
+    });
+    const rejected = expect(pending).rejects.toBeDefined();
+    await vi.advanceTimersByTimeAsync(4_999);
+    controller.abort();
+    await rejected;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(request).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it("uses the production delay before dispatch and leaves no final delay timer", async () => {
     vi.useFakeTimers();
     const runtime = createPaginationRuntime({ random: () => 0.5 });

@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { adapterBySource } from "../../src/adapters";
 import type { RuntimeResponse } from "../../src/application/messaging/messages";
 import { AppHeader } from "../shared/AppHeader";
 import { OJName } from "../shared/OJName";
 import { AccountForm } from "./AccountForm";
+import { PaginationSettings } from "./PaginationSettings";
 import { modeLabel } from "./AccountAuthContent";
 import {
   instanceBrandingFor,
@@ -23,18 +24,36 @@ function App() {
     "accounts" | "submissions" | "all" | null
   >(null);
   const [clearBusy, setClearBusy] = useState(false);
-  async function load(): Promise<void> {
-    const response = await send<Extract<RuntimeResponse, { type: "STATE" }>>({
-      schemaVersion: 2,
-      type: "GET_STATE",
-      requestId: crypto.randomUUID(),
-    });
-    if (response.ok) setData(response.data);
-  }
+  const loadSequence = useRef(0);
+  const load = useCallback(async (): Promise<void> => {
+    const sequence = ++loadSequence.current;
+    try {
+      const response = await send<RuntimeResponse>({
+        schemaVersion: 2,
+        type: "GET_STATE",
+        requestId: crypto.randomUUID(),
+      });
+      if (sequence !== loadSequence.current) return;
+      if (response.ok && response.type === "STATE") setData(response.data);
+      else if (!response.ok) setMessage(response.error.message);
+    } catch {
+      if (sequence === loadSequence.current)
+        setMessage("设置读取失败，请刷新后重试。");
+    }
+  }, []);
 
   useEffect(() => {
     void load();
-  }, []);
+    const changed = (changes: Record<string, unknown>, area: string) => {
+      if (area === "local" && Object.hasOwn(changes, "ojtrace:data"))
+        void load();
+    };
+    browser.storage.onChanged.addListener(changed);
+    return () => {
+      browser.storage.onChanged.removeListener(changed);
+      loadSequence.current += 1;
+    };
+  }, [load]);
 
   async function remove(accountId: string): Promise<void> {
     const response = await send<Extract<RuntimeResponse, { type: "UPDATED" }>>({
@@ -43,7 +62,7 @@ function App() {
       requestId: crypto.randomUUID(),
       accountId,
     });
-    if (response.ok) setData(response.data);
+    if (response.ok) await load();
   }
 
   async function clearData(
@@ -166,6 +185,10 @@ function App() {
             })}
           </ul>
         </section>
+
+        {data && (
+          <PaginationSettings preferences={data.preferences} onUpdated={load} />
+        )}
 
         <section className="settings-section privacy-section">
           <div className="section-heading">

@@ -1,4 +1,4 @@
-import { resolveSyncWindow } from "../../domain";
+import { resolveSyncWindow, resolvePaginationPolicy } from "../../domain";
 import type {
   AccountRecord,
   AccountSyncProgress,
@@ -155,6 +155,10 @@ export async function syncEnabledAccounts(
               now,
               onProgress: (update) => publish(account, update),
               recheckActivities: options.recheckActivities,
+              paginationPolicy: resolvePaginationPolicy(
+                account.source,
+                current.preferences.paginationBySource,
+              ),
             });
       const settled = terminalProgress(
         collection,

@@ -11,6 +11,7 @@ import type {
 import type { SyncWindow } from "./sync-range";
 import type { ProgressObserver } from "./sync-progress";
 import type { ActivityScheduleRecord } from "./activity-schedule";
+import type { PaginationPolicy } from "./pagination-policy";
 
 export interface AdapterMetadata {
   id: SourceId;
@@ -83,6 +84,8 @@ export interface PaginationRuntime {
     origin: string;
     signal: AbortSignal;
     request: () => Promise<T>;
+    /** Bound by the collection use case; never creates another origin queue. */
+    policy?: PaginationPolicy;
   }): Promise<T>;
 }
 

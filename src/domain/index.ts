@@ -6,3 +6,4 @@ export * from "./types";
 export * from "./sync-range";
 export * from "./sync-progress";
 export * from "./activity-schedule";
+export * from "./pagination-policy";

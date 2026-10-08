@@ -7,6 +7,8 @@ import {
   type InstanceBrandingRecord,
   type StoredData,
   isSyncRangePreference,
+  sanitizePaginationPolicies,
+  isSourceId,
 } from "../../domain";
 import {
   buildIdentityKey,
@@ -67,10 +69,7 @@ function sanitizeAccount(value: unknown): AccountRecord | undefined {
   if (!isRecord(value)) return undefined;
   if (
     typeof value.accountId !== "string" ||
-    typeof value.source !== "string" ||
-    !["codeforces", "luogu", "qoj", "atcoder", "hydroj"].includes(
-      value.source,
-    ) ||
+    !isSourceId(value.source) ||
     typeof value.enabled !== "boolean" ||
     typeof value.providerAccountKey !== "string" ||
     typeof value.identityKey !== "string" ||
@@ -237,6 +236,9 @@ function validateStoredData(value: StoredData): StoredData {
       ]
     : undefined;
   const { retentionPerAccount, freshnessCooldownMs } = value.preferences;
+  const paginationBySource = sanitizePaginationPolicies(
+    value.preferences.paginationBySource,
+  );
   const preferences: StoredData["preferences"] = {
     retentionPerAccount:
       Number.isSafeInteger(retentionPerAccount) && retentionPerAccount > 0
@@ -247,6 +249,7 @@ function validateStoredData(value: StoredData): StoredData {
         ? freshnessCooldownMs
         : DEFAULT_PREFERENCES.freshnessCooldownMs,
     ...(syncAccountIds === undefined ? {} : { syncAccountIds }),
+    ...(paginationBySource === undefined ? {} : { paginationBySource }),
   };
   if (isSyncRangePreference(value.preferences.syncRange)) {
     const { from, to, followNow, preset } = value.preferences.syncRange;

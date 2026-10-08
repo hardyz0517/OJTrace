@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { codeforcesAdapter } from "../../src/adapters/codeforces";
+import { atcoderAdapter } from "../../src/adapters/atcoder";
 import { createAccountCollector } from "../../src/application/sync/collect-account";
 import { commitCollections } from "../../src/application/sync/commit-collection";
 import { syncEnabledAccounts } from "../../src/application/sync/sync-service";
@@ -14,6 +15,8 @@ import type {
   PaginationRuntime,
 } from "../../src/domain";
 import { accountRecord } from "../account-fixture";
+import { createPaginationRuntime } from "../../src/platform/network/pagination-throttle";
+import { updatePaginationPreference } from "../../src/application/preferences/pagination-preferences";
 
 const immediate: PaginationRuntime = { runPage: ({ request }) => request() };
 const http: HttpClient = {
@@ -28,7 +31,7 @@ function deferred<T>() {
   });
   return { resolve, promise };
 }
-function fixture(deadlineMs = 240_000) {
+function fixture(deadlineMs?: number) {
   const account = accountRecord({
     accountId: crypto.randomUUID(),
     source: "codeforces",
@@ -94,6 +97,174 @@ afterEach(() => {
 });
 
 describe("single-account collection", () => {
+  it("uses the production 15-minute deadline and keeps a task running beyond the old four-minute limit", async () => {
+    vi.useFakeTimers();
+    const { account, collector } = fixture();
+    const started = deferred<FetchInput>();
+    vi.spyOn(codeforcesAdapter, "fetchRecent").mockImplementation(
+      async (input) => {
+        started.resolve(input);
+        await new Promise<void>((resolve) =>
+          input.signal.addEventListener("abort", () => resolve(), {
+            once: true,
+          }),
+        );
+        return {
+          ...fetched(input, true),
+          coverage: {
+            ...fetched(input, true).coverage,
+            outcome: { status: "partial", reasons: ["deadline"] },
+          },
+        };
+      },
+    );
+    const operation = collector.collect({
+      account,
+      window: { since: 0, until: 50 },
+      now: 100,
+    });
+    const input = await started.promise;
+    await vi.advanceTimersByTimeAsync(240_000);
+    expect(input.signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(659_999);
+    expect(input.signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(input.signal.reason).toEqual({ kind: "deadline" });
+    expect((await operation).result.coverage?.outcome).toEqual({
+      status: "partial",
+      reasons: ["deadline"],
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("binds each source's configuration to its real list origin including the AtCoder public API", async () => {
+    const { account, storage } = fixture();
+    const atcoder = accountRecord({
+      accountId: "at",
+      source: "atcoder",
+      providerAccountKey: "tester",
+      authMode: "public-handle",
+      enabled: true,
+    });
+    await storage.transact((data) => ({
+      ...data,
+      accounts: [account, atcoder],
+    }));
+    await updatePaginationPreference(storage, "codeforces", {
+      intervalMs: 2_000,
+      jitterMs: 0,
+    });
+    await updatePaginationPreference(storage, "atcoder", {
+      intervalMs: 5_000,
+      jitterMs: 1_000,
+    });
+    const delays: number[] = [];
+    const collector = createAccountCollector(storage, http, {
+      pagination: createPaginationRuntime({
+        random: () => 1,
+        sleep: async (delay) => {
+          delays.push(delay);
+        },
+      }),
+    });
+    const fetch = async (input: FetchInput) => {
+      const origin =
+        input.account.source === "atcoder"
+          ? "https://kenkoooo.com"
+          : "https://codeforces.com";
+      for (let page = 0; page < 2; page++)
+        await input.pagination.runPage({
+          origin,
+          signal: input.signal,
+          request: async () => undefined,
+        });
+      return {
+        account: {
+          accountId: input.account.accountId,
+          source: input.account.source,
+          providerAccountKey: input.account.providerAccountKey!,
+        },
+        records: [],
+        diagnostics: [],
+        coverage: {
+          window: { since: input.since, until: input.until },
+          pagesFetched: 2,
+          acceptedRecords: 0,
+          outcome: { status: "complete", evidence: "exhausted" },
+        },
+      } satisfies FetchResult;
+    };
+    vi.spyOn(codeforcesAdapter, "fetchRecent").mockImplementation(fetch);
+    vi.spyOn(atcoderAdapter, "fetchRecent").mockImplementation(fetch);
+    const result = await syncEnabledAccounts(
+      storage,
+      http,
+      { force: true, now: 100 },
+      collector,
+    );
+    expect(delays.sort((a, b) => a - b)).toEqual([2_000, 6_000]);
+    expect(result.progress.map((item) => item.status)).toEqual([
+      "complete",
+      "complete",
+    ]);
+  });
+  it("freezes a sync's policy while applying saved settings to the next queued sync without splitting origin queues", async () => {
+    const { storage } = fixture();
+    await updatePaginationPreference(storage, "codeforces", {
+      intervalMs: 2_000,
+      jitterMs: 0,
+    });
+    const sleep = vi.fn(async (_milliseconds: number) => undefined);
+    const collector = createAccountCollector(storage, http, {
+      pagination: createPaginationRuntime({ sleep }),
+    });
+    const started = deferred<void>();
+    const finish = deferred<void>();
+    let calls = 0;
+    vi.spyOn(codeforcesAdapter, "fetchRecent").mockImplementation(
+      async (input) => {
+        const firstRun = ++calls === 1;
+        await input.pagination.runPage({
+          origin: "https://codeforces.com",
+          signal: input.signal,
+          request: async () => {
+            if (firstRun) {
+              started.resolve();
+              await finish.promise;
+            }
+          },
+        });
+        await input.pagination.runPage({
+          origin: "https://codeforces.com",
+          signal: input.signal,
+          request: async () => undefined,
+        });
+        return fetched(input);
+      },
+    );
+    const first = syncEnabledAccounts(
+      storage,
+      http,
+      { force: true, now: 100 },
+      collector,
+    );
+    await started.promise;
+    await updatePaginationPreference(storage, "codeforces", {
+      intervalMs: 4_000,
+      jitterMs: 0,
+    });
+    const second = syncEnabledAccounts(
+      storage,
+      http,
+      { force: true, now: 100 },
+      collector,
+    );
+    finish.resolve();
+    await Promise.all([first, second]);
+    expect(calls).toBe(2);
+    expect(sleep.mock.calls.map(([delay]) => delay)).toEqual([
+      2_000, 4_000, 4_000,
+    ]);
+  });
   it("shares exactly identical windows, serializes a different until and refuses a third window", async () => {
     const { account, collector } = fixture();
     const started = deferred<FetchInput>();

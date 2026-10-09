@@ -1,3 +1,4 @@
+import { immediatePagination } from "../helpers/fetch-input";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
@@ -106,7 +107,7 @@ describe("AtCoder adapter", () => {
       atcoderAdapter.fetchRecent({
         since: 0,
         until: Number.MAX_SAFE_INTEGER,
-        pagination: { runPage: ({ request }) => request() },
+        pagination: immediatePagination(),
         account: {
           accountId: "local",
           source: "atcoder",

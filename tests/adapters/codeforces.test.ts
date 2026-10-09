@@ -1,3 +1,4 @@
+import { immediatePagination } from "../helpers/fetch-input";
 import { describe, expect, it } from "vitest";
 import { normalizeCodeforcesSubmission } from "../../src/adapters/codeforces/normalizer";
 import { parseCodeforcesResponse } from "../../src/adapters/codeforces/parser";
@@ -249,7 +250,7 @@ describe("Codeforces parser and normalizer", () => {
     const result = await codeforcesAdapter.fetchRecent({
       since: 0,
       until: Number.MAX_SAFE_INTEGER,
-      pagination: { runPage: ({ request }) => request() },
+      pagination: immediatePagination(),
       account: {
         accountId: "account",
         source: "codeforces",
@@ -364,7 +365,7 @@ describe("Codeforces parser and normalizer", () => {
     const result = await codeforcesAdapter.fetchRecent({
       since: 0,
       until: Number.MAX_SAFE_INTEGER,
-      pagination: { runPage: ({ request }) => request() },
+      pagination: immediatePagination(),
       account: {
         accountId: "account",
         source: "codeforces",

@@ -1,3 +1,4 @@
+import { immediatePagination } from "../helpers/fetch-input";
 import { describe, expect, it, vi } from "vitest";
 import { atcoderAdapter } from "../../src/adapters/atcoder";
 import { collectAtCoderSubmissions } from "../../src/adapters/atcoder/submissions";
@@ -46,7 +47,7 @@ function input(
     signal: new AbortController().signal,
     requestId: "r",
     http,
-    pagination: { runPage: ({ request }) => request() },
+    pagination: immediatePagination(),
     ...overrides,
   };
 }

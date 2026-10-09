@@ -1,3 +1,5 @@
+import { immediatePagination } from "../helpers/fetch-input";
+import { httpResponse as response } from "../helpers/http-response";
 import { describe, expect, it } from "vitest";
 import { hydroOJAdapter } from "../../src/adapters/hydroj";
 import { parseHydroOJRecordPage } from "../../src/adapters/hydroj/parser";
@@ -5,11 +7,7 @@ import {
   ACTIVITY_SCHEDULE_TTL_MS,
   type ActivityScheduleRecord,
 } from "../../src/domain/activity-schedule";
-import type {
-  FetchInput,
-  HttpResponse,
-  CollectionProgress,
-} from "../../src/domain";
+import type { FetchInput, CollectionProgress } from "../../src/domain";
 
 const origin = "https://school.example.org";
 const activityId = "000000000000000000000010";
@@ -33,15 +31,7 @@ const schedule: ActivityScheduleRecord = {
   endAt,
   checkedAt: now,
 };
-function response(url: string, text: string, status = 200): HttpResponse {
-  return {
-    url,
-    text,
-    status,
-    contentType: text.startsWith("{") ? "application/json" : "text/html",
-    headers: new Headers(),
-  };
-}
+
 function fixture(
   options: {
     metadata?: unknown;
@@ -67,7 +57,7 @@ function fixture(
     limit: 1000,
     signal: new AbortController().signal,
     requestId: "r",
-    pagination: { runPage: ({ request }) => request() },
+    pagination: immediatePagination(),
     onProgress: (update) => updates.push(update),
     http: {
       async request(_source, url) {

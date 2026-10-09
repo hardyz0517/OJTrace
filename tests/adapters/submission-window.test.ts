@@ -1,3 +1,4 @@
+import { immediatePagination } from "../helpers/fetch-input";
 import { describe, expect, it, vi } from "vitest";
 import type { FetchInput, HttpClient, SourceId } from "../../src/domain";
 import type { CollectionProgress } from "../../src/domain/sync-progress";
@@ -37,7 +38,7 @@ function input(
     signal: new AbortController().signal,
     requestId: "test",
     http,
-    pagination: { runPage: ({ request }) => request() },
+    pagination: immediatePagination(),
     ...overrides,
   };
 }

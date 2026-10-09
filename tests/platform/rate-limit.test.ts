@@ -5,6 +5,7 @@ import {
   parseRetryAfter,
   type RateLimitEntry,
 } from "../../src/platform/network/rate-limit";
+import { deferred } from "../helpers/deferred";
 
 describe("origin rate limit registry", () => {
   it("parses delta seconds and HTTP dates", () => {
@@ -49,10 +50,8 @@ describe("origin rate limit registry", () => {
   });
 
   it("shares one restore and merges persisted cooldown with newer memory", async () => {
-    let finishLoad!: (entries: RateLimitEntry[]) => void;
-    const pending = new Promise<RateLimitEntry[]>(
-      (resolve) => (finishLoad = resolve),
-    );
+    const { promise: pending, resolve: finishLoad } =
+      deferred<RateLimitEntry[]>();
     const load = vi.fn(() => pending);
     const save = vi.fn(async () => undefined);
     const registry = createRateLimitRegistry({
@@ -78,10 +77,8 @@ describe("origin rate limit registry", () => {
   });
 
   it("serializes deferred persistence writes so an old snapshot cannot win", async () => {
-    let release!: () => void;
-    let started!: () => void;
-    const pending = new Promise<void>((resolve) => (release = resolve));
-    const firstStarted = new Promise<void>((resolve) => (started = resolve));
+    const { promise: pending, resolve: release } = deferred<void>();
+    const { promise: firstStarted, resolve: started } = deferred<void>();
     const persisted: RateLimitEntry[][] = [];
     const save = vi.fn(async (entries: readonly RateLimitEntry[]) => {
       if (persisted.length === 0) {

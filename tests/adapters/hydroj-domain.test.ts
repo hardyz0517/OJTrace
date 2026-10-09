@@ -1,5 +1,7 @@
+import { immediatePagination } from "../helpers/fetch-input";
+import { httpResponse as response } from "../helpers/http-response";
 import { describe, expect, it } from "vitest";
-import type { FetchInput, HttpClient, HttpResponse } from "../../src/domain";
+import type { FetchInput, HttpClient } from "../../src/domain";
 import { hydroOJAdapter } from "../../src/adapters/hydroj";
 import {
   createHydroOJInstance,
@@ -20,15 +22,7 @@ const origin = "http://hydro.example.org";
 const tid = "6940ba67fb0f033a69e00504";
 const home = (uid = 42, domainId = "student") =>
   `<script>window.UserContext = '{"_id":${uid},"uname":"tester"}'; window.UiContext = '{"domainId":"${domainId}"}';</script>`;
-function response(url: string, text: string, status = 200): HttpResponse {
-  return {
-    url,
-    text,
-    status,
-    contentType: text.startsWith("{") ? "application/json" : "text/html",
-    headers: new Headers(),
-  };
-}
+
 function input(http: HttpClient): FetchInput {
   return {
     account: {
@@ -47,7 +41,7 @@ function input(http: HttpClient): FetchInput {
     limit: 100,
     since: Date.parse("2026-09-01T00:00:00Z"),
     until: Date.parse("2026-10-04T00:00:00Z"),
-    pagination: { runPage: ({ request }) => request() },
+    pagination: immediatePagination(),
   };
 }
 function record(id: string, overrides = {}) {

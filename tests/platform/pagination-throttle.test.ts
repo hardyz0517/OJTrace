@@ -4,6 +4,7 @@ import {
   sleepForPagination,
 } from "../../src/platform/network/pagination-throttle";
 import { createRateLimitRegistry } from "../../src/platform/network/rate-limit";
+import { deferred } from "../helpers/deferred";
 
 afterEach(() => vi.useRealTimers());
 
@@ -31,10 +32,7 @@ describe("pagination runtime", () => {
   );
 
   it("snapshots an enqueued policy and rejects unsafe policies before dispatch", async () => {
-    let release!: () => void;
-    const pending = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const { promise: pending, resolve: release } = deferred<void>();
     const sleep = vi.fn(async (_milliseconds: number) => undefined);
     const runtime = createPaginationRuntime({ random: () => 0.5, sleep });
     const signal = new AbortController().signal;
@@ -162,8 +160,7 @@ describe("pagination runtime", () => {
   });
 
   it("does not release the queue while a callback is still running", async () => {
-    let release!: () => void;
-    const running = new Promise<void>((resolve) => (release = resolve));
+    const { promise: running, resolve: release } = deferred<void>();
     const events: string[] = [];
     const runtime = createPaginationRuntime({
       sleep: async () => undefined,
@@ -194,8 +191,7 @@ describe("pagination runtime", () => {
   });
 
   it("cancels a queued page without running its callback", async () => {
-    let release!: () => void;
-    const running = new Promise<void>((resolve) => (release = resolve));
+    const { promise: running, resolve: release } = deferred<void>();
     const runtime = createPaginationRuntime({ sleep: async () => undefined });
     const controller = new AbortController();
     const first = runtime.runPage({
@@ -218,10 +214,8 @@ describe("pagination runtime", () => {
   });
 
   it("waits for active callback cleanup after abort before dispatching the next page", async () => {
-    let release!: () => void;
-    let started!: () => void;
-    const running = new Promise<void>((resolve) => (release = resolve));
-    const hasStarted = new Promise<void>((resolve) => (started = resolve));
+    const { promise: running, resolve: release } = deferred<void>();
+    const { promise: hasStarted, resolve: started } = deferred<void>();
     const controller = new AbortController();
     const next = vi.fn(async () => 2);
     const runtime = createPaginationRuntime({ sleep: async () => undefined });
@@ -251,8 +245,7 @@ describe("pagination runtime", () => {
   });
 
   it("allows independent origins to run while another callback is active", async () => {
-    let release!: () => void;
-    const running = new Promise<void>((resolve) => (release = resolve));
+    const { promise: running, resolve: release } = deferred<void>();
     const runtime = createPaginationRuntime();
     const first = runtime.runPage({
       origin: "https://one.test",

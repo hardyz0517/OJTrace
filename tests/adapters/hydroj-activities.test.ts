@@ -1,10 +1,12 @@
+import { immediatePagination } from "../helpers/fetch-input";
+import { httpResponse as response } from "../helpers/http-response";
 import { describe, expect, it } from "vitest";
 import { hydroOJAdapter } from "../../src/adapters/hydroj";
 import {
   parseHydroUserActivities,
   parseHydroUserActivitiesJson,
 } from "../../src/adapters/hydroj/parser";
-import type { FetchInput, HttpClient, HttpResponse } from "../../src/domain";
+import type { FetchInput, HttpClient } from "../../src/domain";
 import type { CollectionProgress } from "../../src/domain/sync-progress";
 
 const origin = "https://oj.example.org";
@@ -20,13 +22,7 @@ const record = (id: number) => ({
   score: 100,
   submitAt: "2026-01-02T00:00:00Z",
 });
-const response = (url: string, text: string, status = 200): HttpResponse => ({
-  url,
-  text,
-  status,
-  contentType: text.startsWith("{") ? "application/json" : "text/html",
-  headers: new Headers(),
-});
+
 function input(http: HttpClient, limit = 100): FetchInput {
   return {
     account: {
@@ -41,7 +37,7 @@ function input(http: HttpClient, limit = 100): FetchInput {
     limit,
     since: 0,
     until: Date.parse("2026-01-03"),
-    pagination: { runPage: ({ request }) => request() },
+    pagination: immediatePagination(),
     now: Date.parse("2026-01-03"),
     signal: new AbortController().signal,
     requestId: "r",

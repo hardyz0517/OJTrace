@@ -1,19 +1,13 @@
+import { immediatePagination } from "../helpers/fetch-input";
+import { httpResponse as response } from "../helpers/http-response";
 import { describe, expect, it } from "vitest";
 import { hydroOJAdapter } from "../../src/adapters/hydroj";
-import type { FetchInput, HttpClient, HttpResponse } from "../../src/domain";
+import type { FetchInput, HttpClient } from "../../src/domain";
 
 const origin = "https://session.example.org";
 const home = (uid: string) =>
   `<script>window.UserContext = '{"_id":${uid},"uname":"user${uid}"}';</script>`;
-function response(url: string, text: string): HttpResponse {
-  return {
-    url,
-    text,
-    status: 200,
-    contentType: text.startsWith("{") ? "application/json" : "text/html",
-    headers: new Headers(),
-  };
-}
+
 function input(http: HttpClient, uid: string): FetchInput {
   return {
     account: {
@@ -32,7 +26,7 @@ function input(http: HttpClient, uid: string): FetchInput {
     limit: 100,
     since: 0,
     until: 1,
-    pagination: { runPage: ({ request }) => request() },
+    pagination: immediatePagination(),
   };
 }
 describe("Hydro session ownership", () => {

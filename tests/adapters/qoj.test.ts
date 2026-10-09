@@ -1,3 +1,4 @@
+import { immediatePagination } from "../helpers/fetch-input";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { HttpClient } from "../../src/domain";
@@ -98,7 +99,7 @@ describe("QOJ adapter", () => {
     const recent = await qojAdapter.fetchRecent({
       since: 0,
       until: Number.MAX_SAFE_INTEGER,
-      pagination: { runPage: ({ request }) => request() },
+      pagination: immediatePagination(),
       ...input,
       account: {
         accountId: "account-1",
@@ -549,7 +550,7 @@ describe("QOJ adapter", () => {
     const result = await qojAdapter.fetchRecent({
       since: 0,
       until: Number.MAX_SAFE_INTEGER,
-      pagination: { runPage: ({ request }) => request() },
+      pagination: immediatePagination(),
       account: {
         accountId: "account-1",
         source: "qoj",
@@ -646,7 +647,7 @@ describe("QOJ adapter", () => {
     const result = await qojAdapter.fetchRecent({
       since: 0,
       until: Number.MAX_SAFE_INTEGER,
-      pagination: { runPage: ({ request }) => request() },
+      pagination: immediatePagination(),
       account: {
         accountId: "account-1",
         source: "qoj",
@@ -689,7 +690,7 @@ describe("QOJ adapter", () => {
       qojAdapter.fetchRecent({
         since: 0,
         until: Number.MAX_SAFE_INTEGER,
-        pagination: { runPage: ({ request }) => request() },
+        pagination: immediatePagination(),
         account: {
           accountId: "account-1",
           source: "qoj",
@@ -723,7 +724,7 @@ describe("QOJ adapter", () => {
       qojAdapter.fetchRecent({
         since: 0,
         until: Number.MAX_SAFE_INTEGER,
-        pagination: { runPage: ({ request }) => request() },
+        pagination: immediatePagination(),
         account: {
           accountId: "account-1",
           source: "qoj",
@@ -759,7 +760,7 @@ describe("QOJ adapter", () => {
     const result = await qojAdapter.fetchRecent({
       since: 0,
       until: Number.MAX_SAFE_INTEGER,
-      pagination: { runPage: ({ request }) => request() },
+      pagination: immediatePagination(),
       account: {
         accountId: "account-1",
         source: "qoj",
@@ -790,7 +791,7 @@ describe("QOJ adapter", () => {
       qojAdapter.fetchRecent({
         since: 0,
         until: Number.MAX_SAFE_INTEGER,
-        pagination: { runPage: ({ request }) => request() },
+        pagination: immediatePagination(),
         account: {
           accountId: "account-1",
           source: "qoj",

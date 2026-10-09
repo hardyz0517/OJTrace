@@ -1,3 +1,5 @@
+import { immediatePagination } from "../helpers/fetch-input";
+import { httpResponse as response } from "../helpers/http-response";
 import { describe, expect, it } from "vitest";
 import { hydroOJAdapter } from "../../src/adapters/hydroj";
 import type { FetchInput, HttpClient, HttpResponse } from "../../src/domain";
@@ -21,15 +23,7 @@ function oid(time: number, suffix = 1) {
 function raw(time: number, suffix = 1) {
   return { _id: oid(time, suffix), uid: 42, pid: suffix, status: 1 };
 }
-function response(url: string, text: string, status = 200): HttpResponse {
-  return {
-    url,
-    text,
-    status,
-    contentType: text.startsWith("{") ? "application/json" : "text/html",
-    headers: new Headers(),
-  };
-}
+
 function input(http: HttpClient): FetchInput {
   return {
     account: {
@@ -47,7 +41,7 @@ function input(http: HttpClient): FetchInput {
     signal: new AbortController().signal,
     requestId: "r",
     http,
-    pagination: { runPage: ({ request }) => request() },
+    pagination: immediatePagination(),
   };
 }
 function httpWithPages(

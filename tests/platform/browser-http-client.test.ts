@@ -6,6 +6,7 @@ import {
   withCookieScope,
   withTemporaryCookies,
 } from "../../src/platform/network/temporary-cookies";
+import { deferred } from "../helpers/deferred";
 
 const cookieApi = vi.hoisted(() => ({
   get: vi.fn(),
@@ -477,16 +478,13 @@ describe("BrowserHttpClient QOJ browser session", () => {
   it("waits for manual Cookie restoration before reading a browser session", async () => {
     cookieApi.get.mockResolvedValue(null);
     cookieApi.set.mockResolvedValue({});
-    let finishRestore!: (value: object) => void;
-    let restorationStarted!: () => void;
-    const restoring = new Promise<void>((done) => {
-      restorationStarted = done;
-    });
+    const { promise: restoring, resolve: restorationStarted } =
+      deferred<void>();
+    const { promise: restoreResult, resolve: finishRestore } =
+      deferred<object>();
     cookieApi.remove.mockImplementationOnce(() => {
       restorationStarted();
-      return new Promise((done) => {
-        finishRestore = done;
-      });
+      return restoreResult;
     });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"));
     const http = createBrowserHttpClient();
@@ -586,10 +584,7 @@ describe("BrowserHttpClient Hydro manual Cookie", () => {
     cookieApi.get.mockResolvedValue(null);
     cookieApi.set.mockResolvedValue({});
     cookieApi.remove.mockResolvedValue({});
-    let finishCancel!: () => void;
-    const pendingCancel = new Promise<void>(
-      (resolve) => (finishCancel = resolve),
-    );
+    const { promise: pendingCancel, resolve: finishCancel } = deferred<void>();
     const cancel = vi.fn(() => pendingCancel);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -624,17 +619,15 @@ describe("BrowserHttpClient Hydro manual Cookie", () => {
   it("keeps the pagination lock through aborted HTTP and deferred Cookie restoration", async () => {
     cookieApi.get.mockResolvedValue(null);
     cookieApi.set.mockResolvedValue({});
-    let finishRestore!: (value: object) => void;
-    let restorationStarted!: () => void;
-    const restoring = new Promise<void>(
-      (resolve) => (restorationStarted = resolve),
-    );
+    const { promise: restoring, resolve: restorationStarted } =
+      deferred<void>();
+    const { promise: restoreResult, resolve: finishRestore } =
+      deferred<object>();
     cookieApi.remove.mockImplementationOnce(() => {
       restorationStarted();
-      return new Promise((resolve) => (finishRestore = resolve));
+      return restoreResult;
     });
-    let started!: () => void;
-    const requesting = new Promise<void>((resolve) => (started = resolve));
+    const { promise: requesting, resolve: started } = deferred<void>();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementationOnce(
@@ -883,14 +876,8 @@ describe("BrowserHttpClient Hydro manual Cookie", () => {
     cookieApi.get.mockResolvedValue(null);
     cookieApi.set.mockResolvedValue({});
     cookieApi.remove.mockResolvedValue({});
-    let release!: (response: Response) => void;
-    let started!: () => void;
-    const manualResponse = new Promise<Response>((done) => {
-      release = done;
-    });
-    const manualStarted = new Promise<void>((done) => {
-      started = done;
-    });
+    const { promise: manualResponse, resolve: release } = deferred<Response>();
+    const { promise: manualStarted, resolve: started } = deferred<void>();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementationOnce(() => {

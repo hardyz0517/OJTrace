@@ -1,3 +1,4 @@
+import { immediatePagination } from "../helpers/fetch-input";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { HttpClient } from "../../src/domain";
@@ -237,7 +238,7 @@ describe("HydroOJ research utilities", () => {
       limit: 100,
       since: 0,
       until: Date.now(),
-      pagination: { runPage: ({ request }) => request() },
+      pagination: immediatePagination(),
       signal: new AbortController().signal,
       now: Date.now(),
       requestId: "request-1",
@@ -288,7 +289,7 @@ describe("HydroOJ research utilities", () => {
       limit: 1_000,
       since: Date.parse("2026-01-01T00:00:00.000Z"),
       until: Date.parse("2026-01-03T00:00:00.000Z"),
-      pagination: { runPage: ({ request }) => request() },
+      pagination: immediatePagination(),
       signal: new AbortController().signal,
       now: Date.parse("2026-01-03T00:00:00.000Z"),
       requestId: "request-3",
@@ -359,7 +360,7 @@ describe("HydroOJ research utilities", () => {
         limit: 100,
         since: 0,
         until: Date.now(),
-        pagination: { runPage: ({ request }) => request() },
+        pagination: immediatePagination(),
         signal: new AbortController().signal,
         now: Date.now(),
         requestId: "request-2",

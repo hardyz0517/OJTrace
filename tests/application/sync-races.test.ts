@@ -8,14 +8,9 @@ import {
 import { syncEnabledAccounts } from "../../src/application/sync/sync-service";
 import type { FetchInput, FetchResult, HttpClient } from "../../src/domain";
 import { accountRecord } from "../account-fixture";
+import { deferred } from "../helpers/deferred";
+import { memoryStorageArea } from "../helpers/memory-storage";
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
 function fixture() {
   const account = accountRecord({
     accountId: crypto.randomUUID(),
@@ -24,15 +19,11 @@ function fixture() {
     enabled: true,
     authMode: "public-handle",
   });
-  let data: Record<string, unknown> = {
-    "ojtrace:data": { ...defaultStoredData(), accounts: [account] },
-  };
-  const storage = createStoragePort({
-    get: async () => data,
-    set: async (value) => {
-      data = { ...data, ...value };
-    },
-  });
+  const storage = createStoragePort(
+    memoryStorageArea({
+      "ojtrace:data": { ...defaultStoredData(), accounts: [account] },
+    }),
+  );
   const http: HttpClient = {
     request: async () => {
       throw new Error("Unexpected request");

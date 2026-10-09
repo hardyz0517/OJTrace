@@ -17,6 +17,8 @@ import type {
 import { accountRecord } from "../account-fixture";
 import { createPaginationRuntime } from "../../src/platform/network/pagination-throttle";
 import { updatePaginationPreference } from "../../src/application/preferences/pagination-preferences";
+import { deferred } from "../helpers/deferred";
+import { memoryStorageArea } from "../helpers/memory-storage";
 
 const immediate: PaginationRuntime = { runPage: ({ request }) => request() };
 const http: HttpClient = {
@@ -24,13 +26,6 @@ const http: HttpClient = {
     throw new Error("unexpected HTTP");
   },
 };
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
-    resolve = done;
-  });
-  return { resolve, promise };
-}
 function fixture(deadlineMs?: number) {
   const account = accountRecord({
     accountId: crypto.randomUUID(),
@@ -39,19 +34,15 @@ function fixture(deadlineMs?: number) {
     authMode: "public-handle",
     enabled: true,
   });
-  let value: Record<string, unknown> = {
-    "ojtrace:data": {
-      ...defaultStoredData(),
-      accounts: [account],
-      syncStates: { [account.accountId]: { stale: false, lastSuccessAt: 1 } },
-    },
-  };
-  const storage = createStoragePort({
-    get: async () => value,
-    set: async (next) => {
-      value = { ...value, ...next };
-    },
-  });
+  const storage = createStoragePort(
+    memoryStorageArea({
+      "ojtrace:data": {
+        ...defaultStoredData(),
+        accounts: [account],
+        syncStates: { [account.accountId]: { stale: false, lastSuccessAt: 1 } },
+      },
+    }),
+  );
   return {
     account,
     storage,

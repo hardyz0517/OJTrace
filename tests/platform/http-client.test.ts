@@ -4,14 +4,12 @@ import {
   HttpClientError,
 } from "../../src/platform/network/http-client";
 import { createRateLimitRegistry } from "../../src/platform/network/rate-limit";
+import { deferred } from "../helpers/deferred";
 
 describe("HttpClient", () => {
   it("waits for deferred stream cancellation before settling a body timeout", async () => {
     vi.useFakeTimers();
-    let finishCancel!: () => void;
-    const pendingCancel = new Promise<void>(
-      (resolve) => (finishCancel = resolve),
-    );
+    const { promise: pendingCancel, resolve: finishCancel } = deferred<void>();
     const cancel = vi.fn(() => pendingCancel);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -47,8 +45,7 @@ describe("HttpClient", () => {
   });
   it("blocks later requests as soon as 429 headers arrive, before the body finishes", async () => {
     let body!: ReadableStreamDefaultController<Uint8Array>;
-    let bodyReadStarted!: () => void;
-    const reading = new Promise<void>((resolve) => (bodyReadStarted = resolve));
+    const { promise: reading, resolve: bodyReadStarted } = deferred<void>();
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         body = controller;
@@ -111,8 +108,7 @@ describe("HttpClient", () => {
   });
 
   it("preserves caller abort reasons during body reads without retry", async () => {
-    let started!: () => void;
-    const reading = new Promise<void>((resolve) => (started = resolve));
+    const { promise: reading, resolve: started } = deferred<void>();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         new ReadableStream({

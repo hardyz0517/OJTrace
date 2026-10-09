@@ -1,3 +1,4 @@
+import { immediatePagination } from "../helpers/fetch-input";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { normalizeLuoguRecord } from "../../src/adapters/luogu/normalizer";
@@ -68,7 +69,7 @@ describe("Luogu parser and normalizer", () => {
     const result = await luoguAdapter.fetchRecent({
       since: 0,
       until: Number.MAX_SAFE_INTEGER,
-      pagination: { runPage: ({ request }) => request() },
+      pagination: immediatePagination(),
       account: {
         accountId: "account",
         source: "luogu",
@@ -348,7 +349,7 @@ describe("Luogu parser and normalizer", () => {
       luoguAdapter.fetchRecent({
         since: 0,
         until: Number.MAX_SAFE_INTEGER,
-        pagination: { runPage: ({ request }) => request() },
+        pagination: immediatePagination(),
         account: {
           accountId: "account",
           source: "luogu",
@@ -382,7 +383,7 @@ describe("Luogu parser and normalizer", () => {
       luoguAdapter.fetchRecent({
         since: 0,
         until: Number.MAX_SAFE_INTEGER,
-        pagination: { runPage: ({ request }) => request() },
+        pagination: immediatePagination(),
         account: {
           accountId: "account",
           source: "luogu",
@@ -417,7 +418,7 @@ describe("Luogu parser and normalizer", () => {
       luoguAdapter.fetchRecent({
         since: 0,
         until: Number.MAX_SAFE_INTEGER,
-        pagination: { runPage: ({ request }) => request() },
+        pagination: immediatePagination(),
         account: {
           accountId: "account",
           source: "luogu",
@@ -479,7 +480,7 @@ describe("Luogu parser and normalizer", () => {
     const result = await luoguAdapter.fetchRecent({
       since: 1_699_500_000_000,
       until: Number.MAX_SAFE_INTEGER,
-      pagination: { runPage: ({ request }) => request() },
+      pagination: immediatePagination(),
       account: {
         accountId: "account",
         source: "luogu",
@@ -534,7 +535,7 @@ describe("Luogu parser and normalizer", () => {
     const result = await luoguAdapter.fetchRecent({
       since: 0,
       until: Number.MAX_SAFE_INTEGER,
-      pagination: { runPage: ({ request }) => request() },
+      pagination: immediatePagination(),
       account: {
         accountId: "account",
         source: "luogu",

@@ -1,11 +1,19 @@
 import { createBrowserHttpClient } from "../src/platform/network/browser-http-client";
 import { createStoragePort } from "../src/application/storage/store";
-import { publicStoredData } from "../src/application/accounts/account-queries";
+import {
+  authorizedResponse,
+  browserSessionResponse,
+  clearedResponse,
+  dataResponse,
+  messageEnvelope,
+  responseError,
+  syncResultResponse,
+} from "../src/application/messaging/responses";
 import { AccountCommandError } from "../src/application/accounts/account-errors";
 import { errorMessage } from "../src/application/messaging/error-messages";
 import { createAccountService } from "../src/application/accounts/account-service";
 import { syncEnabledAccounts } from "../src/application/sync/sync-service";
-import { adapterBySource } from "../src/adapters";
+import { adapterRegistry } from "../src/adapters";
 import { AdapterFailure } from "../src/domain/errors";
 import {
   isRuntimeMessage,
@@ -58,19 +66,6 @@ const accounts = createAccountService(storage, {
   ensurePermission: ensureAuthorizationPermission,
 });
 
-function responseError(
-  requestId: string,
-  message: string,
-  code = "invalid_request",
-): RuntimeResponse {
-  return {
-    schemaVersion: 2,
-    requestId,
-    ok: false,
-    error: { code, message },
-  };
-}
-
 function requestIdOf(raw: unknown): string {
   if (!raw || typeof raw !== "object") return "unknown";
   const requestId = (raw as { requestId?: unknown }).requestId;
@@ -97,15 +92,7 @@ async function authorizeAccount(
   input: Extract<RuntimeMessage, { type: "AUTHORIZE_ACCOUNT" }>,
 ): Promise<RuntimeResponse> {
   const saved = await accounts.authorize(input);
-  return {
-    schemaVersion: 2,
-    requestId: input.requestId,
-    ok: true,
-    type: "AUTHORIZED",
-    data: publicStoredData(saved.data),
-    account: saved.account,
-    superseded: saved.superseded,
-  };
+  return authorizedResponse(input.requestId, saved);
 }
 
 export default defineBackground(() => {
@@ -129,8 +116,7 @@ export default defineBackground(() => {
     if (!isRuntimeMessage(raw)) {
       return responseError(requestIdOf(raw), "Invalid runtime message");
     }
-    const message = raw as RuntimeMessage;
-    return handleMessage(message);
+    return handleMessage(raw);
   });
 });
 
@@ -141,13 +127,7 @@ async function handleMessage(
     await rateLimits.ready();
     switch (message.type) {
       case "GET_STATE":
-        return {
-          schemaVersion: 2,
-          requestId: message.requestId,
-          ok: true,
-          type: "STATE",
-          data: publicStoredData(await storage.load()),
-        };
+        return dataResponse(message.requestId, "STATE", await storage.load());
       case "SYNC_REQUEST": {
         let sequence = 0;
         const result = await syncEnabledAccounts(
@@ -161,9 +141,8 @@ async function handleMessage(
             accountIds: message.accountIds,
             onProgress(progress) {
               const event: SyncProgressEvent = {
-                schemaVersion: 2,
+                ...messageEnvelope(message.requestId),
                 type: "SYNC_PROGRESS",
-                requestId: message.requestId,
                 sequence: ++sequence,
                 progress,
               };
@@ -173,13 +152,7 @@ async function handleMessage(
           },
           collector,
         );
-        return {
-          schemaVersion: 2,
-          requestId: message.requestId,
-          ok: true,
-          type: "SYNC_RESULT",
-          result: { ...result, data: publicStoredData(result.data) },
-        };
+        return syncResultResponse(message.requestId, result);
       }
       case "UPDATE_SYNC_ACCOUNTS": {
         const data = await storage.transact((current) => ({
@@ -197,13 +170,7 @@ async function handleMessage(
             ],
           },
         }));
-        return {
-          schemaVersion: 2,
-          requestId: message.requestId,
-          ok: true,
-          type: "UPDATED",
-          data: publicStoredData(data),
-        };
+        return dataResponse(message.requestId, "UPDATED", data);
       }
       case "UPDATE_SYNC_RANGE": {
         const data = await storage.transact((current) => ({
@@ -213,13 +180,7 @@ async function handleMessage(
             syncRange: message.range,
           },
         }));
-        return {
-          schemaVersion: 2,
-          requestId: message.requestId,
-          ok: true,
-          type: "UPDATED",
-          data: publicStoredData(data),
-        };
+        return dataResponse(message.requestId, "UPDATED", data);
       }
       case "UPDATE_PAGINATION_POLICY": {
         const data = await updatePaginationPreference(
@@ -227,42 +188,19 @@ async function handleMessage(
           message.source,
           message.policy,
         );
-        return {
-          schemaVersion: 2,
-          requestId: message.requestId,
-          ok: true,
-          type: "UPDATED",
-          data: publicStoredData(data),
-        };
+        return dataResponse(message.requestId, "UPDATED", data);
       }
       case "DELETE_ACCOUNT": {
         const data = await accounts.remove(message.accountId);
-        return {
-          schemaVersion: 2,
-          requestId: message.requestId,
-          ok: true,
-          type: "UPDATED",
-          data: publicStoredData(data),
-        };
+        return dataResponse(message.requestId, "UPDATED", data);
       }
       case "CLEAR_DATA":
         accounts.cancelPending();
         await storage.clear();
-        return {
-          schemaVersion: 2,
-          requestId: message.requestId,
-          ok: true,
-          type: "CLEARED",
-        };
+        return clearedResponse(message.requestId);
       case "CLEAR_ACCOUNTS": {
         const data = await accounts.clearAll();
-        return {
-          schemaVersion: 2,
-          requestId: message.requestId,
-          ok: true,
-          type: "UPDATED",
-          data: publicStoredData(data),
-        };
+        return dataResponse(message.requestId, "UPDATED", data);
       }
       case "CLEAR_SUBMISSIONS": {
         collector.cancelAll();
@@ -270,25 +208,15 @@ async function handleMessage(
           ...current,
           submissions: [],
         }));
-        return {
-          schemaVersion: 2,
-          requestId: message.requestId,
-          ok: true,
-          type: "UPDATED",
-          data: publicStoredData(data),
-        };
+        return dataResponse(message.requestId, "UPDATED", data);
       }
       case "DETECT_BROWSER_SESSION": {
-        const adapter = adapterBySource.get(message.source);
+        const adapter = adapterRegistry[message.source];
         if (!adapter?.detectBrowserSession) {
-          return {
-            schemaVersion: 2,
-            requestId: message.requestId,
-            ok: true,
-            type: "BROWSER_SESSION",
-            source: message.source,
-            account: { authenticated: false, status: "unsupported" },
-          };
+          return browserSessionResponse(message.requestId, message.source, {
+            authenticated: false,
+            status: "unsupported",
+          });
         }
         let sessionOrigin: string | undefined;
         let sessionDomainId: string | undefined;
@@ -316,18 +244,11 @@ async function handleMessage(
           console.info("[OJTrace] host permission denied", {
             source: message.source,
           });
-          return {
-            schemaVersion: 2,
-            requestId: message.requestId,
-            ok: true,
-            type: "BROWSER_SESSION",
-            source: message.source,
-            account: {
-              authenticated: false,
-              status: "permission-denied",
-              diagnostic: `host-permission-missing; source=${message.source}`,
-            },
-          };
+          return browserSessionResponse(message.requestId, message.source, {
+            authenticated: false,
+            status: "permission-denied",
+            diagnostic: `host-permission-missing; source=${message.source}`,
+          });
         }
         console.info("[OJTrace] host permission granted", {
           source: message.source,
@@ -346,14 +267,11 @@ async function handleMessage(
           authenticated: account.authenticated,
           diagnostic: account.diagnostic,
         });
-        return {
-          schemaVersion: 2,
-          requestId: message.requestId,
-          ok: true,
-          type: "BROWSER_SESSION",
-          source: message.source,
+        return browserSessionResponse(
+          message.requestId,
+          message.source,
           account,
-        };
+        );
       }
       case "AUTHORIZE_ACCOUNT":
         return await authorizeAccount(message);

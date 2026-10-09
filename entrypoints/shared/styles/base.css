@@ -1,0 +1,33 @@
+:root {
+  color-scheme: light;
+  font-family: var(
+    --page-font-family,
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif
+  );
+  color: #1f2937;
+  background: #f6f7f9;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: #f6f7f9;
+}
+button {
+  font: inherit;
+}
+.shell,
+.settings-page {
+  width: min(1080px, calc(100% - 32px));
+  margin: 28px auto 56px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e7e9ee;
+  border-radius: 14px;
+}

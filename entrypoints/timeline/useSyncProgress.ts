@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createRuntimeRequestId } from "../shared/runtime-client";
 import type { AccountConfig, AccountSyncProgress } from "../../src/domain";
 import { isSyncProgressEvent } from "../../src/application/messaging/messages";
 import type { SyncResult } from "../../src/application/sync/sync-service";
@@ -28,7 +29,7 @@ export function useSyncProgress() {
 
   function start(accounts: AccountConfig[]): string {
     active.current?.disconnect();
-    const requestId = crypto.randomUUID();
+    const requestId = createRuntimeRequestId();
     const sequences = new Map<string, number>();
     const listener = (raw: unknown, sender: { id?: string }) => {
       if (

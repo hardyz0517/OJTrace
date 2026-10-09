@@ -1,33 +1,7 @@
-:root {
-  color-scheme: light;
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    sans-serif;
-  color: #1f2937;
-  background: #f6f7f9;
-}
-* {
-  box-sizing: border-box;
-}
-body {
-  margin: 0;
-  background: #f6f7f9;
-}
-button,
+@import "../shared/styles/base.css";
+
 input {
   font: inherit;
-}
-.settings-page {
-  width: min(1080px, calc(100% - 32px));
-  margin: 28px auto 56px;
-  overflow: hidden;
-  background: #fff;
-  border: 1px solid #e7e9ee;
-  border-radius: 14px;
 }
 .settings-content {
   max-width: 920px;
@@ -87,8 +61,7 @@ input {
   width: 100%;
   min-width: 0;
 }
-.account-form input,
-.select-trigger {
+.account-form input {
   height: 38px;
   border: 1px solid #dce1e8;
   border-radius: 7px;
@@ -97,8 +70,7 @@ input {
   padding: 0 12px;
   font-size: 13px;
 }
-.account-form input:focus,
-.select-trigger:focus-visible {
+.account-form input:focus {
   border-color: #8ca7d1;
   outline: 2px solid #dbe7f8;
   outline-offset: 1px;
@@ -515,85 +487,6 @@ input {
 .danger-button:disabled {
   cursor: wait;
   opacity: 0.65;
-}
-.animated-select {
-  position: relative;
-}
-.select-trigger {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  cursor: pointer;
-}
-.select-trigger > span:first-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.select-chevron {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 8px;
-  border-right: 1.5px solid #748096;
-  border-bottom: 1.5px solid #748096;
-  transform: translateY(-2px) rotate(45deg);
-  transition:
-    transform 160ms ease,
-    border-color 160ms ease;
-}
-.select-trigger:hover .select-chevron,
-.select-trigger.is-open .select-chevron {
-  border-color: #315b9f;
-}
-.select-trigger.is-open .select-chevron {
-  transform: translateY(2px) rotate(225deg);
-}
-.select-menu {
-  position: absolute;
-  z-index: 10;
-  top: calc(100% + 6px);
-  left: 0;
-  min-width: 100%;
-  border: 1px solid #e1e5eb;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 12px 28px #1f29371c;
-  padding: 4px;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-3px) scale(0.98);
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease;
-}
-.select-menu.is-open {
-  opacity: 1;
-  pointer-events: auto;
-  transform: none;
-}
-.select-menu[aria-hidden="true"] {
-  visibility: hidden;
-}
-.select-option {
-  display: flex;
-  width: 100%;
-  justify-content: space-between;
-  border: 0;
-  background: transparent;
-  padding: 8px;
-  color: #4b5565;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-}
-.select-option:hover,
-.select-option.is-active,
-.select-option.is-selected {
-  background: #f1f5fb;
-  color: #315b9f;
 }
 @keyframes fade {
   from {

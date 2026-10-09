@@ -7,7 +7,7 @@ import {
   syncReasonLabels,
   syncCoverageNote,
 } from "../../src/application/messaging/error-messages";
-import { adapterBySource } from "../../src/adapters";
+import { sourceDefinitions } from "../../src/sources/definitions";
 import type { SyncSourceResult } from "../../src/application/sync/sync-service";
 import "./SyncDiagnostics.css";
 
@@ -72,7 +72,7 @@ export function SyncDiagnostics({
       (account && data
         ? (instanceBrandingFor(data, account)?.name ?? account.label)
         : undefined) ??
-      adapterBySource.get(source.source)?.metadata.displayName ??
+      sourceDefinitions[source.source].metadata.displayName ??
       source.source
     );
   }

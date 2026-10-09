@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { adapterBySource } from "../../src/adapters";
-import type { RuntimeResponse } from "../../src/application/messaging/messages";
+import { sourceDefinitions } from "../../src/sources/definitions";
+import {
+  createRuntimeMessage,
+  sendRuntimeMessage,
+} from "../shared/runtime-client";
 import { AppHeader } from "../shared/AppHeader";
 import { OJName } from "../shared/OJName";
 import { AccountForm } from "./AccountForm";
@@ -12,10 +15,6 @@ import {
   type PublicStoredData,
 } from "../../src/application/accounts/account-queries";
 import "./style.css";
-
-function send<T extends RuntimeResponse>(message: object): Promise<T> {
-  return browser.runtime.sendMessage(message) as Promise<T>;
-}
 
 function App() {
   const [data, setData] = useState<PublicStoredData | null>(null);
@@ -28,11 +27,9 @@ function App() {
   const load = useCallback(async (): Promise<void> => {
     const sequence = ++loadSequence.current;
     try {
-      const response = await send<RuntimeResponse>({
-        schemaVersion: 2,
-        type: "GET_STATE",
-        requestId: crypto.randomUUID(),
-      });
+      const response = await sendRuntimeMessage(
+        createRuntimeMessage({ type: "GET_STATE" }),
+      );
       if (sequence !== loadSequence.current) return;
       if (response.ok && response.type === "STATE") setData(response.data);
       else if (!response.ok) setMessage(response.error.message);
@@ -56,13 +53,17 @@ function App() {
   }, [load]);
 
   async function remove(accountId: string): Promise<void> {
-    const response = await send<Extract<RuntimeResponse, { type: "UPDATED" }>>({
-      schemaVersion: 2,
-      type: "DELETE_ACCOUNT",
-      requestId: crypto.randomUUID(),
-      accountId,
-    });
-    if (response.ok) await load();
+    try {
+      const response = await sendRuntimeMessage(
+        createRuntimeMessage({ type: "DELETE_ACCOUNT", accountId }),
+      );
+      if (!response.ok) throw new Error(response.error.message);
+      if (response.type === "UPDATED") await load();
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "账号删除失败，请重试。",
+      );
+    }
   }
 
   async function clearData(
@@ -77,12 +78,11 @@ function App() {
           ? "CLEAR_SUBMISSIONS"
           : "CLEAR_DATA";
     try {
-      const response = await send<RuntimeResponse>({
-        schemaVersion: 2,
-        type,
-        requestId: crypto.randomUUID(),
-      });
-      if (response.ok) {
+      const response = await sendRuntimeMessage(createRuntimeMessage({ type }));
+      if (
+        response.ok &&
+        (response.type === "CLEARED" || response.type === "UPDATED")
+      ) {
         setConfirmClear(null);
         setMessage(
           kind === "accounts"
@@ -92,7 +92,7 @@ function App() {
               : "本地数据已清除。",
         );
         await load();
-      } else {
+      } else if (!response.ok) {
         setMessage(response.error.message);
       }
     } catch (error) {
@@ -123,7 +123,7 @@ function App() {
           {!data?.accounts.length && <p className="muted">还没有账号。</p>}
           <ul className="accounts">
             {data?.accounts.map((account) => {
-              const adapter = adapterBySource.get(account.source);
+              const adapter = sourceDefinitions[account.source];
               const branding = instanceBrandingFor(data, account);
               const syncState = data.syncStates[account.accountId];
               const syncLabel =

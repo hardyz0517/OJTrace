@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { RotateCcw, Save } from "lucide-react";
-import { adapters } from "../../src/adapters";
+import { sources } from "../../src/sources/definitions";
 import {
   PAGINATION_LIMITS,
   isPaginationPolicy,
@@ -11,10 +11,10 @@ import {
   type SourceId,
 } from "../../src/domain";
 import type { PublicStoredData } from "../../src/application/accounts/account-queries";
-import type {
-  RuntimeMessage,
-  RuntimeResponse,
-} from "../../src/application/messaging/messages";
+import {
+  createRuntimeMessage,
+  sendRuntimeMessage,
+} from "../shared/runtime-client";
 import { OJName } from "../shared/OJName";
 
 function secondsToMs(value: string): number {
@@ -136,17 +136,13 @@ function PaginationSourceRow({
     submitting.current = true;
     setBusy(true);
     setError(null);
-    const command: RuntimeMessage = {
-      schemaVersion: 2,
+    const command = createRuntimeMessage({
       type: "UPDATE_PAGINATION_POLICY",
-      requestId: crypto.randomUUID(),
       source,
       policy,
-    };
+    });
     try {
-      const response = (await browser.runtime.sendMessage(
-        command,
-      )) as RuntimeResponse;
+      const response = await sendRuntimeMessage(command);
       if (!response.ok) throw new Error(response.error.message);
       if (response.type !== "UPDATED") throw new Error("保存失败，请重试。");
       if (!mounted.current) return;
@@ -294,7 +290,7 @@ export function PaginationSettings({
         同一网站的多个账号和域共享请求队列，网站限流会触发冷却。
       </p>
       <div className="pagination-rows">
-        {adapters.map(({ metadata }) => (
+        {sources.map(({ metadata }) => (
           <PaginationSourceRow
             key={metadata.id}
             source={metadata.id}

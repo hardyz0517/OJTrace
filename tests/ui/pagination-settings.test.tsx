@@ -301,7 +301,15 @@ describe("pagination settings UI", () => {
     ).toBe(true);
     expect(updated).not.toHaveBeenCalled();
     await act(async () =>
-      resolve({ ok: false, error: { message: "存储失败。" } }),
+      resolve({
+        schemaVersion: 2,
+        requestId: (
+          vi.mocked(browser.runtime.sendMessage).mock
+            .calls[0]![0] as unknown as RuntimeMessage
+        ).requestId,
+        ok: false,
+        error: { code: "storage_failed", message: "存储失败。" },
+      }),
     );
     expect(form().textContent).toContain("存储失败。");
     expect(input("基础间隔（秒）").value).toBe("3");

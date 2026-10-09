@@ -7,6 +7,7 @@ import { ensureAuthorizationPermission } from "../../src/platform/permissions/ho
 import { publicStoredData } from "../../src/application/accounts/account-queries";
 import { defaultStoredData } from "../../src/application/storage/store";
 import { accountRecord } from "../account-fixture";
+import type { RuntimeMessage } from "../../src/application/messaging/messages";
 vi.mock("../../src/platform/permissions/hosts", () => ({
   ensureAuthorizationPermission: vi.fn(async () => true),
 }));
@@ -39,30 +40,37 @@ describe("account authorization UI", () => {
       authMode: "browser-session",
       enabled: true,
     });
-    vi.mocked(browser.runtime.sendMessage).mockImplementation(async (raw) => {
-      const message = raw as unknown as { type: string };
-      return message.type === "DETECT_BROWSER_SESSION"
-        ? {
-            ok: true,
-            type: "BROWSER_SESSION",
-            account: {
-              authenticated: true,
-              status: "authenticated",
-              uid: "42",
-              username: "tester",
-            },
-          }
-        : {
-            ok: true,
-            type: "AUTHORIZED",
-            account,
-            data: publicStoredData({
-              ...defaultStoredData(),
-              accounts: [account],
-            }),
-            superseded: false,
-          };
-    });
+    vi.mocked(browser.runtime.sendMessage).mockImplementation(
+      async (raw: unknown) => {
+        const message = raw as RuntimeMessage;
+        return message.type === "DETECT_BROWSER_SESSION"
+          ? {
+              schemaVersion: 2,
+              requestId: message.requestId,
+              ok: true,
+              type: "BROWSER_SESSION",
+              source: "hydroj",
+              account: {
+                authenticated: true,
+                status: "authenticated",
+                uid: "42",
+                username: "tester",
+              },
+            }
+          : {
+              schemaVersion: 2,
+              requestId: message.requestId,
+              ok: true,
+              type: "AUTHORIZED",
+              account,
+              data: publicStoredData({
+                ...defaultStoredData(),
+                accounts: [account],
+              }),
+              superseded: false,
+            };
+      },
+    );
     await act(async () => state.selectSource("hydroj"));
     await act(async () =>
       state.updateForm({ origin: "http://ui.example.org/d/student/" }),
@@ -98,15 +106,17 @@ describe("account authorization UI", () => {
       authMode: "manual-cookie",
       enabled: true,
     });
-    vi.mocked(browser.runtime.sendMessage).mockResolvedValue({
-      schemaVersion: 2,
-      requestId: "r",
-      ok: true,
-      type: "AUTHORIZED",
-      account,
-      data: publicStoredData({ ...defaultStoredData(), accounts: [account] }),
-      superseded: false,
-    } as never);
+    vi.mocked(browser.runtime.sendMessage).mockImplementation(
+      async (raw: unknown) => ({
+        schemaVersion: 2,
+        requestId: (raw as RuntimeMessage).requestId,
+        ok: true,
+        type: "AUTHORIZED",
+        account,
+        data: publicStoredData({ ...defaultStoredData(), accounts: [account] }),
+        superseded: false,
+      }),
+    );
     await act(async () => state.selectSource("atcoder"));
     await act(async () =>
       state.updateForm({
@@ -124,18 +134,20 @@ describe("account authorization UI", () => {
     expect(onAuthorized).toHaveBeenCalledOnce();
   });
   it("keeps a background failure code and message in the session state", async () => {
-    vi.mocked(browser.runtime.sendMessage).mockResolvedValue({
-      schemaVersion: 2,
-      requestId: "failed-detection",
-      ok: false,
-      error: { code: "permission_required", message: "站点权限查询失败。" },
-    } as never);
+    let requestId = "";
+    vi.mocked(browser.runtime.sendMessage).mockImplementation(
+      async (raw: unknown) => ({
+        schemaVersion: 2,
+        requestId: (requestId = (raw as RuntimeMessage).requestId),
+        ok: false,
+        error: { code: "permission_required", message: "站点权限查询失败。" },
+      }),
+    );
     await act(async () => state.selectSource("qoj"));
     await act(async () => state.detect(false));
     expect(state.session).toMatchObject({
       authenticated: false,
-      diagnostic:
-        "background-response-error; code=permission_required; requestId=failed-detection",
+      diagnostic: `background-response-error; code=permission_required; requestId=${requestId}`,
     });
     expect(state.message).toBe("站点权限查询失败。");
   });
@@ -187,7 +199,13 @@ describe("account authorization UI", () => {
       }),
     );
     await act(async () => {
-      release(authorized);
+      release({
+        ...authorized,
+        requestId: (
+          vi.mocked(browser.runtime.sendMessage).mock
+            .calls[0]![0] as unknown as RuntimeMessage
+        ).requestId,
+      });
       await Promise.all([first, second]);
     });
     expect(state.form.credentials).toEqual({});
@@ -213,7 +231,10 @@ describe("account authorization UI", () => {
     await act(async () => {
       release({
         schemaVersion: 2,
-        requestId: "r",
+        requestId: (
+          vi.mocked(browser.runtime.sendMessage).mock
+            .calls[0]![0] as unknown as RuntimeMessage
+        ).requestId,
         ok: true,
         type: "BROWSER_SESSION",
         source: "hydroj",

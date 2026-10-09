@@ -1,5 +1,9 @@
+import {
+  requiresIdentifier,
+  formCredentialInput,
+} from "../../src/domain/auth-input";
 import { useEffect, useRef, useState } from "react";
-import { adapterBySource } from "../../src/adapters";
+import { sourceDefinitions } from "../../src/sources/definitions";
 import { createHydroOJInstance } from "../../src/adapters/hydroj/instance";
 import type {
   AccountAuthMode,
@@ -8,6 +12,10 @@ import type {
 } from "../../src/domain";
 import type { RuntimeResponse } from "../../src/application/messaging/messages";
 import { ensureAuthorizationPermission } from "../../src/platform/permissions/hosts";
+import {
+  createRuntimeMessage,
+  sendRuntimeMessage,
+} from "../shared/runtime-client";
 
 export type AuthorizedResponse = Extract<
   RuntimeResponse,
@@ -31,7 +39,7 @@ export interface AccountFormValue {
 }
 
 function initialForm(source: SourceId): AccountFormValue {
-  const modes = adapterBySource.get(source)?.metadata.authModes ?? [];
+  const modes = sourceDefinitions[source].metadata.authModes;
   return {
     source,
     authMode:
@@ -57,10 +65,6 @@ function normalizedScope(form: AccountFormValue): {
   }
 }
 
-function send(message: object): Promise<RuntimeResponse> {
-  return browser.runtime.sendMessage(message) as Promise<RuntimeResponse>;
-}
-
 export function useAccountAuthorization(
   onAuthorized: (response: AuthorizedResponse) => void,
 ) {
@@ -74,8 +78,7 @@ export function useAccountAuthorization(
     status === "validating-input" ||
     status === "requesting-permission" ||
     status === "authorizing";
-  const modeDefinitions =
-    adapterBySource.get(form.source)?.metadata.authModes ?? [];
+  const modeDefinitions = sourceDefinitions[form.source].metadata.authModes;
   const mode = modeDefinitions.find((item) => item.type === form.authMode);
 
   function updateForm(patch: Partial<AccountFormValue>) {
@@ -114,13 +117,13 @@ export function useAccountAuthorization(
           });
         return;
       }
-      const response = await send({
-        schemaVersion: 2,
-        type: "DETECT_BROWSER_SESSION",
-        requestId: crypto.randomUUID(),
-        source: form.source,
-        ...scope,
-      });
+      const response = await sendRuntimeMessage(
+        createRuntimeMessage({
+          type: "DETECT_BROWSER_SESSION",
+          source: form.source,
+          ...scope,
+        }),
+      );
       if (revision !== detectionRevision.current) return;
       if (!response.ok) {
         setSession({
@@ -183,40 +186,28 @@ export function useAccountAuthorization(
         (!session || session === "checking" || !session.authenticated)
       )
         throw new Error("请先授权站点并检测登录状态。");
-      if (
-        mode.type !== "browser-session" &&
-        mode.identifierRequired !== false &&
-        !identifier
-      )
+      if (requiresIdentifier(mode) && !identifier)
         throw new Error("请填写账号标识。");
-      const credentials = Object.fromEntries(
-        (mode.credentialFields ?? []).flatMap((field) => {
-          const value =
-            field.key === "password"
-              ? (form.credentials[field.key] ?? "")
-              : (form.credentials[field.key]?.trim() ?? "");
-          if (field.required !== false && !value)
-            throw new Error("请填写全部必需凭证。");
-          return value ? [[field.key, value]] : [];
-        }),
-      );
+      const parsedCredentials = formCredentialInput(mode, form.credentials);
+      if (parsedCredentials.issue) throw new Error("请填写全部必需凭证。");
+      const credentials = parsedCredentials.credentials ?? {};
       setStatus("requesting-permission");
       if (!(await ensureAuthorizationPermission(form.source, origin, true)))
         throw new Error("未授予站点权限，请重新授权。");
       setStatus("authorizing");
-      const response = await send({
-        schemaVersion: 2,
-        type: "AUTHORIZE_ACCOUNT",
-        requestId: crypto.randomUUID(),
-        source: form.source,
-        authMode: mode.type,
-        ...(identifier ? { identifier } : {}),
-        ...(form.source === "hydroj" && form.label.trim()
-          ? { label: form.label.trim() }
-          : {}),
-        ...scope,
-        ...(Object.keys(credentials).length ? { credentials } : {}),
-      });
+      const response = await sendRuntimeMessage(
+        createRuntimeMessage({
+          type: "AUTHORIZE_ACCOUNT",
+          source: form.source,
+          authMode: mode.type,
+          ...(identifier ? { identifier } : {}),
+          ...(form.source === "hydroj" && form.label.trim()
+            ? { label: form.label.trim() }
+            : {}),
+          ...scope,
+          ...(Object.keys(credentials).length ? { credentials } : {}),
+        }),
+      );
       if (!response.ok) throw new Error(response.error.message);
       if (response.type !== "AUTHORIZED")
         throw new Error("授权响应格式错误，请重试。");

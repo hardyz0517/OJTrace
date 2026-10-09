@@ -4,6 +4,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../entrypoints/timeline/main";
 import type { Submission } from "../../src/domain";
+import type { RuntimeMessage } from "../../src/application/messaging/messages";
 import { publicStoredData } from "../../src/application/accounts/account-queries";
 import { defaultStoredData } from "../../src/application/storage/store";
 
@@ -102,13 +103,15 @@ async function mount(items = submissions) {
     ...defaultStoredData(),
     submissions: items,
   });
-  vi.mocked(browser.runtime.sendMessage).mockResolvedValue({
-    schemaVersion: 2,
-    type: "STATE",
-    requestId: "state",
-    ok: true,
-    data,
-  } as never);
+  vi.mocked(browser.runtime.sendMessage).mockImplementation(
+    async (raw: unknown) => ({
+      schemaVersion: 2,
+      type: "STATE",
+      requestId: (raw as RuntimeMessage).requestId,
+      ok: true,
+      data,
+    }),
+  );
   await act(async () => root.render(createElement(App)));
 }
 

@@ -1,0 +1,176 @@
+.animated-select {
+  position: relative;
+}
+.animated-select .select-trigger {
+  display: flex;
+  width: 100%;
+  height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid #dce1e8;
+  border-radius: 7px;
+  background: #fff;
+  color: #344054;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.animated-select--form .select-trigger > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.animated-select--form .select-trigger:focus-visible {
+  border-color: #8ca7d1;
+  outline: 2px solid #dbe7f8;
+  outline-offset: 1px;
+}
+.animated-select .select-chevron {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-right: 1.5px solid #748096;
+  border-bottom: 1.5px solid #748096;
+  transform: translateY(-2px) rotate(45deg);
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease;
+}
+.animated-select--form .select-trigger:hover .select-chevron,
+.animated-select--form .select-trigger.is-open .select-chevron {
+  border-color: #315b9f;
+}
+.animated-select .select-trigger.is-open .select-chevron {
+  transform: translateY(2px) rotate(225deg);
+}
+.animated-select .select-menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 100%;
+  border: 1px solid #e1e5eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 28px #1f29371c;
+  padding: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-3px) scale(0.98);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+.animated-select .select-menu.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+.animated-select .select-menu[aria-hidden="true"] {
+  visibility: hidden;
+}
+.animated-select .select-option {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  border: 0;
+  background: transparent;
+  padding: 8px;
+  color: #4b5565;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.animated-select--form .select-option:hover,
+.animated-select--form .select-option.is-active,
+.animated-select--form .select-option.is-selected {
+  background: #f1f5fb;
+  color: #315b9f;
+}
+
+/* The timeline retains its compact dimensions and motion. */
+.animated-select--compact {
+  display: inline-flex;
+}
+.animated-select--compact .select-trigger {
+  display: inline-flex;
+  width: auto;
+  min-width: 108px;
+  height: 34px;
+  gap: 18px;
+  border-color: #e1e5eb;
+  color: #4b5565;
+  padding: 0 10px;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease;
+}
+.animated-select--compact .select-trigger:hover,
+.animated-select--compact .select-trigger.is-open {
+  border-color: #bdc8da;
+  background: #fbfcfd;
+}
+.animated-select--compact .select-trigger.is-open {
+  box-shadow: 0 0 0 3px rgb(184 199 232 / 28%);
+}
+.animated-select--compact .select-chevron {
+  width: 7px;
+  height: 7px;
+  flex-basis: 7px;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease;
+}
+.animated-select--compact .select-trigger.is-open .select-chevron {
+  border-color: #4f6f9f;
+}
+.animated-select--compact .select-menu {
+  z-index: 20;
+  border-radius: 9px;
+  background: rgb(255 255 255 / 98%);
+  box-shadow:
+    0 12px 28px rgb(31 41 55 / 11%),
+    0 2px 6px rgb(31 41 55 / 6%);
+  transform: translateY(-5px) scale(0.98);
+  transform-origin: top center;
+  transition:
+    opacity 160ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.animated-select--compact .select-menu.is-open {
+  transform: translateY(0) scale(1);
+}
+.animated-select--compact .select-option {
+  align-items: center;
+  border-radius: 6px;
+  padding: 8px 9px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+.animated-select--compact .select-option:hover,
+.animated-select--compact .select-option.is-active {
+  background: #f1f5fb;
+  color: #25344d;
+  transform: translateX(1px);
+}
+.animated-select--compact .select-option.is-selected {
+  color: #315b9f;
+  font-weight: 600;
+}
+.animated-select--compact .select-trigger:focus-visible,
+.animated-select--compact .select-option:focus-visible {
+  outline: 2px solid #b8c7e8;
+  outline-offset: 1px;
+}
+@media (max-width: 420px) {
+  .animated-select--compact .select-menu {
+    min-width: max-content;
+  }
+}

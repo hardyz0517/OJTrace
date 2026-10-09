@@ -1,3 +1,4 @@
+import { sourceDefinitions } from "../../src/sources/definitions";
 import { useEffect, useState } from "react";
 import type { SourceId } from "../../src/domain";
 import "./OJLogo.css";
@@ -8,14 +9,6 @@ const logoFiles: Record<SourceId, string> = {
   qoj: "/oj-logos/qoj.png",
   atcoder: "/oj-logos/atcoder-favicon.png",
   hydroj: "/oj-logos/hydroj.png",
-};
-
-const sourceNames: Record<SourceId, string> = {
-  codeforces: "Codeforces",
-  luogu: "洛谷",
-  qoj: "QOJ",
-  atcoder: "AtCoder",
-  hydroj: "HydroOJ",
 };
 
 export function OJLogo({
@@ -37,7 +30,7 @@ export function OJLogo({
       src={failed ? logoFiles[source] : (iconDataUrl ?? logoFiles[source])}
       alt=""
       aria-hidden="true"
-      title={`${sourceNames[source]} logo`}
+      title={`${sourceDefinitions[source].metadata.displayName} logo`}
       onError={
         iconDataUrl
           ? () => {

@@ -1,36 +1,14 @@
+@import "../shared/styles/base.css";
+
 :root {
-  color-scheme: light;
   overflow-x: auto;
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
-  color: #1f2937;
-  background: #f6f7f9;
-}
-* {
-  box-sizing: border-box;
+  --page-font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
 }
 body {
-  margin: 0;
   /* Preserve all six timeline columns and let narrow viewports scroll. */
   min-width: 900px;
-  background: #f6f7f9;
-}
-button {
-  font: inherit;
-}
-.shell {
-  width: min(1080px, calc(100% - 32px));
-  margin: 28px auto 56px;
-  overflow: hidden;
-  background: #fff;
-  border: 1px solid #e7e9ee;
-  border-radius: 14px;
 }
 .filter-actions {
   display: flex;
@@ -103,6 +81,17 @@ button {
   border-color: #bdc8da;
   background: #f8fafc;
   color: #344054;
+}
+.sync-option-button .select-chevron {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-right: 1.5px solid #748096;
+  border-bottom: 1.5px solid #748096;
+  transform: translateY(-2px) rotate(45deg);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease;
 }
 .sync-option-button[data-state="open"] .select-chevron {
   border-color: #4f6f9f;
@@ -268,9 +257,7 @@ button {
 .quiet-action:active {
   transform: translateY(1px);
 }
-.quiet-action:focus-visible,
-.select-trigger:focus-visible,
-.select-option:focus-visible {
+.quiet-action:focus-visible {
   outline: 2px solid #b8c7e8;
   outline-offset: 1px;
 }
@@ -330,118 +317,6 @@ button {
 }
 .copy-filtered-button[aria-busy="true"] {
   cursor: wait;
-}
-.animated-select {
-  position: relative;
-  display: inline-flex;
-}
-.select-trigger {
-  display: inline-flex;
-  min-width: 108px;
-  height: 34px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  border: 1px solid #e1e5eb;
-  border-radius: 7px;
-  background: #fff;
-  color: #4b5565;
-  padding: 0 10px;
-  font-size: 13px;
-  cursor: pointer;
-  transition:
-    border-color 180ms ease,
-    background-color 180ms ease,
-    box-shadow 180ms ease;
-}
-.select-trigger:hover,
-.select-trigger.is-open {
-  border-color: #bdc8da;
-  background: #fbfcfd;
-}
-.select-trigger.is-open {
-  box-shadow: 0 0 0 3px rgb(184 199 232 / 28%);
-}
-.select-chevron {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 7px;
-  border-right: 1.5px solid #748096;
-  border-bottom: 1.5px solid #748096;
-  transform: translateY(-2px) rotate(45deg);
-  transition:
-    transform 180ms ease,
-    border-color 180ms ease;
-}
-.select-trigger.is-open .select-chevron {
-  border-color: #4f6f9f;
-  transform: translateY(2px) rotate(225deg);
-}
-.select-menu {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 6px);
-  left: 0;
-  min-width: 100%;
-  border: 1px solid #e1e5eb;
-  border-radius: 9px;
-  background: rgb(255 255 255 / 98%);
-  box-shadow:
-    0 12px 28px rgb(31 41 55 / 11%),
-    0 2px 6px rgb(31 41 55 / 6%);
-  opacity: 0;
-  padding: 4px;
-  pointer-events: none;
-  transform: translateY(-5px) scale(0.98);
-  transform-origin: top center;
-  transition:
-    opacity 160ms ease,
-    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.select-menu.is-open {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0) scale(1);
-}
-.select-option {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #4b5565;
-  padding: 8px 9px;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background-color 120ms ease,
-    color 120ms ease,
-    transform 120ms ease;
-}
-.select-option:hover,
-.select-option.is-active {
-  background: #f1f5fb;
-  color: #25344d;
-  transform: translateX(1px);
-}
-.select-option.is-selected {
-  color: #315b9f;
-  font-weight: 600;
-}
-.select-menu[aria-hidden="true"] {
-  visibility: hidden;
-}
-.select-menu.is-open[aria-hidden="false"] {
-  visibility: visible;
-}
-/* Keep the menu inside the viewport on narrow screens. */
-@media (max-width: 420px) {
-  .select-menu {
-    min-width: max-content;
-  }
 }
 .sync-state {
   white-space: nowrap;

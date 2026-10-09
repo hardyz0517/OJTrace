@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from "react";
+import "./AnimatedSelect.css";
 
 export interface SelectOption<T extends string | number> {
   value: T;
@@ -10,11 +11,13 @@ export function AnimatedSelect<T extends string | number>({
   value,
   options,
   onChange,
+  variant = "form",
 }: {
   label: string;
   value: T;
   options: SelectOption<T>[];
   onChange: (value: T) => void;
+  variant?: "form" | "compact";
 }) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(() =>
@@ -77,7 +80,10 @@ export function AnimatedSelect<T extends string | number>({
   }
 
   return (
-    <div className="animated-select" ref={rootRef}>
+    <div
+      className={`animated-select animated-select--${variant}`}
+      ref={rootRef}
+    >
       <button
         type="button"
         className={`select-trigger${open ? " is-open" : ""}`}

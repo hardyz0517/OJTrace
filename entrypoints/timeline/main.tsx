@@ -1,12 +1,14 @@
+import { sourceDefinitions, sources } from "../../src/sources/definitions";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as Checkbox from "@radix-ui/react-checkbox";
 import * as Popover from "@radix-ui/react-popover";
 import { Clipboard } from "lucide-react";
-import type {
-  RuntimeMessage,
-  RuntimeResponse,
-} from "../../src/application/messaging/messages";
+import type { RuntimeMessage } from "../../src/application/messaging/messages";
+import {
+  createRuntimeMessage,
+  sendRuntimeMessage,
+} from "../shared/runtime-client";
 import type { AccountConfig, Submission } from "../../src/domain";
 import { hydroScopedUrl } from "../../src/domain/hydro-scope";
 import {
@@ -38,14 +40,6 @@ import {
 } from "../../src/application/accounts/account-queries";
 import "./style.css";
 
-const sourceLabels: Record<Submission["source"], string> = {
-  codeforces: "Codeforces",
-  luogu: "洛谷",
-  qoj: "QOJ",
-  atcoder: "AtCoder",
-  hydroj: "HydroOJ",
-};
-
 const verdictFilterOptions = [
   { value: "all" as const, label: "全部状态" },
   { value: "accepted" as const, label: "Accepted" },
@@ -60,10 +54,6 @@ const submissionFilterOptions = [
 ];
 
 type SubmissionFilter = "all" | "latest";
-
-function request<T extends RuntimeResponse>(message: object): Promise<T> {
-  return browser.runtime.sendMessage(message) as Promise<T>;
-}
 
 function formatTime(timestamp: number): string {
   return new Intl.DateTimeFormat(undefined, {
@@ -244,19 +234,7 @@ function groupByDate(items: Submission[]): Array<[string, Submission[]]> {
 
 function navigationUrl(item: Submission): string | undefined {
   const candidate = item.submissionUrl ?? item.fallbackListUrl;
-  if (!candidate) return undefined;
-  if (item.source === "hydroj") {
-    return item.origin &&
-      isAllowedOriginNavigation(
-        item.source,
-        item.origin,
-        candidate,
-        item.domainId,
-      )
-      ? candidate
-      : undefined;
-  }
-  return isAllowedNavigation(item.source, candidate) ? candidate : undefined;
+  return allowedRowUrl(item, candidate);
 }
 
 function ojHomeUrl(item: Submission): string | undefined {
@@ -269,13 +247,7 @@ function ojHomeUrl(item: Submission): string | undefined {
     }
   }
 
-  const homeUrls: Record<Exclude<Submission["source"], "hydroj">, string> = {
-    codeforces: "https://codeforces.com/",
-    luogu: "https://www.luogu.com.cn/",
-    qoj: "https://qoj.ac/",
-    atcoder: "https://atcoder.jp/",
-  };
-  return homeUrls[item.source];
+  return sourceDefinitions[item.source].officialHomeUrl;
 }
 
 function reviewMarkdown(item: Submission): string {
@@ -419,11 +391,15 @@ function sourceDisplayName(
   data: PublicStoredData | null,
   item: Submission,
 ): string {
-  if (item.source !== "hydroj") return sourceLabels[item.source];
+  if (item.source !== "hydroj")
+    return sourceDefinitions[item.source].metadata.displayName;
   const account = data?.accounts.find(
     (candidate) => candidate.accountId === item.accountId,
   );
-  return account?.label?.trim() || sourceLabels[item.source];
+  return (
+    account?.label?.trim() ||
+    sourceDefinitions[item.source].metadata.displayName
+  );
 }
 
 function SyncAccountPopover({
@@ -501,7 +477,7 @@ function SyncAccountPopover({
                   >
                     <Checkbox.Root
                       className="sync-account-check"
-                      aria-label={`${sourceLabels[account.source]} ${accountDisplayName(account)}`}
+                      aria-label={`${sourceDefinitions[account.source].metadata.displayName} ${accountDisplayName(account)}`}
                       checked={checked}
                       disabled={syncing || !account.enabled}
                       onCheckedChange={(nextChecked) =>
@@ -519,7 +495,7 @@ function SyncAccountPopover({
                       </Checkbox.Indicator>
                     </Checkbox.Root>
                     <span className="sync-account-source">
-                      {sourceLabels[account.source]}
+                      {sourceDefinitions[account.source].metadata.displayName}
                     </span>
                     <span className="sync-account-name">
                       {accountDisplayName(account)}
@@ -693,18 +669,22 @@ export function App() {
   }
 
   async function load(): Promise<void> {
-    const response = await request<Extract<RuntimeResponse, { type: "STATE" }>>(
-      {
-        schemaVersion: 2,
-        type: "GET_STATE",
-        requestId: crypto.randomUUID(),
-      },
-    );
-    if (response.ok) {
-      savedData.current = response.data;
-      setData(response.data);
-      setSelectedAccountIds(selectionForData(response.data));
-      setSyncRange(syncRangeForData(response.data));
+    try {
+      const response = await sendRuntimeMessage(
+        createRuntimeMessage({ type: "GET_STATE" }),
+      );
+      if (response.ok && response.type === "STATE") {
+        savedData.current = response.data;
+        setData(response.data);
+        setSelectedAccountIds(selectionForData(response.data));
+        setSyncRange(syncRangeForData(response.data));
+      } else if (!response.ok) setError(response.error.message);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "时间线读取失败，请刷新后重试。",
+      );
     }
   }
 
@@ -712,12 +692,10 @@ export function App() {
     const nextIds = [...new Set(accountIds)];
     setSelectedAccountIds(nextIds);
     saveSyncPreference(
-      {
-        schemaVersion: 2,
+      createRuntimeMessage({
         type: "UPDATE_SYNC_ACCOUNTS",
-        requestId: crypto.randomUUID(),
         accountIds: nextIds,
-      },
+      }),
       "同步账号保存失败",
     );
   }
@@ -726,12 +704,10 @@ export function App() {
     if (!isSyncRangePreference(range)) return;
     setSyncRange(range);
     saveSyncPreference(
-      {
-        schemaVersion: 2,
+      createRuntimeMessage({
         type: "UPDATE_SYNC_RANGE",
-        requestId: crypto.randomUUID(),
         range,
-      },
+      }),
       "采集范围保存失败",
     );
   }
@@ -748,7 +724,7 @@ export function App() {
     setSelectionSaving(true);
     selectionSaveQueue.current = selectionSaveQueue.current
       .then(async () => {
-        const response = await request<RuntimeResponse>(message);
+        const response = await sendRuntimeMessage(message);
         if (!response.ok || response.type !== "UPDATED") {
           throw new Error(
             response.ok ? failureMessage : response.error.message,
@@ -810,15 +786,18 @@ export function App() {
         return;
       }
       syncRequestId = syncProgress.start(selectedAccounts);
-      const response = await request<RuntimeResponse>({
-        schemaVersion: 2,
-        type: "SYNC_REQUEST",
-        requestId: syncRequestId,
-        force: true,
-        since: Math.max(0, bounds.from),
-        until: bounds.to,
-        accountIds: selectedAccounts.map((account) => account.accountId),
-      });
+      const response = await sendRuntimeMessage(
+        createRuntimeMessage(
+          {
+            type: "SYNC_REQUEST",
+            force: true,
+            since: Math.max(0, bounds.from),
+            until: bounds.to,
+            accountIds: selectedAccounts.map((account) => account.accountId),
+          },
+          syncRequestId,
+        ),
+      );
       if (!response.ok || response.type !== "SYNC_RESULT") {
         throw new Error(
           response.ok ? "同步响应格式错误" : response.error.message,
@@ -896,17 +875,16 @@ export function App() {
         <section className="filters" aria-label="筛选">
           <div className="filter-controls">
             <AnimatedSelect
+              variant="compact"
               label="OJ 筛选"
               value={source}
               onChange={setSource}
               options={[
                 { value: "all" as const, label: "全部 OJ" },
-                ...Object.entries(sourceLabels).map(([value, label]) => ({
-                  value: value as Submission["source"],
+                ...sources.map(({ metadata }) => ({
+                  value: metadata.id,
                   label: (
-                    <OJName source={value as Submission["source"]}>
-                      {label}
-                    </OJName>
+                    <OJName source={metadata.id}>{metadata.displayName}</OJName>
                   ),
                 })),
               ]}
@@ -920,12 +898,14 @@ export function App() {
               ]}
             />
             <AnimatedSelect
+              variant="compact"
               label="状态筛选"
               value={verdict}
               onChange={setVerdict}
               options={verdictFilterOptions}
             />
             <AnimatedSelect
+              variant="compact"
               label="提交筛选"
               value={submissionFilter}
               onChange={setSubmissionFilter}
@@ -1003,8 +983,8 @@ export function App() {
                 >
                   {data
                     ? (instanceBrandingFor(data, account)?.name ??
-                      sourceLabels[account.source])
-                    : sourceLabels[account.source]}
+                      sourceDefinitions[account.source].metadata.displayName)
+                    : sourceDefinitions[account.source].metadata.displayName}
                 </OJName>
                 <span className="sync-progress-identity">
                   {accountDisplayName(account)}

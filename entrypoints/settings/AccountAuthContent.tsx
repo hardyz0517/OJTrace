@@ -1,16 +1,9 @@
+import { sourceDefinitions } from "../../src/sources/definitions";
 import type {
   AccountAuthMode,
   AuthModeDefinition,
   SourceId,
 } from "../../src/domain";
-
-const sourceHomeUrls: Record<SourceId, string> = {
-  codeforces: "https://codeforces.com/",
-  luogu: "https://www.luogu.com.cn/",
-  qoj: "https://qoj.ac/",
-  atcoder: "https://atcoder.jp/",
-  hydroj: "https://hydro.ac/",
-};
 
 export function modeLabel(mode: AccountAuthMode): string {
   return {
@@ -33,7 +26,7 @@ export function AccountAuthDescription({
   const sourceLink = (
     <a
       className="auth-source-link"
-      href={sourceHomeUrls[source]}
+      href={sourceDefinitions[source].officialHomeUrl}
       target="_blank"
       rel="noreferrer"
       aria-label={`打开 ${sourceName} 官网`}

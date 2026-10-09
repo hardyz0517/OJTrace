@@ -1,4 +1,4 @@
-import { adapters } from "../../src/adapters";
+import { sources, sourceDefinitions } from "../../src/sources/definitions";
 import type { BrowserSessionAccount } from "../../src/domain";
 import { AnimatedSelect } from "../shared/AnimatedSelect";
 import { OJName } from "../shared/OJName";
@@ -55,9 +55,7 @@ export function AccountForm({
 }) {
   const state = useAccountAuthorization(onAuthorized);
   const { form, mode, session, busy } = state;
-  const sourceName =
-    adapters.find((adapter) => adapter.metadata.id === form.source)?.metadata
-      .displayName ?? form.source;
+  const sourceName = sourceDefinitions[form.source].metadata.displayName;
   const canSubmit =
     !!mode &&
     (mode.type !== "browser-session" ||
@@ -78,7 +76,7 @@ export function AccountForm({
             <AnimatedSelect
               label="选择平台"
               value={form.source}
-              options={adapters.map((adapter) => ({
+              options={sources.map((adapter) => ({
                 value: adapter.metadata.id,
                 label: (
                   <OJName source={adapter.metadata.id}>

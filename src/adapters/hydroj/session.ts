@@ -1,5 +1,6 @@
+import { createKeyedSerialQueue } from "../../platform/async/serial-queue";
 import { type AdapterContext, type HttpResponse } from "../../domain";
-import { AdapterFailure } from "../../domain/errors";
+import { AdapterFailure, createAdapterFailure } from "../../domain/errors";
 import { createHydroOJInstance } from "./instance";
 import {
   hydroScopedUrl,
@@ -87,9 +88,8 @@ export function failure(
   messageKey: string,
   response?: HttpResponse,
 ): AdapterFailure {
-  return new AdapterFailure({
+  return createAdapterFailure("hydroj", input.requestId, {
     kind,
-    source: "hydroj",
     stage,
     messageKey,
     retryable:
@@ -101,7 +101,6 @@ export function failure(
           ? "retry_later"
           : undefined,
     ...(response ? { httpStatus: response.status } : {}),
-    requestId: input.requestId,
   });
 }
 
@@ -197,15 +196,13 @@ export async function loginHydroOJ(
     isHydroOJLoginPage(response.text) ||
     !identity.username
   ) {
-    throw new AdapterFailure({
+    throw createAdapterFailure("hydroj", input.requestId, {
       kind: "auth_required",
-      source: "hydroj",
       stage: "identity",
       messageKey: "source.loginFailed",
       retryable: false,
       userAction: "edit_account",
       httpStatus: response.status,
-      requestId: input.requestId,
     });
   }
   try {
@@ -285,7 +282,7 @@ export async function requestRecordPage(
   }
 }
 
-const sessionQueues = new Map<string, Promise<unknown>>();
+const runInstanceSession = createKeyedSerialQueue();
 
 export function withInstanceSession<T>(
   origin: string,
@@ -293,14 +290,5 @@ export function withInstanceSession<T>(
 ): Promise<T> {
   // Lock order: instance session -> pagination -> browser Cookie scope -> HTTP.
   // Keep the session until the task (including Cookie restoration) truly settles.
-  const operation = (sessionQueues.get(origin) ?? Promise.resolve())
-    .catch(() => undefined)
-    .then(task);
-  sessionQueues.set(origin, operation);
-  void operation
-    .finally(() => {
-      if (sessionQueues.get(origin) === operation) sessionQueues.delete(origin);
-    })
-    .catch(() => undefined);
-  return operation;
+  return runInstanceSession(origin, task);
 }

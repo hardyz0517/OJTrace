@@ -1,3 +1,4 @@
+import { decodeHtml } from "../shared/html";
 import type { HttpClient, InstanceBrandingRecord } from "../../domain";
 import { hydroScopedUrl } from "../../domain/hydro-scope";
 import { assertHydroScopeResponse } from "./session";
@@ -6,24 +7,12 @@ export interface HydroBrandingParseResult {
   iconUrls: string[];
 }
 
-function decodeHtml(value: string): string {
-  return value
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([\da-f]+);/gi, (_, code) =>
-      String.fromCodePoint(parseInt(code, 16)),
-    );
-}
-
 function attributes(tag: string): Record<string, string> {
   const result: Record<string, string> = {};
   for (const match of tag.matchAll(/([:\w-]+)\s*=\s*(["'])(.*?)\2/gs)) {
     const key = match[1]?.toLowerCase();
-    if (key) result[key] = decodeHtml(match[3] ?? "");
+    if (key)
+      result[key] = decodeHtml(match[3] ?? "", { nonBreakingSpace: false });
   }
   return result;
 }

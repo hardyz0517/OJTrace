@@ -1,11 +1,12 @@
-import { finalizeCoverage } from "../shared/submission-window";
+import { sourceDefinitions } from "../../sources/definitions";
+import { finalizeCoverage } from "../../domain/sync-coverage";
 import {
   credentialValue,
   type OJAdapter,
   type AuthorizeInput,
   type Diagnostic,
 } from "../../domain";
-import { AdapterFailure } from "../../domain/errors";
+import { AdapterFailure, createAdapterFailure } from "../../domain/errors";
 import { reportProgress } from "../../domain/sync-progress";
 import { normalizeAtCoderSubmission } from "./normalizer";
 import { parseAtCoderProblems, parseAtCoderSubmissionDetails } from "./parser";
@@ -70,26 +71,22 @@ async function resolveAtCoderHandle(
 ): Promise<string> {
   const authMode = input.account.authMode;
   if (authMode !== "browser-session" && authMode !== "manual-cookie") {
-    throw new AdapterFailure({
+    throw createAdapterFailure("atcoder", input.requestId, {
       kind: "unsupported",
-      source: "atcoder",
       stage: "identity",
       messageKey: "account.authModeUnsupported",
       retryable: false,
       userAction: "edit_account",
-      requestId: input.requestId,
     });
   }
   const manualCookie = manualAtCoderCookie(input.credentials);
   if (authMode === "manual-cookie" && !manualCookie) {
-    throw new AdapterFailure({
+    throw createAdapterFailure("atcoder", input.requestId, {
       kind: "invalid_response",
-      source: "atcoder",
       stage: "identity",
       messageKey: "account.cookieRequired",
       retryable: false,
       userAction: "edit_account",
-      requestId: input.requestId,
     });
   }
   let handle = (
@@ -110,9 +107,8 @@ async function resolveAtCoderHandle(
         },
       );
       if (identityResponse.status === 429 || identityResponse.status === 403)
-        throw new AdapterFailure({
+        throw createAdapterFailure("atcoder", input.requestId, {
           kind: identityResponse.status === 429 ? "rate_limited" : "blocked",
-          source: "atcoder",
           stage: "identity",
           messageKey:
             identityResponse.status === 429
@@ -120,22 +116,19 @@ async function resolveAtCoderHandle(
               : "source.blocked",
           retryable: false,
           httpStatus: identityResponse.status,
-          requestId: input.requestId,
         });
       if (
         identityResponse.status < 200 ||
         identityResponse.status >= 300 ||
         /Sign In|ログイン|login\?continue/i.test(identityResponse.text)
       ) {
-        throw new AdapterFailure({
+        throw createAdapterFailure("atcoder", input.requestId, {
           kind: "auth_required",
-          source: "atcoder",
           stage: "identity",
           messageKey: "source.authRequired",
           retryable: false,
           userAction: "open_site_login",
           httpStatus: identityResponse.status,
-          requestId: input.requestId,
         });
       }
       handle = parseAtCoderUsername(identityResponse.text) ?? "";
@@ -146,14 +139,12 @@ async function resolveAtCoderHandle(
     }
   }
   if (!handle)
-    throw new AdapterFailure({
+    throw createAdapterFailure("atcoder", input.requestId, {
       kind: "invalid_response",
-      source: "atcoder",
       stage: "identity",
       messageKey: "account.identityFromCookieRequired",
       retryable: false,
       userAction: "edit_account",
-      requestId: input.requestId,
     });
   return handle;
 }
@@ -168,31 +159,7 @@ export const atcoderAdapter: OJAdapter = {
       displayName: handle,
     };
   },
-  metadata: {
-    id: "atcoder",
-    displayName: "AtCoder",
-    availability: "stable",
-    dataOrigins: ["https://kenkoooo.com/*", "https://atcoder.jp/*"],
-    authModes: [
-      {
-        type: "browser-session",
-        recommended: true,
-      },
-      {
-        type: "manual-cookie",
-        credentialFields: [
-          {
-            key: "REVEL_SESSION",
-            label: "REVEL_SESSION",
-            type: "password",
-            credentialType: "cookie",
-            placeholder: "粘贴 REVEL_SESSION 值",
-          },
-        ],
-        identifierRequired: false,
-      },
-    ],
-  },
+  metadata: sourceDefinitions.atcoder.metadata,
   async detectBrowserSession(input) {
     try {
       const response = await input.http.request("atcoder", atcoderHomeUrl(), {

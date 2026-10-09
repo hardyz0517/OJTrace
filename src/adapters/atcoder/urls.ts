@@ -1,5 +1,8 @@
-export const ATCODER_ORIGIN = "https://atcoder.jp";
-export const ATCODER_PROBLEMS_ORIGIN = "https://kenkoooo.com";
+import { sourceDefinitions } from "../../sources/definitions";
+export const ATCODER_ORIGIN = sourceDefinitions.atcoder.fixedOrigin;
+export const ATCODER_PROBLEMS_ORIGIN = new URL(
+  sourceDefinitions.atcoder.metadata.dataOrigins[0],
+).origin;
 
 export function atcoderHomeUrl(): string {
   return `${ATCODER_ORIGIN}/`;

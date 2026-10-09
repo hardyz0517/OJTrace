@@ -1,4 +1,5 @@
-const QOJ_ORIGIN = "https://qoj.ac";
+import { sourceDefinitions } from "../../sources/definitions";
+export const QOJ_ORIGIN = sourceDefinitions.qoj.fixedOrigin;
 
 function encodeUsername(username: string): string {
   const value = username.trim();

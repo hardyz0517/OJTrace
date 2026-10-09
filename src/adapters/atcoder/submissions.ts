@@ -1,5 +1,5 @@
 import type { CoverageOutcome, FetchInput, PartialReason } from "../../domain";
-import { AdapterFailure } from "../../domain/errors";
+import { AdapterFailure, createAdapterFailure } from "../../domain/errors";
 import { HttpClientError } from "../../platform/network/http-client";
 import { reportProgress } from "../../domain/sync-progress";
 import {
@@ -20,9 +20,8 @@ function failure(
   messageKey: string,
   httpStatus?: number,
 ): AdapterFailure {
-  return new AdapterFailure({
+  return createAdapterFailure("atcoder", input.requestId, {
     kind,
-    source: "atcoder",
     stage: kind === "parse_failed" ? "parse" : "request",
     messageKey,
     retryable:
@@ -34,7 +33,6 @@ function failure(
         : kind === "blocked" || kind === "rate_limited"
           ? "retry_later"
           : undefined,
-    requestId: input.requestId,
   });
 }
 

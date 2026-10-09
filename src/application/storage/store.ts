@@ -9,6 +9,7 @@ import {
   isSyncRangePreference,
   sanitizePaginationPolicies,
   isSourceId,
+  isCredentialEntry,
 } from "../../domain";
 import {
   buildIdentityKey,
@@ -56,9 +57,8 @@ function sanitizeCredentials(
   value: unknown,
 ): Record<string, string> | undefined {
   if (!isRecord(value)) return undefined;
-  const entries = Object.entries(value).filter(
-    ([key, item]) =>
-      key.length > 0 && typeof item === "string" && !/[\r\n]/.test(item),
+  const entries = Object.entries(value).filter(([key, item]) =>
+    isCredentialEntry(key, item),
   );
   return entries.length
     ? (Object.fromEntries(entries) as Record<string, string>)

@@ -1,3 +1,4 @@
+import { sourceDefinitions } from "../../sources/definitions";
 import { createHttpClient, HttpClientError } from "./http-client";
 import type { RateLimitRegistry } from "./rate-limit";
 import { withCookieScope, withTemporaryCookies } from "./temporary-cookies";
@@ -7,13 +8,6 @@ import {
   type HttpRequestOptions,
   type SourceId,
 } from "../../domain";
-
-const FIXED_ORIGINS: Partial<Record<SourceId, string>> = {
-  atcoder: "https://atcoder.jp",
-  qoj: "https://qoj.ac",
-  codeforces: "https://codeforces.com",
-  luogu: "https://www.luogu.com.cn",
-};
 
 function temporaryCredential(
   source: SourceId,
@@ -29,7 +23,9 @@ function temporaryCredential(
     : (options.qojCookie ?? options.codeforcesCookie ?? suppliedHeader?.[1]);
   if (!raw) return undefined;
   const expected =
-    source === "hydroj" ? options.hydroOrigin : FIXED_ORIGINS[source];
+    source === "hydroj"
+      ? options.hydroOrigin
+      : sourceDefinitions[source].fixedOrigin;
   if (
     !expected ||
     origin !== new URL(expected).origin ||
@@ -86,7 +82,10 @@ export function createBrowserHttpClient(
       });
     },
     async getCookie(source: SourceId, url: string, name: string) {
-      if (source !== "qoj" || new URL(url).origin !== FIXED_ORIGINS.qoj)
+      if (
+        source !== "qoj" ||
+        new URL(url).origin !== sourceDefinitions.qoj.fixedOrigin
+      )
         return undefined;
       return withCookieScope(new URL(url).origin, async () => {
         const cookie = await browser.cookies.get({ url, name });
@@ -94,7 +93,10 @@ export function createBrowserHttpClient(
       });
     },
     async getCookies(source: SourceId, url: string) {
-      if (source !== "qoj" || new URL(url).origin !== FIXED_ORIGINS.qoj)
+      if (
+        source !== "qoj" ||
+        new URL(url).origin !== sourceDefinitions.qoj.fixedOrigin
+      )
         return {};
       return withCookieScope(new URL(url).origin, async () => {
         const cookies = await browser.cookies.getAll({ url });
@@ -118,7 +120,10 @@ export function createBrowserHttpClient(
       url: string,
     ): Promise<HttpCookieMetadata[]> {
       const origin = new URL(url).origin;
-      if (source !== "codeforces" || origin !== FIXED_ORIGINS.codeforces)
+      if (
+        source !== "codeforces" ||
+        origin !== sourceDefinitions.codeforces.fixedOrigin
+      )
         return [];
       return withCookieScope(origin, async () => {
         // cookies.getAll() defaults to unpartitioned cookies. Also inspect

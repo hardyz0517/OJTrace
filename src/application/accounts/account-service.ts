@@ -1,3 +1,7 @@
+import {
+  requiresIdentifier,
+  commandCredentialInput,
+} from "../../domain/auth-input";
 import { buildIdentityKey } from "../../domain/account-identity";
 import type {
   AccountAuthMode,
@@ -11,7 +15,7 @@ import type {
   HttpClient,
   SourceId,
 } from "../../domain";
-import { adapterBySource } from "../../adapters";
+import { adapterRegistry } from "../../adapters";
 import { createHydroOJInstance } from "../../adapters/hydroj/instance";
 import { AccountCommandError } from "./account-errors";
 import type { StoragePort } from "../storage/store";
@@ -84,7 +88,7 @@ export function createAccountService(
         throw new AccountCommandError("unsupported", "account.unavailable");
       const sequence = ++authorizationSequence;
       const generation = authorizationGeneration;
-      const adapter = adapterBySource.get(command.source);
+      const adapter = adapterRegistry[command.source];
       const mode = adapter?.metadata.authModes.find(
         (item) => item.type === command.authMode,
       );
@@ -94,40 +98,23 @@ export function createAccountService(
           "account.authModeUnsupported",
         );
       const identifier = command.identifier?.trim();
-      if (
-        mode.identifierRequired !== false &&
-        command.authMode !== "browser-session" &&
-        !identifier
-      )
+      if (requiresIdentifier(mode) && !identifier)
         throw new AccountCommandError(
           "invalid-input",
           "account.identifierRequired",
         );
-      const fields = mode.credentialFields ?? [];
-      if (
-        Object.keys(command.credentials ?? {}).some(
-          (key) => !fields.some((field) => field.key === key),
-        )
-      )
+      const parsedCredentials = commandCredentialInput(
+        mode,
+        command.credentials,
+      );
+      if (parsedCredentials.issue)
         throw new AccountCommandError(
           "invalid-input",
-          "account.credentialsInvalid",
+          parsedCredentials.issue === "unknown-field"
+            ? "account.credentialsInvalid"
+            : "account.credentialsRequired",
         );
-      const credentials =
-        command.authMode === "browser-session" ||
-        command.authMode === "public-handle"
-          ? undefined
-          : Object.fromEntries(
-              fields.flatMap((field) => {
-                const value = command.credentials?.[field.key];
-                if (field.required !== false && !value?.trim())
-                  throw new AccountCommandError(
-                    "invalid-input",
-                    "account.credentialsRequired",
-                  );
-                return value ? [[field.key, value]] : [];
-              }),
-            );
+      const credentials = parsedCredentials.credentials;
       let origin: string | undefined;
       let domainId: string | undefined;
       if (command.source === "hydroj") {

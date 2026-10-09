@@ -12,8 +12,10 @@ import {
 } from "../../domain";
 import type { PublicStoredData } from "../accounts/account-queries";
 import type { SyncResult } from "../sync/sync-service";
+import type { SyncSourceResult } from "../sync/collect-account";
 import type { AccountSyncProgress } from "../../domain/sync-progress";
 import { isHydroDomainId } from "../../domain/hydro-scope";
+import { isCredentialEntry } from "../../domain/credentials";
 
 function isDomainScopeValid(source: unknown, domainId: unknown): boolean {
   return (
@@ -167,7 +169,10 @@ export type RuntimeResponse =
       requestId: string;
       ok: true;
       type: "SYNC_RESULT";
-      result: Omit<SyncResult, "data"> & { data: PublicStoredData };
+      result: Omit<SyncResult, "data" | "sources"> & {
+        data: PublicStoredData;
+        sources: Array<Omit<SyncSourceResult, "activitySchedules">>;
+      };
     }
   | {
       schemaVersion: 2;
@@ -300,11 +305,8 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
         (typeof account.credentials === "object" &&
           account.credentials !== null &&
           !Array.isArray(account.credentials) &&
-          Object.entries(account.credentials).every(
-            ([key, value]) =>
-              key.length > 0 &&
-              typeof value === "string" &&
-              !/[\r\n]/.test(value),
+          Object.entries(account.credentials).every(([key, value]) =>
+            isCredentialEntry(key, value),
           ));
       return (
         isSourceId(account.source) &&

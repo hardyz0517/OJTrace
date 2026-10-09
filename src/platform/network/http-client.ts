@@ -1,3 +1,5 @@
+import { abortableDelay } from "../async/delay";
+import { createRequestTargetPolicy } from "./request-target";
 import type {
   HttpClient,
   HttpRequestOptions,
@@ -5,15 +7,6 @@ import type {
 } from "../../domain";
 import type { SourceId } from "../../domain";
 import { createRateLimitRegistry, type RateLimitRegistry } from "./rate-limit";
-
-const ALLOWED_ORIGINS: Record<SourceId, readonly string[]> = {
-  codeforces: ["https://codeforces.com/"],
-  luogu: ["https://www.luogu.com.cn/"],
-  qoj: ["https://qoj.ac/"],
-  atcoder: ["https://atcoder.jp/"],
-  hydroj: [],
-};
-const ATCODER_PROBLEMS_ORIGIN = "https://kenkoooo.com/";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_BYTES = 2_000_000;
@@ -34,32 +27,6 @@ export class HttpClientError extends Error {
     super(message);
     this.name = "HttpClientError";
   }
-}
-
-function isAllowed(
-  source: SourceId,
-  rawUrl: string,
-  allowedOrigins?: readonly string[],
-): boolean {
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return false;
-  }
-  if (
-    (url.protocol !== "https:" &&
-      !(source === "hydroj" && url.protocol === "http:")) ||
-    url.username ||
-    url.password
-  )
-    return false;
-  return [...ALLOWED_ORIGINS[source], ...(allowedOrigins ?? [])].some(
-    (origin) => {
-      const allowed = new URL(origin);
-      return url.origin === allowed.origin;
-    },
-  );
 }
 
 async function readLimited(
@@ -124,21 +91,11 @@ async function readLimited(
 }
 
 function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) {
-    return Promise.reject(new DOMException("Aborted", "AbortError"));
-  }
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", abort);
-      resolve();
-    }, delayMs);
-    const abort = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      reject(new DOMException("Aborted", "AbortError"));
-    };
-    signal?.addEventListener("abort", abort, { once: true });
-  });
+  return abortableDelay(
+    delayMs,
+    signal,
+    () => new DOMException("Aborted", "AbortError"),
+  );
 }
 
 export interface HttpClientOptions {
@@ -153,33 +110,8 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
       url: string,
       options: HttpRequestOptions = {},
     ): Promise<HttpResponse> {
-      const allowedOrigins =
-        source === "hydroj" && options.hydroOrigin
-          ? [options.hydroOrigin]
-          : source === "atcoder" &&
-              (options.atcoderProblemsApi ||
-                options.atcoderProblemMetadataApi ||
-                options.atcoderSubmissionPage)
-            ? [ATCODER_PROBLEMS_ORIGIN]
-            : undefined;
-      if (
-        !isAllowed(source, url, allowedOrigins) ||
-        (options.atcoderSessionCookie && source !== "atcoder") ||
-        (source === "atcoder" &&
-          options.atcoderSessionCookie &&
-          new URL(url).origin !== "https://atcoder.jp") ||
-        (source === "atcoder" &&
-          options.atcoderProblemsApi &&
-          !new URL(url).pathname.startsWith(
-            "/atcoder/atcoder-api/v3/user/submissions",
-          )) ||
-        (source === "atcoder" &&
-          options.atcoderProblemMetadataApi &&
-          new URL(url).pathname !== "/atcoder/resources/problems.json") ||
-        (source === "atcoder" &&
-          options.atcoderSubmissionPage &&
-          !/^\/contests\/[^/]+\/submissions\/\d+$/.test(new URL(url).pathname))
-      ) {
+      const target = createRequestTargetPolicy(source, options);
+      if (!target.allows(url) || !target.allowsCredentials(url)) {
         throw new HttpClientError(
           "invalid_url",
           "URL is outside source allowlist",
@@ -267,23 +199,7 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
             }
             continue;
           }
-          if (
-            !isAllowed(source, response.url || url, allowedOrigins) ||
-            (source === "atcoder" &&
-              options.atcoderProblemsApi &&
-              !new URL(response.url || url).pathname.startsWith(
-                "/atcoder/atcoder-api/v3/user/submissions",
-              )) ||
-            (source === "atcoder" &&
-              options.atcoderProblemMetadataApi &&
-              new URL(response.url || url).pathname !==
-                "/atcoder/resources/problems.json") ||
-            (source === "atcoder" &&
-              options.atcoderSubmissionPage &&
-              !/^\/contests\/[^/]+\/submissions\/\d+$/.test(
-                new URL(response.url || url).pathname,
-              ))
-          ) {
+          if (!target.allows(response.url || url)) {
             throw new HttpClientError(
               "invalid_url",
               "Response redirected outside source allowlist",

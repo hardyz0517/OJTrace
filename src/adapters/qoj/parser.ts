@@ -1,3 +1,5 @@
+import { QOJ_ORIGIN } from "./urls";
+import { decodeHtml } from "../shared/html";
 export interface QOJRawRecord {
   id: string;
   problemId: string;
@@ -18,20 +20,6 @@ export interface QOJRecordPage {
   records: QOJRawRecord[];
   hasMore: boolean;
   username?: string;
-}
-
-function decodeHtml(value: string): string {
-  return value
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([\da-f]+);/gi, (_, code) =>
-      String.fromCodePoint(parseInt(code, 16)),
-    );
 }
 
 function textOf(value: string | undefined): string {
@@ -168,8 +156,8 @@ function problemFromCell(
     /^(?:https?:\/\/[^/]+)?\/contest\/([1-9][0-9]{0,9})\/problem\/([1-9][0-9]{0,9})(?:\/|$)/i,
   );
   if (!path && !contestPath) return undefined;
-  const problemUrl = new URL(link.href, "https://qoj.ac");
-  if (problemUrl.origin !== "https://qoj.ac") return undefined;
+  const problemUrl = new URL(link.href, QOJ_ORIGIN);
+  if (problemUrl.origin !== QOJ_ORIGIN) return undefined;
   const problemId = contestPath?.[2] ?? path?.[1];
   if (!problemId) return undefined;
   const prefix = `#${problemId}.`;

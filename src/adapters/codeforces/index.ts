@@ -1,4 +1,6 @@
-import { finalizeCoverage } from "../shared/submission-window";
+import { CODEFORCES_ORIGIN } from "./urls";
+import { sourceDefinitions } from "../../sources/definitions";
+import { finalizeCoverage } from "../../domain/sync-coverage";
 import {
   cookieHeaderFromCredentials,
   credentialValue,
@@ -7,12 +9,12 @@ import {
   type FetchInput,
   type OJAdapter,
 } from "../../domain";
-import { AdapterFailure } from "../../domain/errors";
+import { AdapterFailure, createAdapterFailure } from "../../domain/errors";
 import { reportProgress } from "../../domain/sync-progress";
 import { normalizeCodeforcesSubmission } from "./normalizer";
 import { parseCodeforcesResponse } from "./parser";
 
-const CODEFORCES_HOME_URL = "https://codeforces.com/";
+const CODEFORCES_HOME_URL = sourceDefinitions.codeforces.officialHomeUrl;
 
 function isCodeforcesChallenge(text: string, headers: Headers): boolean {
   return (
@@ -77,93 +79,79 @@ async function currentCodeforcesUser(
   trace?.(`http=${response.status}`);
   if (isCodeforcesChallenge(response.text, response.headers)) {
     trace?.("codeforces-cloudflare-challenge");
-    throw new AdapterFailure({
+    throw createAdapterFailure("codeforces", input.requestId, {
       kind: "blocked",
-      source: "codeforces",
       stage: "identity",
       messageKey: "source.blocked",
       retryable: false,
       userAction: "open_site_login",
       httpStatus: response.status,
-      requestId: input.requestId,
     });
   }
   if (response.status === 401) {
     trace?.("codeforces-login-required");
-    throw new AdapterFailure({
+    throw createAdapterFailure("codeforces", input.requestId, {
       kind: "auth_required",
-      source: "codeforces",
       stage: "identity",
       messageKey: identityMessageKey,
       retryable: false,
       userAction: "open_site_login",
       httpStatus: response.status,
-      requestId: input.requestId,
     });
   }
   if (response.status === 403) {
     trace?.("codeforces-forbidden");
-    throw new AdapterFailure({
+    throw createAdapterFailure("codeforces", input.requestId, {
       kind: "blocked",
-      source: "codeforces",
       stage: "identity",
       messageKey: "source.blocked",
       retryable: false,
       userAction: "retry_later",
       httpStatus: response.status,
-      requestId: input.requestId,
     });
   }
   if (response.status === 429) {
     trace?.("codeforces-rate-limited");
-    throw new AdapterFailure({
+    throw createAdapterFailure("codeforces", input.requestId, {
       kind: "rate_limited",
-      source: "codeforces",
       stage: "identity",
       messageKey: "source.rateLimited",
       retryable: false,
       userAction: "retry_later",
       httpStatus: response.status,
-      requestId: input.requestId,
     });
   }
   if (response.status < 200 || response.status >= 300) {
     trace?.("codeforces-http-error");
-    throw new AdapterFailure({
+    throw createAdapterFailure("codeforces", input.requestId, {
       kind: "network",
-      source: "codeforces",
       stage: "identity",
       messageKey: "source.httpError",
       retryable: response.status >= 500,
       httpStatus: response.status,
-      requestId: input.requestId,
     });
   }
   if (isCodeforcesLoginPage(response.text)) {
     trace?.("codeforces-login-required");
-    throw new AdapterFailure({
+    throw createAdapterFailure("codeforces", input.requestId, {
       kind: "auth_required",
-      source: "codeforces",
       stage: "identity",
       messageKey: identityMessageKey,
       retryable: false,
       userAction: "open_site_login",
       httpStatus: response.status,
-      requestId: input.requestId,
     });
   }
   const username = parseCodeforcesUsername(response.text);
   if (!username) {
     trace?.("codeforces-identity-missing");
-    throw new AdapterFailure({
+    throw createAdapterFailure("codeforces", input.requestId, {
       kind: "auth_required",
-      source: "codeforces",
       stage: "identity",
       messageKey: identityMessageKey,
       retryable: false,
       userAction: "open_site_login",
       httpStatus: response.status,
-      requestId: input.requestId,
     });
   }
   return username;
@@ -202,13 +190,11 @@ export const codeforcesAdapter: OJAdapter = {
       authMode !== "browser-session" &&
       authMode !== "manual-cookie"
     ) {
-      throw new AdapterFailure({
+      throw createAdapterFailure("codeforces", input.requestId, {
         kind: "unsupported",
-        source: "codeforces",
         stage: "identity",
         messageKey: "account.authModeUnsupported",
         retryable: false,
-        requestId: input.requestId,
       });
     }
     let username: string;
@@ -219,19 +205,17 @@ export const codeforcesAdapter: OJAdapter = {
         ""
       ).trim();
       if (!handle)
-        throw new AdapterFailure({
+        throw createAdapterFailure("codeforces", input.requestId, {
           kind: "invalid_response",
-          source: "codeforces",
           stage: "identity",
           messageKey: "account.identifierRequired",
           retryable: false,
-          requestId: input.requestId,
         });
       let response;
       try {
         response = await input.http.request(
           "codeforces",
-          `https://codeforces.com/api/user.info?handles=${encodeURIComponent(handle)}`,
+          `${CODEFORCES_ORIGIN}/api/user.info?handles=${encodeURIComponent(handle)}`,
           codeforcesRequestOptions("public-handle", input.signal),
         );
       } catch (error) {
@@ -243,32 +227,28 @@ export const codeforcesAdapter: OJAdapter = {
         );
       }
       if (response.status < 200 || response.status >= 300)
-        throw new AdapterFailure({
+        throw createAdapterFailure("codeforces", input.requestId, {
           kind:
             response.status === 429
               ? "rate_limited"
               : response.status === 403
                 ? "blocked"
                 : "network",
-          source: "codeforces",
           stage: "identity",
           messageKey:
             response.status === 429 ? "source.rateLimited" : "source.httpError",
           retryable: response.status >= 500,
           httpStatus: response.status,
-          requestId: input.requestId,
         });
       let parsed: { status?: unknown; result?: Array<{ handle?: unknown }> };
       try {
         parsed = JSON.parse(response.text) as typeof parsed;
       } catch {
-        throw new AdapterFailure({
+        throw createAdapterFailure("codeforces", input.requestId, {
           kind: "parse_failed",
-          source: "codeforces",
           stage: "identity",
           messageKey: "source.invalidResponse",
           retryable: false,
-          requestId: input.requestId,
         });
       }
       const resolved = Array.isArray(parsed.result)
@@ -279,14 +259,12 @@ export const codeforcesAdapter: OJAdapter = {
         typeof resolved !== "string" ||
         !resolved.trim()
       )
-        throw new AdapterFailure({
+        throw createAdapterFailure("codeforces", input.requestId, {
           kind: "invalid_response",
-          source: "codeforces",
           stage: "identity",
           messageKey: "account.notFound",
           retryable: false,
           userAction: "edit_account",
-          requestId: input.requestId,
         });
       username = resolved;
     } else {
@@ -295,13 +273,11 @@ export const codeforcesAdapter: OJAdapter = {
           ? manualCodeforcesCookie(input.credentials)
           : undefined;
       if (authMode === "manual-cookie" && !cookie)
-        throw new AdapterFailure({
+        throw createAdapterFailure("codeforces", input.requestId, {
           kind: "invalid_response",
-          source: "codeforces",
           stage: "identity",
           messageKey: "account.cookieRequired",
           retryable: false,
-          requestId: input.requestId,
         });
       username = await currentCodeforcesUser(input, cookie);
     }
@@ -312,35 +288,7 @@ export const codeforcesAdapter: OJAdapter = {
       displayName: username,
     };
   },
-  metadata: {
-    id: "codeforces",
-    displayName: "Codeforces",
-    availability: "stable",
-    authModes: [
-      {
-        type: "browser-session",
-        recommended: true,
-      },
-      {
-        type: "manual-cookie",
-        credentialFields: [
-          {
-            key: "cookie",
-            label: "JSESSIONID",
-            type: "password",
-            credentialType: "cookie",
-            placeholder: "粘贴 JSESSIONID 的值",
-          },
-        ],
-        identifierRequired: false,
-      },
-      {
-        type: "public-handle",
-        label: "直接输入用户名",
-        description: "直接输入 Codeforces 用户名，使用公开提交记录。",
-      },
-    ],
-  },
+  metadata: sourceDefinitions.codeforces.metadata,
 
   async detectBrowserSession(input: BrowserSessionInput) {
     const trace: string[] = [];
@@ -376,7 +324,7 @@ export const codeforcesAdapter: OJAdapter = {
           `clearance-unpartitioned=${cookies.some((cookie) => cookie.name === "cf_clearance" && !cookie.partitionTopLevelSite)}`,
         );
         trace.push(
-          `clearance-first-party-partitioned=${cookies.some((cookie) => cookie.name === "cf_clearance" && cookie.partitionTopLevelSite === "https://codeforces.com")}`,
+          `clearance-first-party-partitioned=${cookies.some((cookie) => cookie.name === "cf_clearance" && cookie.partitionTopLevelSite === CODEFORCES_ORIGIN)}`,
         );
       } catch {
         if (input.signal.aborted) throw input.signal.reason;
@@ -433,14 +381,12 @@ export const codeforcesAdapter: OJAdapter = {
       authMode !== "browser-session" &&
       authMode !== "manual-cookie"
     ) {
-      throw new AdapterFailure({
+      throw createAdapterFailure("codeforces", input.requestId, {
         kind: "unsupported",
-        source: "codeforces",
         stage: "identity",
         messageKey: "account.authModeUnsupported",
         retryable: false,
         userAction: "edit_account",
-        requestId: input.requestId,
       });
     }
     const cookie =
@@ -448,14 +394,12 @@ export const codeforcesAdapter: OJAdapter = {
         ? manualCodeforcesCookie(input.credentials)
         : undefined;
     if (authMode === "manual-cookie" && !cookie) {
-      throw new AdapterFailure({
+      throw createAdapterFailure("codeforces", input.requestId, {
         kind: "invalid_response",
-        source: "codeforces",
         stage: "identity",
         messageKey: "account.cookieRequired",
         retryable: false,
         userAction: "edit_account",
-        requestId: input.requestId,
       });
     }
     const handle = (
@@ -478,20 +422,18 @@ export const codeforcesAdapter: OJAdapter = {
       }
     }
     if (!resolvedHandle) {
-      throw new AdapterFailure({
+      throw createAdapterFailure("codeforces", input.requestId, {
         kind: "invalid_response",
-        source: "codeforces",
         stage: "identity",
         messageKey: "account.identifierRequired",
         retryable: false,
         userAction: "edit_account",
-        requestId: input.requestId,
       });
     }
     let response;
     try {
       response = await input.pagination.runPage({
-        origin: "https://codeforces.com",
+        origin: CODEFORCES_ORIGIN,
         signal: input.signal,
         request: () => {
           reportProgress(input.onProgress, {
@@ -501,7 +443,7 @@ export const codeforcesAdapter: OJAdapter = {
           });
           return input.http.request(
             "codeforces",
-            `https://codeforces.com/api/user.status?handle=${encodeURIComponent(resolvedHandle)}&from=1&count=1000`,
+            `${CODEFORCES_ORIGIN}/api/user.status?handle=${encodeURIComponent(resolvedHandle)}&from=1&count=1000`,
             codeforcesRequestOptions(authMode, input.signal),
           );
         },
@@ -512,21 +454,18 @@ export const codeforcesAdapter: OJAdapter = {
       throw AdapterFailure.fromTransport(error, "codeforces", input.requestId);
     }
     if (response.status === 429) {
-      throw new AdapterFailure({
+      throw createAdapterFailure("codeforces", input.requestId, {
         kind: "rate_limited",
-        source: "codeforces",
         stage: "request",
         messageKey: "source.rateLimited",
         retryable: false,
         userAction: "retry_later",
         httpStatus: response.status,
-        requestId: input.requestId,
       });
     }
     if (response.status === 401) {
-      throw new AdapterFailure({
+      throw createAdapterFailure("codeforces", input.requestId, {
         kind: "auth_required",
-        source: "codeforces",
         stage: "request",
         messageKey: cookie
           ? "account.identityFromCookieRequired"
@@ -534,37 +473,31 @@ export const codeforcesAdapter: OJAdapter = {
         retryable: false,
         userAction: "open_site_login",
         httpStatus: response.status,
-        requestId: input.requestId,
       });
     }
     if (response.status < 200 || response.status >= 300) {
-      throw new AdapterFailure({
+      throw createAdapterFailure("codeforces", input.requestId, {
         kind: response.status === 403 ? "blocked" : "network",
-        source: "codeforces",
         stage: "request",
         messageKey: "source.httpError",
         retryable: response.status >= 500,
         httpStatus: response.status,
-        requestId: input.requestId,
       });
     }
     let parsed;
     try {
       parsed = parseCodeforcesResponse(response.text);
     } catch {
-      throw new AdapterFailure({
+      throw createAdapterFailure("codeforces", input.requestId, {
         kind: "parse_failed",
-        source: "codeforces",
         stage: "parse",
         messageKey: "source.invalidResponse",
         retryable: false,
-        requestId: input.requestId,
       });
     }
     if (parsed.status === "FAILED") {
-      throw new AdapterFailure({
+      throw createAdapterFailure("codeforces", input.requestId, {
         kind: "invalid_response",
-        source: "codeforces",
         stage: "request",
         messageKey:
           parsed.comment === "User not found"
@@ -573,7 +506,6 @@ export const codeforcesAdapter: OJAdapter = {
         retryable: false,
         userAction:
           parsed.comment === "User not found" ? "edit_account" : undefined,
-        requestId: input.requestId,
       });
     }
     let normalized;
@@ -601,13 +533,11 @@ export const codeforcesAdapter: OJAdapter = {
         ).values(),
       ];
     } catch {
-      throw new AdapterFailure({
+      throw createAdapterFailure("codeforces", input.requestId, {
         kind: "parse_failed",
-        source: "codeforces",
         stage: "normalize",
         messageKey: "source.invalidRecord",
         retryable: false,
-        requestId: input.requestId,
       });
     }
     const truncated = records.length > Math.max(1, Math.min(input.limit, 1000));

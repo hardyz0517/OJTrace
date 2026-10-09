@@ -1,6 +1,7 @@
+import { createKeyedSerialQueue } from "../async/serial-queue";
 import { normalizeCookieHeader } from "../../domain";
 
-const queues = new Map<string, Promise<unknown>>();
+const runCookieScope = createKeyedSerialQueue();
 
 /** Stable, value-free transport details suitable for session diagnostics. */
 export class CookieTransportError extends Error {
@@ -22,16 +23,7 @@ export function withCookieScope<T>(
   origin: string,
   task: () => Promise<T>,
 ): Promise<T> {
-  const operation = (queues.get(origin) ?? Promise.resolve())
-    .catch(() => undefined)
-    .then(task);
-  queues.set(origin, operation);
-  void operation
-    .finally(() => {
-      if (queues.get(origin) === operation) queues.delete(origin);
-    })
-    .catch(() => undefined);
-  return operation;
+  return runCookieScope(origin, task);
 }
 
 /** Caller holds the origin queue and has checked the exact request scope. */

@@ -1,4 +1,5 @@
-export const LUOGU_ORIGIN = "https://www.luogu.com.cn";
+import { sourceDefinitions } from "../../sources/definitions";
+export const LUOGU_ORIGIN = sourceDefinitions.luogu.fixedOrigin;
 
 export function luoguRecordListUrl(identifier: string, page = 1): string {
   if (!Number.isSafeInteger(page) || page < 1) {

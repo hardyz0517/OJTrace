@@ -1,3 +1,4 @@
+import { sourceDefinitions } from "../../sources/definitions";
 import { normalizeCustomHttpsOrigin } from "../../platform/permissions/custom-origin";
 import {
   normalizeHydroDomainId,
@@ -5,7 +6,9 @@ import {
 } from "../../domain/hydro-scope";
 
 /** Default HydroOJ website origin, identified from the official project links. */
-export const HYDROOJ_OFFICIAL_ORIGIN = "https://hydro.ac";
+export const HYDROOJ_OFFICIAL_ORIGIN = new URL(
+  sourceDefinitions.hydroj.officialHomeUrl,
+).origin;
 
 export type HydroOJOrigin = string;
 

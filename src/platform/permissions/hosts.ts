@@ -1,18 +1,19 @@
-import type { SourceId } from "../../domain";
-import { adapterBySource } from "../../adapters";
+import { SOURCE_IDS, type SourceId } from "../../domain";
+import { sourceDefinitions } from "../../sources/definitions";
 import { isHydroScopeUrl } from "../../domain/hydro-scope";
 import {
   exactOriginPermissionPattern,
   normalizeCustomHttpsOrigin,
 } from "./custom-origin";
 
-export const SOURCE_ORIGINS: Record<SourceId, string[]> = {
-  codeforces: ["https://codeforces.com/*"],
-  luogu: ["https://www.luogu.com.cn/*"],
-  qoj: ["https://qoj.ac/*"],
-  atcoder: ["https://atcoder.jp/*"],
-  hydroj: [],
-};
+export const SOURCE_ORIGINS = SOURCE_IDS.reduce<Record<SourceId, string[]>>(
+  (origins, source) => {
+    const origin = sourceDefinitions[source].fixedOrigin;
+    origins[source] = origin ? [`${origin}/*`] : [];
+    return origins;
+  },
+  {} as Record<SourceId, string[]>,
+);
 
 export async function hasSourcePermission(source: SourceId): Promise<boolean> {
   return browser.permissions.contains({ origins: SOURCE_ORIGINS[source] });
@@ -41,7 +42,7 @@ export function authorizationOrigins(
       ...(source === "hydroj" && origin
         ? [exactOriginPermissionPattern(origin, { allowHttp: true })]
         : SOURCE_ORIGINS[source]),
-      ...(adapterBySource.get(source)?.metadata.dataOrigins ?? []),
+      ...(sourceDefinitions[source].metadata.dataOrigins ?? []),
     ]),
   ];
 }
@@ -67,7 +68,7 @@ export async function ensureAdapterDataPermission(
   const origins = [
     ...(options.includeSource === false ? [] : SOURCE_ORIGINS[source]),
     ...(options.origins ??
-      adapterBySource.get(source)?.metadata.dataOrigins ??
+      sourceDefinitions[source].metadata.dataOrigins ??
       []),
   ];
   if (await browser.permissions.contains({ origins })) return true;

@@ -1,5 +1,9 @@
+import { sourceDefinitions } from "../../../sources/definitions";
+
+export const CODEFORCES_ORIGIN = sourceDefinitions.codeforces.fixedOrigin;
+
 export function codeforcesListUrl(handle: string): string {
-  return `https://codeforces.com/submissions/${encodeURIComponent(handle)}`;
+  return `${CODEFORCES_ORIGIN}/submissions/${encodeURIComponent(handle)}`;
 }
 
 /** Codeforces does not expose contest kind in user.status; centralize the current ID heuristic. */

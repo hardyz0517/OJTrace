@@ -1,5 +1,15 @@
 import type { AdapterError, AdapterErrorKind, SourceId } from "./types";
 
+/** Site policy stays in details; source/request correlation has one constructor. */
+export function createAdapterFailure(
+  source: SourceId,
+  requestId: string,
+  details: Omit<AdapterError, "source" | "requestId">,
+  options?: ErrorOptions,
+): AdapterFailure {
+  return new AdapterFailure({ ...details, source, requestId }, options);
+}
+
 export class AdapterFailure extends Error {
   readonly error: AdapterError;
 
@@ -24,10 +34,11 @@ export class AdapterFailure extends Error {
           : code === "invalid_url"
             ? "invalid_response"
             : "network";
-    return new AdapterFailure(
+    return createAdapterFailure(
+      source,
+      requestId,
       {
         kind,
-        source,
         stage: "request",
         messageKey:
           kind === "timeout"
@@ -50,7 +61,6 @@ export class AdapterFailure extends Error {
                 : {}),
             }
           : {}),
-        requestId,
       },
       { cause: error },
     );

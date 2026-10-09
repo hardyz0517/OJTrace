@@ -14,32 +14,32 @@ import type { ActivityScheduleRecord } from "./activity-schedule";
 import type { PaginationPolicy } from "./pagination-policy";
 
 export interface AdapterMetadata {
-  id: SourceId;
-  displayName: string;
-  availability: Availability;
-  authModes: AuthModeDefinition[];
+  readonly id: SourceId;
+  readonly displayName: string;
+  readonly availability: Availability;
+  readonly authModes: readonly AuthModeDefinition[];
   /** Additional origins used for public data requests by this adapter. */
-  dataOrigins?: readonly string[];
+  readonly dataOrigins?: readonly string[];
 }
 
 export interface AuthModeDefinition {
-  type: AccountAuthMode;
-  recommended?: boolean;
-  label?: string;
-  description?: string;
-  credentialFields?: AuthCredentialField[];
-  identifierRequired?: boolean;
-  identifierLabel?: string;
+  readonly type: AccountAuthMode;
+  readonly recommended?: boolean;
+  readonly label?: string;
+  readonly description?: string;
+  readonly credentialFields?: readonly AuthCredentialField[];
+  readonly identifierRequired?: boolean;
+  readonly identifierLabel?: string;
 }
 
 export interface AuthCredentialField {
-  key: string;
-  label: string;
-  type?: "text" | "password";
+  readonly key: string;
+  readonly label: string;
+  readonly type?: "text" | "password";
   /** Marks a field as a Cookie value for adapters and future UI affordances. */
-  credentialType?: "cookie" | "text";
-  placeholder?: string;
-  required?: boolean;
+  readonly credentialType?: "cookie" | "text";
+  readonly placeholder?: string;
+  readonly required?: boolean;
 }
 
 export type BrowserSessionStatus =

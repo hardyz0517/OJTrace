@@ -1,5 +1,5 @@
-import { adapterBySource } from "../../adapters";
-import { AdapterFailure } from "../../domain/errors";
+import { adapterRegistry } from "../../adapters";
+import { AdapterFailure, createAdapterFailure } from "../../domain/errors";
 import {
   instanceBrandingKey,
   isWithinSyncWindow,
@@ -30,7 +30,7 @@ import { createPaginationRuntime } from "../../platform/network/pagination-throt
 import { RateLimitError } from "../../platform/network/rate-limit";
 import type { StoragePort } from "../storage/store";
 import { refreshInstanceBranding } from "./instance-branding";
-import { finalizeCoverage } from "../../adapters/shared/submission-window";
+import { finalizeCoverage } from "../../domain/sync-coverage";
 
 export type CollectionSkip =
   "freshness" | "busy" | "superseded" | "disabled" | "cancelled";
@@ -143,14 +143,12 @@ export function guardCollection(
         (record.origin !== account.origin ||
           record.domainId !== account.domainId))
     ) {
-      throw new AdapterFailure({
+      throw createAdapterFailure(account.source, crypto.randomUUID(), {
         kind: "auth_required",
-        source: account.source,
         stage: "identity",
         messageKey: "account.identityChanged",
         retryable: false,
         userAction: "edit_account",
-        requestId: crypto.randomUUID(),
       });
     }
     if (!isWithinSyncWindow(record.submittedAt, window)) {
@@ -263,15 +261,13 @@ export function createAccountCollector(
       if (!active.enabled)
         return skippedCollection(account, window, now, "disabled");
       controller.signal.throwIfAborted();
-      const adapter = adapterBySource.get(account.source);
+      const adapter = adapterRegistry[account.source];
       if (!adapter)
-        throw new AdapterFailure({
+        throw createAdapterFailure(account.source, requestId, {
           kind: "unsupported",
-          source: account.source,
           stage: "request",
           messageKey: "source.unsupported",
           retryable: false,
-          requestId,
         });
       const context = {
         account: active,
@@ -333,14 +329,12 @@ export function createAccountCollector(
         fetched.account.accountId !== active.accountId ||
         fetched.account.source !== active.source
       )
-        throw new AdapterFailure({
+        throw createAdapterFailure(account.source, requestId, {
           kind: "auth_required",
-          source: account.source,
           stage: "identity",
           messageKey: "account.identityChanged",
           retryable: false,
           userAction: "edit_account",
-          requestId,
         });
       let diagnostics = fetched.diagnostics;
       let instanceBranding: InstanceBrandingRecord | undefined;

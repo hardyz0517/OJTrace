@@ -1,3 +1,4 @@
+import { abortableDelay } from "../async/delay";
 import {
   DEFAULT_PAGINATION_POLICY,
   isPaginationPolicy,
@@ -28,19 +29,7 @@ export function sleepForPagination(
   milliseconds: number,
   signal: AbortSignal,
 ): Promise<void> {
-  if (signal.aborted) return Promise.reject(abortError(signal));
-  return new Promise((resolve, reject) => {
-    const abort = () => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", abort);
-      reject(abortError(signal));
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", abort);
-      resolve();
-    }, milliseconds);
-    signal.addEventListener("abort", abort, { once: true });
-  });
+  return abortableDelay(milliseconds, signal, () => abortError(signal));
 }
 
 interface OriginQueue {

@@ -1,3 +1,4 @@
+import { decodeHtml } from "../shared/html";
 import {
   hydroDomainFromUrl,
   hydroDomainPrefix,
@@ -98,20 +99,6 @@ export interface HydroActivity {
   title: string;
   type: "contest" | "homework" | "other";
   url?: string;
-}
-
-function decodeHtml(value: string): string {
-  return value
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([\da-f]+);/gi, (_, code) =>
-      String.fromCodePoint(parseInt(code, 16)),
-    );
 }
 
 function textOf(value: string | undefined): string {

@@ -1,8 +1,13 @@
+import { QOJ_ORIGIN } from "./urls";
 import {
-  finalizeCoverage,
-  isCollectionDeadline,
-} from "../shared/submission-window";
-import { isWithinSyncWindow } from "../../domain/sync-range";
+  DescendingWindowTracker,
+  WindowRecordBuffer,
+  PageSignatures,
+  PageProgress,
+  classifiedPageFailure,
+} from "../shared/page-state";
+import { finalizeCoverage } from "../../domain/sync-coverage";
+import { sourceDefinitions } from "../../sources/definitions";
 import {
   cookieHeaderFromCredentials,
   type BrowserSessionInput,
@@ -14,7 +19,7 @@ import {
   normalizeCookieHeader,
   type OJAdapter,
 } from "../../domain";
-import { AdapterFailure } from "../../domain/errors";
+import { AdapterFailure, createAdapterFailure } from "../../domain/errors";
 import { reportProgress } from "../../domain/sync-progress";
 import { normalizeQOJRecord } from "./normalizer";
 import {
@@ -151,9 +156,8 @@ function failure(
   stage: "identity" | "request" | "parse",
   status?: number,
 ): AdapterFailure {
-  return new AdapterFailure({
+  return createAdapterFailure("qoj", input.requestId, {
     kind,
-    source: "qoj",
     stage,
     messageKey:
       kind === "auth_required"
@@ -173,7 +177,6 @@ function failure(
           ? "retry_later"
           : undefined,
     ...(status !== undefined ? { httpStatus: status } : {}),
-    requestId: input.requestId,
   });
 }
 
@@ -248,26 +251,22 @@ export const qojAdapter: OJAdapter = {
       input.account.authMode !== "browser-session" &&
       input.account.authMode !== "manual-cookie"
     )
-      throw new AdapterFailure({
+      throw createAdapterFailure("qoj", input.requestId, {
         kind: "unsupported",
-        source: "qoj",
         stage: "identity",
         messageKey: "account.authModeUnsupported",
         retryable: false,
-        requestId: input.requestId,
       });
     const cookie =
       input.account.authMode === "manual-cookie"
         ? manualQOJCookie(input.credentials)
         : undefined;
     if (input.account.authMode === "manual-cookie" && !cookie)
-      throw new AdapterFailure({
+      throw createAdapterFailure("qoj", input.requestId, {
         kind: "invalid_response",
-        source: "qoj",
         stage: "identity",
         messageKey: "account.cookieRequired",
         retryable: false,
-        requestId: input.requestId,
       });
     const response = await request(
       input,
@@ -293,30 +292,7 @@ export const qojAdapter: OJAdapter = {
       displayName: username,
     };
   },
-  metadata: {
-    id: "qoj",
-    displayName: "QOJ",
-    availability: "experimental",
-    authModes: [
-      {
-        type: "browser-session",
-        recommended: true,
-      },
-      {
-        type: "manual-cookie",
-        credentialFields: [
-          {
-            key: "cookie",
-            label: "Cookie",
-            type: "password",
-            credentialType: "cookie",
-            placeholder: "粘贴 QOJ 完整 Cookie（如 __Host-UOJSESSID=...）",
-          },
-        ],
-        identifierRequired: false,
-      },
-    ],
-  },
+  metadata: sourceDefinitions.qoj.metadata,
 
   async detectBrowserSession(input: BrowserSessionInput) {
     const trace: string[] = [];
@@ -325,7 +301,7 @@ export const qojAdapter: OJAdapter = {
     try {
       const cookie = await request(
         input,
-        "https://qoj.ac/submissions",
+        `${QOJ_ORIGIN}/submissions`,
         undefined,
         true,
         trace,
@@ -416,14 +392,12 @@ export const qojAdapter: OJAdapter = {
       input.account.authMode !== "browser-session" &&
       input.account.authMode !== "manual-cookie"
     ) {
-      throw new AdapterFailure({
+      throw createAdapterFailure("qoj", input.requestId, {
         kind: "unsupported",
-        source: "qoj",
         stage: "identity",
         messageKey: "account.authModeUnsupported",
         retryable: false,
         userAction: "edit_account",
-        requestId: input.requestId,
       });
     }
     const manualCookie =
@@ -431,14 +405,12 @@ export const qojAdapter: OJAdapter = {
         ? manualQOJCookie(input.credentials)
         : undefined;
     if (input.account.authMode === "manual-cookie" && !manualCookie) {
-      throw new AdapterFailure({
+      throw createAdapterFailure("qoj", input.requestId, {
         kind: "invalid_response",
-        source: "qoj",
         stage: "identity",
         messageKey: "account.cookieRequired",
         retryable: false,
         userAction: "edit_account",
-        requestId: input.requestId,
       });
     }
     let username = (
@@ -477,21 +449,19 @@ export const qojAdapter: OJAdapter = {
       username = parseQOJIdentity(identityResponse.text) ?? "";
     }
     if (!/^[a-zA-Z0-9_]{1,32}$/.test(username)) {
-      throw new AdapterFailure({
+      throw createAdapterFailure("qoj", input.requestId, {
         kind: "invalid_response",
-        source: "qoj",
         stage: "identity",
         messageKey: "account.identifierRequired",
         retryable: false,
         userAction: "edit_account",
-        requestId: input.requestId,
       });
     }
     let browserCookieUsername: string | undefined;
     if (input.account.authMode === "browser-session" && input.http.getCookie) {
       const raw = await input.http.getCookie(
         "qoj",
-        "https://qoj.ac/",
+        qojHomeUrl(),
         "uoj_username",
       );
       browserCookieUsername = raw ? decodeQOJCookieUsername(raw) : undefined;
@@ -500,30 +470,24 @@ export const qojAdapter: OJAdapter = {
       }
     }
     const limit = Math.max(1, Math.min(input.limit, 1_000));
-    const records: Submission[] = [];
+    const buffer = new WindowRecordBuffer(input, limit);
+    const records = buffer.records;
     let page = 1;
     const reasons: PartialReason[] = [];
     const diagnostics: Diagnostic[] = [];
-    let pagesFetched = 0;
+    const progress = new PageProgress(input.onProgress, records);
     let successfulPages = 0;
     let evidence: "exhausted" | "window-boundary" = "exhausted";
-    let ordered = true;
-    let previousOldest = Infinity;
-    const seenPageKeys = new Set<string>();
-    const seenRecords = new Set<string>();
+    const order = new DescendingWindowTracker();
+    const signatures = new PageSignatures();
     while (records.length < limit && page <= 100) {
       try {
         const listUrl = qojSubmissionListUrl(username, page);
         const response = await input.pagination.runPage({
-          origin: "https://qoj.ac",
+          origin: QOJ_ORIGIN,
           signal: input.signal,
           request: () => {
-            pagesFetched += 1;
-            reportProgress(input.onProgress, {
-              phase: "list",
-              pagesFetched,
-              recordsFetched: records.length,
-            });
+            progress.dispatched();
             return request(
               input,
               listUrl,
@@ -547,7 +511,7 @@ export const qojAdapter: OJAdapter = {
           throw failure(input, "parse_failed", "request", response.status);
         }
         if (
-          finalUrl.origin !== "https://qoj.ac" ||
+          finalUrl.origin !== QOJ_ORIGIN ||
           finalUrl.pathname !== "/submissions" ||
           finalUrl.searchParams.get("submitter") !== username
         ) {
@@ -580,48 +544,17 @@ export const qojAdapter: OJAdapter = {
         const pageKey = pageRecords
           .map((record) => record.submissionId)
           .join(",");
-        if (pageKey && seenPageKeys.has(pageKey)) {
+        if (signatures.repeated(pageKey)) {
           reasons.push("pagination-repeated");
           break;
         }
-        if (pageKey) seenPageKeys.add(pageKey);
-        const validTimes = pageRecords.every(
-          (record) =>
-            Number.isSafeInteger(record.submittedAt) && record.submittedAt >= 0,
+        const { validTimes, reachedSince } = order.observe(
+          pageRecords,
+          input.since,
         );
-        // QOJ submissions are listed in descending submission order; validate
-        // normalized timestamps across pages before using the lower boundary.
-        ordered =
-          ordered &&
-          validTimes &&
-          pageRecords.every(
-            (record, index) =>
-              record.submittedAt <=
-              (index === 0
-                ? previousOldest
-                : pageRecords[index - 1]!.submittedAt),
-          );
-        if (pageRecords.length > 0)
-          previousOldest = pageRecords[pageRecords.length - 1]!.submittedAt;
         if (!validTimes) reasons.push("invalid-record");
-        for (const record of pageRecords) {
-          if (
-            !isWithinSyncWindow(record.submittedAt, input) ||
-            seenRecords.has(record.submissionId)
-          )
-            continue;
-          seenRecords.add(record.submissionId);
-          if (records.length < limit) records.push(record);
-          else reasons.push("record-limit");
-        }
-        reportProgress(input.onProgress, {
-          phase: "list",
-          pagesFetched,
-          recordsFetched: records.length,
-        });
-        const reachedSince =
-          ordered &&
-          pageRecords.some((record) => record.submittedAt < input.since);
+        if (buffer.append(pageRecords)) reasons.push("record-limit");
+        progress.report();
         if (!parsed.hasMore) break;
         if (parsed.records.length === 0) {
           reasons.push("unverified-coverage");
@@ -641,46 +574,20 @@ export const qojAdapter: OJAdapter = {
         }
         page += 1;
       } catch (error) {
-        if (input.signal.aborted && !isCollectionDeadline(input.signal))
-          throw input.signal.reason;
-        if (successfulPages > 0 && isCollectionDeadline(input.signal)) {
-          reasons.push("deadline");
-          diagnostics.push({
-            source: "qoj",
-            code: "deadline",
-            severity: "warning",
-            messageKey: "sync.partial",
-            retryable: true,
-          });
-          break;
-        }
-        if (
-          successfulPages === 0 ||
-          !(error instanceof AdapterFailure) ||
-          error.error.stage === "identity" ||
-          error.error.kind === "auth_required" ||
-          error.error.kind === "unknown"
-        )
-          throw error;
-        const reason: PartialReason = isCollectionDeadline(input.signal)
-          ? "deadline"
-          : error.error.kind === "rate_limited"
-            ? "rate-limited"
-            : "unavailable";
-        reasons.push(reason);
-        diagnostics.push({
-          source: "qoj",
-          code: reason,
-          severity: "warning",
-          messageKey: error.error.messageKey,
-          retryable: error.error.retryable,
-        });
+        const partial = classifiedPageFailure(
+          error,
+          input.signal,
+          successfulPages,
+          "qoj",
+        );
+        reasons.push(partial.reason);
+        diagnostics.push(partial.diagnostic);
         break;
       }
     }
     const coverage = finalizeCoverage(
       input,
-      pagesFetched,
+      progress.pagesFetched,
       records.length,
       reasons.length
         ? { status: "partial", reasons: [reasons[0]!, ...reasons.slice(1)] }

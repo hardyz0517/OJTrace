@@ -1,3 +1,4 @@
+import { LUOGU_ORIGIN } from "../urls";
 export interface LuoguRawRecord {
   id: number | string;
   submitTime?: number | string;
@@ -96,7 +97,7 @@ function htmlRecords(text: string): LuoguRawRecord[] | undefined {
           ? title.slice(problemId.length).trim()
           : title,
       },
-      problemUrl: new URL(match[3]!, "https://www.luogu.com.cn").href,
+      problemUrl: new URL(match[3]!, LUOGU_ORIGIN).href,
     });
   }
   if (records.length > 0) return records;
@@ -120,7 +121,7 @@ function htmlRecords(text: string): LuoguRawRecord[] | undefined {
     records.push({
       id: decodeURIComponent(submissionId),
       problem: { pid: problemId, title },
-      problemUrl: new URL(match[1]!, "https://www.luogu.com.cn").href,
+      problemUrl: new URL(match[1]!, LUOGU_ORIGIN).href,
     });
   }
   return records.length > 0 ? records : undefined;

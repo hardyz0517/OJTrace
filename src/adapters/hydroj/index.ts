@@ -1,5 +1,6 @@
+import { sourceDefinitions } from "../../sources/definitions";
 import { cookieHeaderFromCredentials, type OJAdapter } from "../../domain";
-import { finalizeCoverage } from "../shared/submission-window";
+import { finalizeCoverage } from "../../domain/sync-coverage";
 import { reportProgress } from "../../domain/sync-progress";
 import { hydroScopedUrl } from "../../domain/hydro-scope";
 import { fetchHydroBranding } from "./branding";
@@ -24,57 +25,7 @@ import {
 } from "./session";
 
 const implementation: OJAdapter = {
-  metadata: {
-    id: "hydroj",
-    displayName: "HydroOJ",
-    availability: "stable",
-    authModes: [
-      {
-        type: "browser-session",
-        recommended: true,
-      },
-      {
-        type: "manual-cookie",
-        identifierRequired: false,
-        credentialFields: [
-          {
-            key: "sid",
-            label: "sid",
-            type: "password",
-            credentialType: "cookie",
-            placeholder: "粘贴 sid 值",
-          },
-          {
-            key: "sid.sig",
-            label: "sid.sig",
-            type: "password",
-            credentialType: "cookie",
-            placeholder: "粘贴 sid.sig 值",
-          },
-        ],
-      },
-      {
-        type: "password",
-        label: "账号密码登录",
-        description: "使用 HydroOJ 用户名和密码登录；会话过期后自动重新登录。",
-        identifierRequired: false,
-        credentialFields: [
-          {
-            key: "username",
-            label: "用户名",
-            type: "text",
-            placeholder: "例如 username",
-          },
-          {
-            key: "password",
-            label: "密码",
-            type: "password",
-            placeholder: "输入 HydroOJ 密码",
-          },
-        ],
-      },
-    ],
-  },
+  metadata: sourceDefinitions.hydroj.metadata,
 
   async authorize(input) {
     const origin = originFor(input.account);

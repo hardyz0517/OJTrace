@@ -1,5 +1,13 @@
 import type { AccountCredentials } from "./types";
 
+/** Shared entry shape; callers decide whether to reject or filter bad entries. */
+export function isCredentialEntry(
+  key: string,
+  value: unknown,
+): value is string {
+  return key.length > 0 && typeof value === "string" && !/[\r\n]/.test(value);
+}
+
 const COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const COOKIE_ATTRIBUTE_NAMES = new Set([
   "domain",

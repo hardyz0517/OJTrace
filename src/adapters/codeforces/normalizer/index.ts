@@ -1,3 +1,4 @@
+import { CODEFORCES_ORIGIN } from "../urls";
 import type { Submission, VerdictCode } from "../../../domain";
 import type { CodeforcesRawSubmission } from "../parser";
 import { codeforcesContestPrefix } from "../urls";
@@ -61,13 +62,13 @@ export function normalizeCodeforcesSubmission(
         : undefined,
     language: raw.programmingLanguage,
     submissionUrl: prefix
-      ? `https://codeforces.com/${prefix}/${contestId}/submission/${raw.id}`
+      ? `${CODEFORCES_ORIGIN}/${prefix}/${contestId}/submission/${raw.id}`
       : undefined,
     problemUrl:
       prefix && index
-        ? `https://codeforces.com/${prefix}/${contestId}/problem/${encodeURIComponent(index)}`
+        ? `${CODEFORCES_ORIGIN}/${prefix}/${contestId}/problem/${encodeURIComponent(index)}`
         : undefined,
-    fallbackListUrl: `https://codeforces.com/submissions/${encodeURIComponent(providerAccountKey)}`,
+    fallbackListUrl: `${CODEFORCES_ORIGIN}/submissions/${encodeURIComponent(providerAccountKey)}`,
     fetchedAt,
   };
 }

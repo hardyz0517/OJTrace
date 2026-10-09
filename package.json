@@ -1,11 +1,12 @@
 {
   "name": "ojtrace",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A local-first cross-OJ submission timeline extension",
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",
     "audit:manifest": "node tools/audit-manifest.mjs",
+    "audit:architecture": "node tools/audit-architecture.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --deny-warnings src entrypoints tests *.ts",
     "test:contract": "vitest run tests/adapters tests/domain",

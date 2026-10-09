@@ -4,7 +4,7 @@ export default defineConfig({
   manifest: {
     name: "OJTrace（题迹）",
     description: "Local-first cross-OJ submission timeline",
-    version: "0.1.1",
+    version: "0.1.2",
     permissions: ["storage", "tabs", "cookies"],
     host_permissions: ["https://qoj.ac/*"],
     optional_host_permissions: [

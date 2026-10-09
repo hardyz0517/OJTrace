@@ -2,7 +2,9 @@
 
 > 状态：账号系统已实施；2026-10-04 已升级时间窗口、分页节奏、覆盖结果和 Hydro 指定域。自动检查及 student 域真实 HTTP 非空采集已通过；主域流程回归为空窗口且含活动警告，Chrome/Edge 扩展人工验收仍待完成。
 >
-> 范围：授权、规范身份、凭证、权限、首次同步、删除/清空、并发存储。
+> 2026-10-09 合同校正：添加/重新授权只验证身份并保存配置，不自动采集；复用升级保持该行为。
+>
+> 范围：授权、规范身份、凭证、权限、手动同步、删除/清空、并发存储。
 >
 > 绿地策略：唯一存储和消息 schema 为 2；不迁移旧账号数据，不保留旧消息兼容层。
 
@@ -15,15 +17,15 @@
 | `src/domain/types.ts`                                                | 持久化账号、凭证、提交、同步状态和品牌 DTO            |
 | `src/domain/merge.ts`                                                | 提交去重、字段合并、每账号 retention                  |
 | `src/domain/instance-branding.ts`                                    | 可丢弃品牌缓存合并和淘汰                              |
-| `src/application/accounts/account-service.ts`                        | 授权、身份 upsert、首次同步、凭证替换、删除/清空      |
+| `src/application/accounts/account-service.ts`                        | 授权、身份 upsert、凭证替换、删除/清空                |
 | `src/application/accounts/account-queries.ts`                        | 不含凭证的 `PublicStoredData` 和统一品牌查询          |
 | `src/application/storage/store.ts`                                   | 单 writer 事务和单 key 持久化                         |
 | `src/application/sync/sync-service.ts`                               | 已启用账号选择、freshness 和事务结果提交              |
 | `src/application/sync/collect-account.ts`                            | 同账号任务、冻结窗口、取消/时限和最终合同检查         |
-| `src/application/sync/commit-collection.ts`                          | 授权首次采集与常规同步共用的纯事务转换                |
+| `src/application/sync/commit-collection.ts`                          | 采集结果提交使用的纯事务转换                          |
 | `src/platform/permissions/hosts.ts`                                  | UI/后台共用权限计划                                   |
 | `src/platform/network/`                                              | 请求范围、超时、大小限制、浏览器 Cookie 传输          |
-| `entrypoints/settings/AccountForm.tsx`、`useAccountAuthorization.ts` | Adapter 元数据驱动的表单、检测和授权状态              |
+| `entrypoints/settings/AccountForm.tsx`、`useAccountAuthorization.ts` | 轻量来源定义驱动的表单、检测和授权状态                |
 | `entrypoints/background.ts`                                          | runtime handler、依赖装配、稳定错误转换               |
 
 无需额外 repository、事件总线、伪 CAS 或 OJ 专属账号服务。Adapter 不写 storage 或请求扩展权限；UI 不计算 identityKey/accountId，不写 storage。
@@ -81,17 +83,17 @@
 
 浏览器会话、手动 Cookie、密码是不同认证状态，不抽象成隐式的“自动登录”布尔值。Hydro 同 origin 的授权、同步、品牌和会话检测串行，密码账号同步前确认当前 UID，身份不符时重新登录自己的账号或报 identityChanged。
 
-## 5. 授权与首次同步
+## 5. 授权与手动同步
 
 `AccountService.authorize` 的顺序：
 
-1. 校验 Adapter/mode/输入，规范化 origin 和可选 domainId，确认后台已拥有网站 origin 权限。
+1. 校验来源/mode、identifier、凭证，再规范化 origin/domainId；后台检查已经授予的网站权限。表单仍先检查 scope，再检查会话/identifier/凭证，用户手势内请求权限。
 2. 调用 Adapter.authorize；失败不落库。
-3. 事务中按身份 upsert 账号和独立凭证，新账号 enabled=true；重新授权保留原 enabled，递增 credentialRevision，不预写 lastSuccessAt。
-4. 事务外通过共享 collectAccount 执行首次采集和可选品牌刷新；按保存的 syncRange/followNow 解析范围，无偏好时最近 7 天。范围非法时身份授权仍成功，跳过首次采集并提示。
-5. 再次事务检查 accountId + credentialRevision；仍存在且版本匹配才合并记录/状态。
-6. 完整采集更新 lastSuccessAt；部分采集合并有效记录、保留旧 lastSuccessAt、stale=true。首次采集失败保留已验证账号和结构化错误，不改变 enabled。
-7. 若账号已删除或凭证版本变化，丢弃结果；返回 superseded=true，不能伪报首次同步成功。
+3. 按规范身份事务 upsert 账号与独立凭证，新账号 enabled=true；重新授权保留原 enabled、缓存和同步状态，递增 credentialRevision，不预写 lastSuccessAt。
+4. 使旧凭证版本的采集失效，返回最新公开 account/data 和 superseded，不调用 fetchRecent，也不刷新品牌。用户到时间线点击同步后才采集。
+5. 同身份较旧授权或清空账号/全部数据前开始的授权晚返回，不能覆盖更新后的凭证或恢复已清空账号。
+
+complete/partial/失败的提交与 lastSuccessAt 更新由同步用例处理，不能把授权成功当作采集成功。历史“授权后首次采集”条款已移除；本轮没有恢复该流程。
 
 `enabled` 只表示是否可参与同步；验证时间由 verifiedAt 表示，同步成功/失败由 SyncState 表示。没有虚构的 pending、authorizationStatus 或额外消息进度协议。
 
@@ -111,7 +113,7 @@ Hydro 提交 guard 和存储加载均校验记录的 source、origin、domainId 
 
 同账号、credentialRevision、since、until、limit 全部相同的在途请求才可复用；不同范围按账号串行，每账号最多一个运行任务和一个不同范围待执行任务，超额返回 busy。派发前重检启用状态与凭证版本。新凭证取消旧任务；旧调用返回 superseded，不能领取新范围的结果。
 
-清空数据或提交会中止采集并推进内存任务代际，阻止已完成但尚未提交的旧结果回填；新同步仍等待旧 HTTP/Cookie 收尾。首次授权回包也检查代际，不伪报已取消采集的完整覆盖。同一规范身份的较旧授权晚返回时不能覆盖已保存的新凭据；清空账号使待确认身份授权失效。这些控制不改变存储 schema。
+清空数据或提交会中止采集并推进内存任务代际，阻止已完成但尚未提交的旧结果回填；新同步仍等待旧 HTTP/Cookie 收尾。授权回包使用独立授权代际；CLEAR_SUBMISSIONS 只取消采集，不使待授权操作失效。同一规范身份的较旧授权晚返回时不能覆盖已保存的新凭据；清空账号使待确认身份授权失效。这些控制不改变存储 schema。
 
 保留 per-account retention；采集为冻结毫秒闭区间、后台限制最近 35 天，非法范围在采集网络请求前拒绝。freshness 使用 lastAttemptAt 防止部分/失败后重复扫描。每账号任务时限 900 秒（15 分钟）；用户取消丢弃本轮新结果，内部 deadline 可保留已验证页的 partial。手动 force 仅绕过 freshness，不能绕过分页、origin 限流或预算。某来源失败保留本地缓存和其他来源结果。
 
@@ -144,7 +146,7 @@ schema 2 消息使用现有命名和顶层字段：
 
 AUTHORIZE_ACCOUNT 顶层携带 source、authMode、identifier?、origin?、domainId?、label?、credentials?；DETECT_BROWSER_SESSION 同样传递域。domainId 只允许 Hydro 且使用统一域 ID 校验，后台再次规范化地址并拒绝冲突；没有 payload 包装或旧 UPDATE_ACCOUNT。校验消息公共字段及每类业务字段。返回错误含稳定 code/message；后台不返回任意 Error.message、响应正文、请求头、凭证或堆栈。稳定文案放在 messaging/error-messages.ts，设置页/时间线复用。
 
-首次授权返回不含凭证的 account/data、diagnostics、可选 coverage/error 和 superseded。覆盖结果仅在本次响应返回，不改变主存储/消息 schema 2。完整性只使用 coverage.outcome，不保留冗余的顶层 hasMore；缺少 coverage 的响应不能猜测 complete。活动失败作为本次 diagnostics 返回，不覆盖成功的账号级 SyncState。
+授权返回不含凭证的 account/data 和 superseded。同步响应包含 sources/progress/addedRecords，公开 data 和 sources 均不携带内部活动缓存。覆盖只使用 coverage.outcome，缺少可选 coverage 时不能猜测 complete；消息与存储 schema 仍为 2。
 
 ## 9. Settings 和品牌
 
@@ -152,7 +154,7 @@ AccountForm 与授权 Hook 负责 UI 流程：
 
 `idle → validating-input → requesting-permission → authorizing → completed/failed`。
 
-授权 command 内部包含验证、upsert 和首次同步，UI 不伪造不可观测的 upserting/syncing 状态。会话检测独立记录 checking/authenticated 等状态，并用序号丢弃过期检测响应。source/mode 切换清空输入；成功清空凭证；同步 ref 防止双击发出多个命令。
+授权 command 内部包含验证和 upsert，UI 不伪造不可观测的 upserting/syncing 状态。会话检测独立记录 checking/authenticated 等状态，并用序号丢弃过期检测响应。source/mode 切换清空输入；成功清空凭证；同步 ref 防止双击发出多个命令。
 
 图标缓存按 source + normalizedOrigin + 可选 domainId 索引，同域账号共用缓存和在途刷新，不同域隔离。实例名字来自手动 label，默认 HydroOJ，不自动采集站点名称，也不替换账号 displayName。固定 OJ 筛选标签不改；已连接账号和同步选择显示显式域，OJ 首页与记录导航保留域前缀。图标采集合同见 Hydro Spec。缓存损坏或图标失败只回退展示，不丢账号。
 
@@ -161,13 +163,13 @@ AccountForm 与授权 Hook 负责 UI 流程：
 自动化覆盖：
 
 - origin/identity 编码、不同实例隔离、幂等授权、凭证替换与公开查询；
-- 验证失败不落库、首次同步失败保留、删除/清空关联数据；
+- 验证失败不落库、授权不采集、手动同步失败保留缓存、删除/清空关联数据；
 - 删除/替换凭证与在途同步、重复同步与宽窗口请求；
 - Hydro 多账号会话串行、身份切换、活动部分成功；
 - UI 重复提交、密码原值、成功清空、非法 origin 不申请权限；
 - 品牌刷新合并、过期、旧图标保留、缓存淘汰。
 
-质量门禁为 typecheck、lint、test、format:check、build、audit:manifest。真实 Hydro 集成是显式 opt-in 测试，从环境注入根/域地址和凭证，默认跳过；非空采集使用 OJTRACE_HYDRO_REQUIRE_RECORDS=1 单独验收，真实凭证不写仓库。
+质量门禁为 typecheck、lint、test、format:check、build、audit:manifest、audit:architecture。真实 Hydro 集成是显式 opt-in 测试，从环境注入根/域地址和凭证，默认跳过；非空采集使用 OJTRACE_HYDRO_REQUIRE_RECORDS=1 单独验收，真实凭证不写仓库。
 
 Chrome/Edge 的扩展加载、权限弹窗、登录态、活动链接和重启持久化仍须人工验收，记录在 docs/qa/browser-matrix.md。升级旧 schema 会初始化为空，需要重新添加账号。
 

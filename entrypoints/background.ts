@@ -37,8 +37,21 @@ import { createPaginationRuntime } from "../src/platform/network/pagination-thro
 import { createAccountCollector } from "../src/application/sync/collect-account";
 import { SyncRangeError } from "../src/domain";
 import { updatePaginationPreference } from "../src/application/preferences/pagination-preferences";
+import {
+  isProblemExportMessage,
+  isProblemExportPortRequest,
+  problemExportEnvelope,
+  type ProblemExportMessage,
+  type ProblemExportResponse,
+} from "../src/application/problem-export/messages";
+import { PROBLEM_EXPORT_PORT_NAME } from "../src/application/problem-export/transport";
+import { ProblemExportService } from "../src/application/problem-export/service";
+import {
+  openOrFocusSettings,
+  openOrFocusTimeline,
+} from "../src/application/navigation/extension-pages";
+import { problemAdapterRegistry } from "../src/problem/registry";
 
-const TIMELINE_URL = () => browser.runtime.getURL("/timeline.html");
 const storage = createStoragePort(browser.storage.local);
 const rateLimits = createRateLimitRegistry({
   storage: {
@@ -74,19 +87,9 @@ function requestIdOf(raw: unknown): string {
     : "unknown";
 }
 
-async function openOrFocusTimeline(): Promise<void> {
-  const url = TIMELINE_URL();
-  const tabs = await browser.tabs.query({ url });
-  const existing = tabs.find((tab) => typeof tab.id === "number");
-  if (existing?.id !== undefined) {
-    await browser.tabs.update(existing.id, { active: true });
-    if (existing.windowId !== undefined) {
-      await browser.windows.update(existing.windowId, { focused: true });
-    }
-    return;
-  }
-  await browser.tabs.create({ url });
-}
+const problemExport = new ProblemExportService({
+  registry: problemAdapterRegistry,
+});
 
 async function authorizeAccount(
   input: Extract<RuntimeMessage, { type: "AUTHORIZE_ACCOUNT" }>,
@@ -96,13 +99,10 @@ async function authorizeAccount(
 }
 
 export default defineBackground(() => {
-  browser.action.onClicked.addListener(() => {
-    void openOrFocusTimeline();
-  });
-
   browser.runtime.onMessage.addListener((raw: unknown, sender) => {
     if (sender.id !== browser.runtime.id) return undefined;
     if (isSyncProgressEvent(raw)) return undefined;
+    if (isProblemExportMessage(raw)) return handleProblemExportMessage(raw);
     const schemaVersion =
       raw && typeof raw === "object"
         ? (raw as { schemaVersion?: unknown }).schemaVersion
@@ -118,7 +118,103 @@ export default defineBackground(() => {
     }
     return handleMessage(raw);
   });
+
+  // Some unit-test/browser shims only expose onMessage.  Real MV3 runtimes
+  // always provide onConnect, but the guard keeps the existing background
+  // message contract independently testable.
+  browser.runtime.onConnect?.addListener((port) => {
+    if (port.name !== PROBLEM_EXPORT_PORT_NAME) return;
+    if (port.sender?.id !== browser.runtime.id) {
+      port.disconnect();
+      return;
+    }
+    let token: string | undefined;
+    port.onMessage.addListener((raw: unknown) => {
+      if (!isProblemExportPortRequest(raw)) return;
+      token = raw.token;
+      if (
+        raw.type === "PROBLEM_EXPORT_CONNECT" ||
+        raw.type === "PROBLEM_EXPORT_START"
+      ) {
+        void problemExport.deliver(port, raw.token, raw.job);
+      } else {
+        void problemExport.cancel(raw.token);
+      }
+    });
+    port.onDisconnect.addListener(() => {
+      if (token) void problemExport.cancel(token);
+    });
+  });
 });
+
+async function handleProblemExportMessage(
+  message: ProblemExportMessage,
+): Promise<ProblemExportResponse> {
+  try {
+    switch (message.type) {
+      case "INSPECT_ACTIVE_PROBLEM_PAGE": {
+        const preview = await problemExport.inspect(
+          message.tabId,
+          message.expectedUrl,
+        );
+        return {
+          ...problemExportEnvelope(message.requestId),
+          ok: true,
+          type: "PROBLEM_PREVIEW",
+          preview,
+        };
+      }
+      case "START_PROBLEM_EXPORT": {
+        const job = await problemExport.start(
+          message.tabId,
+          message.expectedUrl,
+        );
+        return {
+          ...problemExportEnvelope(message.requestId),
+          ok: true,
+          type: "EXPORT_STARTED",
+          job: { token: job.token, expiresAt: job.expiresAt },
+        };
+      }
+      case "EXTRACT_PROBLEM_MARKDOWN": {
+        const markdown = await problemExport.extractMarkdown(
+          message.tabId,
+          message.expectedUrl,
+        );
+        return {
+          ...problemExportEnvelope(message.requestId),
+          ok: true,
+          type: "PROBLEM_MARKDOWN",
+          markdown,
+        };
+      }
+      case "OPEN_TIMELINE":
+        await openOrFocusTimeline();
+        return {
+          ...problemExportEnvelope(message.requestId),
+          ok: true,
+          type: "NAVIGATED",
+        };
+      case "OPEN_SETTINGS":
+        await openOrFocusSettings();
+        return {
+          ...problemExportEnvelope(message.requestId),
+          ok: true,
+          type: "NAVIGATED",
+        };
+    }
+  } catch (error) {
+    return {
+      ...problemExportEnvelope(message.requestId),
+      ok: false,
+      error: {
+        code: error instanceof Error ? "problem_export_failed" : "unknown",
+        message:
+          error instanceof Error ? error.message : "题面导出操作失败，请重试。",
+      },
+    };
+  }
+}
 
 async function handleMessage(
   message: RuntimeMessage,

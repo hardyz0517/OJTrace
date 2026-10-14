@@ -5,7 +5,15 @@ export default defineConfig({
     name: "OJTrace（题迹）",
     description: "Local-first cross-OJ submission timeline",
     version: "0.1.2",
-    permissions: ["storage", "tabs", "cookies"],
+    permissions: [
+      "storage",
+      "tabs",
+      "cookies",
+      "activeTab",
+      "scripting",
+      // Statement extraction finishes after the click gesture expires.
+      "clipboardWrite",
+    ],
     host_permissions: ["https://qoj.ac/*"],
     optional_host_permissions: [
       "https://codeforces.com/*",
@@ -27,11 +35,18 @@ export default defineConfig({
     },
     action: {
       default_title: "Open OJTrace",
+      default_popup: "popup.html",
       default_icon: {
         16: "icons/ojtrace-16.png",
         32: "icons/ojtrace-32.png",
         48: "icons/ojtrace-48.png",
       },
+    },
+    content_security_policy: {
+      // Typst compiles locally through its bundled WASM module; no remote code
+      // or eval-based script loading is permitted.
+      extension_pages:
+        "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
     },
   },
 });

@@ -1,0 +1,130 @@
+:root {
+  color: #1f2937;
+  background: #f6f8fb;
+  font-family:
+    Inter,
+    "Noto Sans CJK SC",
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: 15px;
+}
+
+body {
+  margin: 0;
+}
+
+.problem-export-page {
+  box-sizing: border-box;
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 20px 56px;
+}
+
+.problem-export-header,
+.problem-export-status {
+  width: min(760px, 100%);
+}
+
+.problem-export-header {
+  margin-bottom: 20px;
+}
+
+.eyebrow {
+  color: #667085;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+h1 {
+  margin: 7px 0 0;
+  font-size: clamp(22px, 3vw, 32px);
+  line-height: 1.2;
+}
+
+.problem-export-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin-bottom: 16px;
+  color: #475467;
+}
+
+.problem-export-status p {
+  margin: 0;
+}
+
+.problem-export-warnings {
+  width: min(760px, 100%);
+  margin: 0 0 16px;
+  border: 1px solid #fedf89;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fffaeb;
+  color: #7a2e0e;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.problem-export-warnings strong {
+  font-weight: 650;
+}
+
+.problem-export-warnings ul {
+  margin: 5px 0 0;
+  padding-left: 18px;
+}
+
+.problem-export-retry-hint {
+  width: min(760px, 100%);
+  margin: 12px 0 0;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.status-spinner {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  border: 2px solid #c7d1e0;
+  border-top-color: #175cd3;
+  border-radius: 999px;
+  animation: spin 800ms linear infinite;
+}
+
+.status-icon {
+  display: inline-flex;
+  width: 17px;
+  height: 17px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #d92d20;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-success {
+  display: inline-flex;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #dcfae6;
+  color: #067647;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

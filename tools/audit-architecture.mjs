@@ -155,7 +155,10 @@ export function auditArchitecture({
     for (const [start] of graph) {
       const name = localName(start);
       const pure = /^src\/(domain|sources)\//.test(name);
-      const ui = /^entrypoints\/(settings|timeline|shared)\//.test(name);
+      const ui =
+        /^entrypoints\/(settings|timeline|popup|problem-export|shared)\//.test(
+          name,
+        );
       if (!pure && !ui) continue;
       const seen = new Set();
       const walk = (file, path) => {

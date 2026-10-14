@@ -28,8 +28,12 @@ if (!hostPermissions.has("https://qoj.ac/*")) {
 if (unexpected.length > 0) {
   throw new Error(`Forbidden permissions found: ${unexpected.join(", ")}`);
 }
-if (permissions.has("scripting")) {
-  throw new Error("The extension must not depend on page-context scripting");
+for (const permission of ["activeTab", "scripting"]) {
+  if (!permissions.has(permission))
+    throw new Error(`Problem export requires ${permission}`);
+}
+if (manifest.action?.default_popup !== "popup.html") {
+  throw new Error("The extension action must open popup.html");
 }
 if (
   optionalHosts.size !== expectedHosts.length ||

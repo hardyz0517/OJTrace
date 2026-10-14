@@ -10,8 +10,6 @@ export const HYDROOJ_OFFICIAL_ORIGIN = new URL(
   sourceDefinitions.hydroj.officialHomeUrl,
 ).origin;
 
-export type HydroOJOrigin = string;
-
 export interface HydroOJInstance {
   origin: string;
   domainId?: string;

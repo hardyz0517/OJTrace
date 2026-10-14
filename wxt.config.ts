@@ -4,7 +4,7 @@ export default defineConfig({
   manifest: {
     name: "OJTrace（题迹）",
     description: "Local-first cross-OJ submission timeline",
-    version: "0.1.2",
+    version: "0.1.3",
     permissions: [
       "storage",
       "tabs",

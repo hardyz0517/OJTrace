@@ -1,0 +1,2 @@
+patchedDependencies:
+  '@myriaddreamin/typst-all-in-one.ts@0.7.0': patches/@myriaddreamin__typst-all-in-one.ts@0.7.0.patch

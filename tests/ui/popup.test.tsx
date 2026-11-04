@@ -20,6 +20,23 @@ const problemExportMocks = vi.hoisted(() => {
   };
 });
 
+const crossOjMocks = vi.hoisted(() => {
+  class MockCrossOjClientError extends Error {
+    constructor(code: string, message: string) {
+      super(message);
+      this.name = "CrossOjClientError";
+      void code;
+    }
+  }
+  return {
+    currentActiveTab: vi.fn(),
+    enableLuoguPageIntegration: vi.fn(),
+    hasCrossOjPermissions: vi.fn(),
+    loadCrossOjHistory: vi.fn(),
+    MockCrossOjClientError,
+  };
+});
+
 vi.mock("../../src/application/problem-export/client", () => ({
   inspectActiveProblemPage: problemExportMocks.inspectActiveProblemPage,
   startProblemExport: problemExportMocks.startProblemExport,
@@ -29,7 +46,13 @@ vi.mock("../../src/application/problem-export/client", () => ({
   ProblemExportClientError: problemExportMocks.MockProblemExportClientError,
 }));
 
+vi.mock("../../src/oj-enhancer/features/cross-oj-submit/client", () => ({
+  ...crossOjMocks,
+  CrossOjClientError: crossOjMocks.MockCrossOjClientError,
+}));
+
 import { App } from "../../entrypoints/popup/main";
+import { loadCrossOjHistory } from "../../src/oj-enhancer/features/cross-oj-submit/client";
 
 const {
   inspectActiveProblemPage,
@@ -39,6 +62,7 @@ const {
   openSettings,
   MockProblemExportClientError,
 } = problemExportMocks;
+const { loadCrossOjHistory: loadCrossOjHistoryMock } = crossOjMocks;
 
 const tab = {
   tabId: 42,
@@ -96,6 +120,10 @@ beforeEach(() => {
   });
   openTimeline.mockResolvedValue(undefined);
   openSettings.mockResolvedValue(undefined);
+  crossOjMocks.currentActiveTab.mockResolvedValue(tab);
+  crossOjMocks.enableLuoguPageIntegration.mockResolvedValue(undefined);
+  crossOjMocks.hasCrossOjPermissions.mockResolvedValue(false);
+  loadCrossOjHistoryMock.mockResolvedValue([]);
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -103,6 +131,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  vi.useRealTimers();
   container.remove();
   Reflect.deleteProperty(navigator, "clipboard");
   Reflect.deleteProperty(document, "execCommand");
@@ -117,7 +146,101 @@ async function renderPopup(): Promise<void> {
   });
 }
 
-describe("OJTrace popup launcher", () => {
+describe("OJTrace popup", () => {
+  it("offers page integration setup without a popup submission action", async () => {
+    const luoguTab = {
+      tabId: 42,
+      url: "https://www.luogu.com.cn/problem/CF1A",
+    };
+    crossOjMocks.currentActiveTab.mockResolvedValue(luoguTab);
+    await renderPopup();
+
+    expect(container.textContent).toContain("授权并启用页面入口");
+    expect(container.textContent).not.toContain("提交到 Codeforces");
+    expect(container.querySelector(".cross-oj-dialog")).toBeNull();
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".cross-oj-enable")!.click();
+      await Promise.resolve();
+    });
+    expect(crossOjMocks.enableLuoguPageIntegration).toHaveBeenCalledWith({
+      tabId: 42,
+      url: luoguTab.url,
+      target: "codeforces",
+    });
+  });
+
+  it("requests AtCoder access for a Luogu ID with an original-link task ID", async () => {
+    const luoguTab = {
+      tabId: 42,
+      url: "https://www.luogu.com.cn/problem/AT1202Contest_h#submit",
+    };
+    crossOjMocks.currentActiveTab.mockResolvedValue(luoguTab);
+    await renderPopup();
+
+    expect(container.textContent).toContain("授权并启用页面入口");
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".cross-oj-enable")!.click();
+      await Promise.resolve();
+    });
+    expect(crossOjMocks.enableLuoguPageIntegration).toHaveBeenCalledWith({
+      tabId: 42,
+      url: luoguTab.url,
+      target: "atcoder",
+    });
+  });
+
+  it("hides setup after both optional host permissions are granted", async () => {
+    const luoguTab = {
+      tabId: 42,
+      url: "https://www.luogu.com.cn/problem/CF1A",
+    };
+    crossOjMocks.currentActiveTab.mockResolvedValue(luoguTab);
+    crossOjMocks.hasCrossOjPermissions.mockResolvedValue(true);
+    await renderPopup();
+    await act(async () => Promise.resolve());
+    expect(container.querySelector(".cross-oj-enable")).toBeNull();
+    expect(container.textContent).not.toContain("提交到 Codeforces");
+  });
+
+  it("shows saved cross-OJ submission history", async () => {
+    loadCrossOjHistoryMock.mockResolvedValue([
+      {
+        oj: "atcoder",
+        submissionId: "987654",
+        problemId: "abc175_f",
+        detailUrl: "https://atcoder.jp/contests/abc175/submissions/987654",
+        observedAt: 100,
+        evaluationStatus: "judging",
+        statusUpdatedAt: 100,
+      },
+    ]);
+    await renderPopup();
+    expect(container.textContent).toContain("abc175_f");
+    expect(container.textContent).toContain("#987654");
+    expect(container.textContent).toContain("评测中");
+    expect(
+      container.querySelector(".cross-oj-history a")?.getAttribute("href"),
+    ).toBe("https://atcoder.jp/contests/abc175/submissions/987654");
+    expect(loadCrossOjHistory).toHaveBeenCalledOnce();
+  });
+
+  it("keeps successful-download structure warnings visible without closing the popup", async () => {
+    startProblemExport.mockResolvedValue({
+      tab,
+      job: {
+        token: "warning",
+        expiresAt: Date.now() + 60000,
+        warnings: [{ code: "cnoi-unrecognized", message: "未知章节已保留。" }],
+      },
+    });
+    await renderPopup();
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>(".primary-action")!.click(),
+    );
+    expect(container.textContent).toContain("未知章节已保留。");
+    expect(window.close).not.toHaveBeenCalled();
+  });
   it("shows the current supported problem and starts an export in that tab context", async () => {
     await renderPopup();
 
@@ -143,7 +266,7 @@ describe("OJTrace popup launcher", () => {
       container.querySelector<HTMLButtonElement>(".primary-action")!.click();
       await Promise.resolve();
     });
-    expect(startProblemExport).toHaveBeenCalledWith(tab);
+    expect(startProblemExport).toHaveBeenCalledWith(tab, "download");
     expect(window.close).toHaveBeenCalledTimes(1);
   });
 
@@ -155,6 +278,54 @@ describe("OJTrace popup launcher", () => {
     expect(container.querySelector(".primary-action")).toBeNull();
     expect(container.textContent).toContain("时间线");
     expect(container.textContent).toContain("设置");
+  });
+
+  it("keeps direct export busy past the page-opening timeout and closes only after download finishes", async () => {
+    vi.useFakeTimers();
+    let finish!: () => void;
+    startProblemExport.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await renderPopup();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".primary-action")!.click();
+      await vi.advanceTimersByTimeAsync(16_000);
+    });
+    expect(startProblemExport).toHaveBeenCalledWith(tab, "download");
+    expect(container.textContent).not.toContain("超时");
+    expect(container.querySelector(".primary-action")?.textContent).toBe(
+      "正在生成 PDF…",
+    );
+    expect(
+      container
+        .querySelector(".primary-action")
+        ?.classList.contains("is-exporting"),
+    ).toBe(true);
+    expect(
+      container
+        .querySelector(".popup-action-spinner")
+        ?.getAttribute("aria-hidden"),
+    ).toBe("true");
+    expect(
+      container.querySelector<HTMLButtonElement>(".primary-action")?.disabled,
+    ).toBe(true);
+    expect(
+      container.querySelector<HTMLButtonElement>(".export-edit-action")
+        ?.disabled,
+    ).toBe(true);
+    expect(
+      container.querySelector<HTMLButtonElement>(".copy-markdown-action")
+        ?.disabled,
+    ).toBe(true);
+    expect(window.close).not.toHaveBeenCalled();
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+    });
+    expect(window.close).toHaveBeenCalledTimes(1);
   });
 
   it("opens timeline and settings through secondary launcher actions", async () => {
@@ -205,12 +376,17 @@ describe("OJTrace popup launcher", () => {
     const copy = container.querySelector<HTMLButtonElement>(
       ".copy-markdown-action",
     )!;
-    const buttons = [...container.querySelectorAll("button")].map(
-      (button) => button.textContent,
+    expect(container.querySelector(".primary-action")?.textContent).toBe(
+      "直接导出 PDF",
     );
-    expect(buttons.slice(0, 2)).toEqual(["导出题面 PDF", "复制题目 Markdown"]);
-    expect(container.querySelector(".primary-action")?.nextElementSibling).toBe(
+    expect(container.querySelectorAll(".primary-action")).toHaveLength(1);
+    expect(container.querySelector(".export-split-toggle")).toBeNull();
+    expect(copy.textContent).toBe("复制 Markdown");
+    expect(container.querySelector(".problem-secondary-actions")).toContain(
       copy,
+    );
+    expect(container.querySelector(".problem-secondary-actions")).toContain(
+      container.querySelector(".export-edit-action"),
     );
 
     await act(async () => {
@@ -220,6 +396,10 @@ describe("OJTrace popup launcher", () => {
     expect(copy.disabled).toBe(true);
     expect(
       container.querySelector<HTMLButtonElement>(".primary-action")?.disabled,
+    ).toBe(true);
+    expect(
+      container.querySelector<HTMLButtonElement>(".export-edit-action")
+        ?.disabled,
     ).toBe(true);
     expect(extractProblemMarkdown).toHaveBeenCalledWith(tab);
     expect(writeClipboard).toHaveBeenCalledTimes(1);
@@ -288,5 +468,20 @@ describe("OJTrace popup launcher", () => {
         ?.disabled,
     ).toBe(false);
     expect(window.close).not.toHaveBeenCalled();
+  });
+
+  it("opens the editor directly from the visible secondary action", async () => {
+    await renderPopup();
+    const edit = container.querySelector<HTMLButtonElement>(
+      ".export-edit-action",
+    )!;
+    expect(edit.textContent).toBe("编辑 / 预览");
+    await act(async () => {
+      edit.click();
+      await Promise.resolve();
+    });
+    expect(startProblemExport).toHaveBeenCalledWith(tab, "edit");
+    expect(extractProblemMarkdown).not.toHaveBeenCalled();
+    expect(window.close).toHaveBeenCalledTimes(1);
   });
 });

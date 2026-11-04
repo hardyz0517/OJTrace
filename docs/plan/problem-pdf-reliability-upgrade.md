@@ -1,5 +1,7 @@
 # 题面 PDF 可靠性与复用升级计划
 
+> 2026-10-16：题面链已升级为 Adapter → SourceProblem → CNOI Transformer → CnoiProblem → 共用 Markdown Parser → Renderer；复制始终取 Source，编辑初始化取 CNOI，编辑后不再转换。当前职责与验收见[维护说明](../development/problem-markdown-pipeline.md)和[执行报告](../qa/problem-markdown-pipeline-upgrade.md)。下文与此冲突的数据流属于历史实现。Chrome/Edge 原生矩阵仍待实机。
+
 > 状态：代码和自动门禁已完成。真实浏览器矩阵仍未执行，不能记为通过。制定日期：2026-10-14。完成日期：2026-10-14。
 >
 > 自动门禁：`pnpm typecheck`、`pnpm lint`、`pnpm test`（719 通过，1 跳过）、`pnpm test:contract`、`pnpm format:check`、`pnpm audit:architecture`、`pnpm build`。构建里 Typst chunk 只被 `problem-export` 引用。
@@ -16,12 +18,12 @@ P1–P6 和图片收口已经落在当前工作区。没有补写事后基线。
 
 本轮要减少 PDF 链路上各自演化的转换和限额，让失败可解释，并让新增题面结构或新 OJ 有固定落点。
 
-| 目标 | 完成后应能观察到的变化 |
-| --- | --- |
-| 可靠 | 正文提取成功后，图片失败仍能导出 PDF；同一导出页里的编译不会互相覆盖 shadow；公式或模板导致的编译失败能在导出页看到原因 |
-| 可维护 | 真正重复的限额各有一个数据入口；字体文件和视觉参数分开；站点特例由该 Adapter 调用，不注册进核心 |
-| 可扩展 | 新的 `StatementBlock` 或行内节点漏渲染时，类型检查失败；新 OJ 先写自己的清理函数，再调用现有转换 |
-| 实际减少重复 | Typst 发射不再用松散对象；图片类型只判断一次；样例框外壳只写一次；HTML 打印不再维持第二套版式 |
+| 目标         | 完成后应能观察到的变化                                                                                                  |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| 可靠         | 正文提取成功后，图片失败仍能导出 PDF；同一导出页里的编译不会互相覆盖 shadow；公式或模板导致的编译失败能在导出页看到原因 |
+| 可维护       | 真正重复的限额各有一个数据入口；字体文件和视觉参数分开；站点特例由该 Adapter 调用，不注册进核心                         |
+| 可扩展       | 新的 `StatementBlock` 或行内节点漏渲染时，类型检查失败；新 OJ 先写自己的清理函数，再调用现有转换                        |
+| 实际减少重复 | Typst 发射不再用松散对象；图片类型只判断一次；样例框外壳只写一次；HTML 打印不再维持第二套版式                           |
 
 不以文件行数、新增抽象个数或删除测试数量作为成功标准。不能靠多一个注册表、预算对象或解析器来宣称已经复用。
 
@@ -52,18 +54,18 @@ popup
 
 复制 Markdown 使用同一次提取产生的 `markdown`，不进入 Typst。HTML 打印渲染器不参与这条路径。编译器跑在导出页，不在后台；两个导出页没有共享的 shadow 文件系统。
 
-| 编号 | 问题 | 现状 | 升级要求 |
-| --- | --- | --- | --- |
-| R1 | Typst 发射不穷尽 | `statement-to-typst.ts` 把节点收成 `UnknownRecord`，未知类型静默变成段落，还保留旧别名 | 按 `StatementBlock` 和 `InlineNode` 穷尽。穷尽只证明没有漏分支，不证明 Typst 语法正确 |
-| R2 | 纯文本被再次解释 | 文本节点里的 `$...$` 会再走 `mitex` | 先用现有夹具确认公式已经在数学节点上。确认后文本只转义。若夹具仍依赖这次重扫，修提取器，不保留两个公式解释器 |
-| R3 | 公式失败没有诊断 | 公式经 `#mi` 交给 MiTeX。字符串阶段不会失败；编译失败时整份 PDF 失败，导出页只有笼统错误 | 展示编译诊断。不把失败公式改写成正文，也不再加一套 TeX 预检查 |
-| R4 | 限额多处手写 | 512KB 和 2MB 写在页面采图、扩展拉图和 Typst 准备三处。`snapshot.ts` 的 HTML 上限小于真实采集。页面脚本另有一套图片魔数嗅探 | 只合并已经有两个调用方的数字。图片类型只由 `embeddableImageType` 判断。只出现一次的超时和交付体积留在原操作旁 |
-| R5 | 有图就整页再提取 | `deliver` 提取后采图，再跑一次 Adapter。第二次失败则悄悄留下第一次结果。页面返回值会把 `sourceUrl` 改成解析后的地址 | 只提取一次，并用现有贴图函数按请求时的 `sourceUrl` 贴回。采图超时仍有上限，但不再丢掉已经提取的正文 |
-| R6 | 同一页里的编译可重入 | 导出页模块级编译器共用一个 shadow，`compile` 没有锁。页面超时不能取消已经进入 WASM 的调用 | 同一页内的编译串行，临界区包含最后一次 `resetShadow`。超时后丢弃迟到的 PDF。不建跨页面锁 |
-| R7 | 字体名单可能漂移 | `FONT_PATHS` 与 `style-tokens.ts` 的字体族各写一份，但二者不是同一类数据 | 文件清单和视觉参数保持两个模块。测试只约束路径存在、样式族名都在清单声明中。不解析字体 name table，也不合成一个字体样式对象 |
-| R8 | 样例框外壳写了两遍 | `template.ts` 的 `#show raw` 和 `oj-sample-lines` 各画一套框。HTML CSS 已与 Typst 不一致 | 共用框的外壳。行内容仍按代码行和样例行分别处理。HTML 退出 PDF 版式合同 |
-| R9 | 共享提取器里有站点痕迹 | 通用提取器含洛谷样例标题函数，以及注释写成 Codeforces 专有、实际被多站使用的分隔和复制按钮规则。洛谷 JSON 经 Markdown 和 HTML 回到 AST | 只移走夹具证明只影响一个站点的清理。`$`/`$$` 扫描和通用复制按钮留在原处。不新增第二套块构造器，也不删除 HTML 中转 |
-| R10 | 预览和 PDF 标题本来就可以不同 | 探针不复制 JSON，`ProblemPageProbe` 也没有 `sourceData`。洛谷弹窗标题来自 DOM，PDF 可优先用 JSON 标题。各 Adapter 的 inspect 和 extract 已经共用标题函数 | 保持这个差异。不给字段加预览标记，也不把 JSON 复制进探针。显示名改为读来源定义；主语言子标签只留一个函数 |
+| 编号 | 问题                          | 现状                                                                                                                                                     | 升级要求                                                                                                                    |
+| ---- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| R1   | Typst 发射不穷尽              | `statement-to-typst.ts` 把节点收成 `UnknownRecord`，未知类型静默变成段落，还保留旧别名                                                                   | 按 `StatementBlock` 和 `InlineNode` 穷尽。穷尽只证明没有漏分支，不证明 Typst 语法正确                                       |
+| R2   | 纯文本被再次解释              | 文本节点里的 `$...$` 会再走 `mitex`                                                                                                                      | 先用现有夹具确认公式已经在数学节点上。确认后文本只转义。若夹具仍依赖这次重扫，修提取器，不保留两个公式解释器                |
+| R3   | 公式失败没有诊断              | 公式经 `#mi` 交给 MiTeX。字符串阶段不会失败；编译失败时整份 PDF 失败，导出页只有笼统错误                                                                 | 展示编译诊断。不把失败公式改写成正文，也不再加一套 TeX 预检查                                                               |
+| R4   | 限额多处手写                  | 512KB 和 2MB 写在页面采图、扩展拉图和 Typst 准备三处。`snapshot.ts` 的 HTML 上限小于真实采集。页面脚本另有一套图片魔数嗅探                               | 只合并已经有两个调用方的数字。图片类型只由 `embeddableImageType` 判断。只出现一次的超时和交付体积留在原操作旁               |
+| R5   | 有图就整页再提取              | `deliver` 提取后采图，再跑一次 Adapter。第二次失败则悄悄留下第一次结果。页面返回值会把 `sourceUrl` 改成解析后的地址                                      | 只提取一次，并用现有贴图函数按请求时的 `sourceUrl` 贴回。采图超时仍有上限，但不再丢掉已经提取的正文                         |
+| R6   | 同一页里的编译可重入          | 导出页模块级编译器共用一个 shadow，`compile` 没有锁。页面超时不能取消已经进入 WASM 的调用                                                                | 同一页内的编译串行，临界区包含最后一次 `resetShadow`。超时后丢弃迟到的 PDF。不建跨页面锁                                    |
+| R7   | 字体名单可能漂移              | `FONT_PATHS` 与 `style-tokens.ts` 的字体族各写一份，但二者不是同一类数据                                                                                 | 文件清单和视觉参数保持两个模块。测试只约束路径存在、样式族名都在清单声明中。不解析字体 name table，也不合成一个字体样式对象 |
+| R8   | 样例框外壳写了两遍            | `template.ts` 的 `#show raw` 和 `oj-sample-lines` 各画一套框。HTML CSS 已与 Typst 不一致                                                                 | 共用框的外壳。行内容仍按代码行和样例行分别处理。HTML 退出 PDF 版式合同                                                      |
+| R9   | 共享提取器里有站点痕迹        | 通用提取器含洛谷样例标题函数，以及注释写成 Codeforces 专有、实际被多站使用的分隔和复制按钮规则。洛谷 JSON 经 Markdown 和 HTML 回到 AST                   | 只移走夹具证明只影响一个站点的清理。`$`/`$$` 扫描和通用复制按钮留在原处。不新增第二套块构造器，也不删除 HTML 中转           |
+| R10  | 预览和 PDF 标题本来就可以不同 | 探针不复制 JSON，`ProblemPageProbe` 也没有 `sourceData`。洛谷弹窗标题来自 DOM，PDF 可优先用 JSON 标题。各 Adapter 的 inspect 和 extract 已经共用标题函数 | 保持这个差异。不给字段加预览标记，也不把 JSON 复制进探针。显示名改为读来源定义；主语言子标签只留一个函数                    |
 
 显示名和语言归一化并入 R10 的收尾，不单独立项。`problemDisplayName` 改为读取 `sourceDefinitions.metadata.displayName`，不再保留一份手写枚举。PDF 页眉怎么排继续留在渲染器。`documentElement.lang` 的主语言子标签只用一个函数：按 `-` 分割取第一段，只认 `zh`、`en`、`ja`，其他非空值是 `other`，空值保持空。写作时 `common.ts` 的 `startsWith` 会把 `japanese` 认成日语；该实现已经换成 `normalizeProblemLanguage`，还要删的只是 P5 里的转发别名。Hydro 和 AtCoder 的 `lang` 查询参数继续精确匹配，不调用这个函数。
 
@@ -101,24 +103,24 @@ Adapter 一次 extract
   -> 成功则下载 PDF；编译失败则在本页展示诊断
 ```
 
-| 模块 | 负责 | 不负责 |
-| --- | --- | --- |
-| `src/problem/statement.ts` | 题面 AST | HTML、Typst、OJ、限额 |
-| `src/problem/budget.ts` | 两组已重复常量：HTML 捕获、图片字节和张数 | 交付体积、字体、MIME、超时、编译和策略函数 |
-| `src/problem/snapshot.ts` | 用 HTML 捕获上限构造探针和快照 | 图片嵌入和交付体积 |
-| `src/problem/extract/html-to-statement.ts` | 通用 HTML 到 AST，含数学分隔、KaTeX、MathJax、TeX script 和通用复制按钮 | 单站输出分支、采图、Typst |
-| `src/problem/extract/markdown-to-html.ts` | Markdown 到 HTML。生产上只有洛谷调用 | 洛谷字段、样例重组、直接构造语句块 |
-| `src/problem/extract/image-type.ts` | 唯一的图片类型判断，以及这四种类型的文件后缀 | 张数、字节上限、页面脚本、第二份后缀表 |
-| `src/problem/merge-images.ts` | 按请求时的 `sourceUrl` 贴回字节，并且只在这里去掉已经嵌入成功的 `image-unembedded` | 采图、第二次提取、类型判断 |
-| `src/problem/adapters/*` | 选根、站点清理、调用通用转换、标题和限制 | Typst、注入脚本、限额字面量 |
-| `src/application/problem-export/service.ts` | 标签页、任务、端口、调用贴图、文档 5MB 和 Markdown 2MB | 第二遍题面解析、Typst 语法、图片和 HTML 限额字面量 |
-| `src/problem/render/statement-to-typst.ts` | AST 到 Typst 正文 | 抓取、OJ、shadow |
-| `src/problem/render/template.ts` | 页眉、页脚和样例框外壳 | 站点块规则 |
-| `src/problem/render/style-tokens.ts` | 字号、边距和字体族名字 | 字体文件路径 |
-| `src/problem/render/font-manifest.ts` | 打包字体路径，以及每个文件人工声明的 Typst 族名 | 字号和页边距 |
-| `src/problem/render/browser-typst-compiler.ts` | 单个导出页里的 WASM 会话队列 | 文档模型、跨页面协调 |
-| `entrypoints/problem-export` | 下载、本页警告和 90 秒等待 | 提取、限额定义 |
-| `src/sources/definitions.ts` | 来源显示名等静态事实 | PDF 页眉排版 |
+| 模块                                           | 负责                                                                               | 不负责                                             |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `src/problem/statement.ts`                     | 题面 AST                                                                           | HTML、Typst、OJ、限额                              |
+| `src/problem/budget.ts`                        | 两组已重复常量：HTML 捕获、图片字节和张数                                          | 交付体积、字体、MIME、超时、编译和策略函数         |
+| `src/problem/snapshot.ts`                      | 用 HTML 捕获上限构造探针和快照                                                     | 图片嵌入和交付体积                                 |
+| `src/problem/extract/html-to-statement.ts`     | 通用 HTML 到 AST，含数学分隔、KaTeX、MathJax、TeX script 和通用复制按钮            | 单站输出分支、采图、Typst                          |
+| `src/problem/extract/markdown-to-html.ts`      | Markdown 到 HTML。生产上只有洛谷调用                                               | 洛谷字段、样例重组、直接构造语句块                 |
+| `src/problem/extract/image-type.ts`            | 唯一的图片类型判断，以及这四种类型的文件后缀                                       | 张数、字节上限、页面脚本、第二份后缀表             |
+| `src/problem/merge-images.ts`                  | 按请求时的 `sourceUrl` 贴回字节，并且只在这里去掉已经嵌入成功的 `image-unembedded` | 采图、第二次提取、类型判断                         |
+| `src/problem/adapters/*`                       | 选根、站点清理、调用通用转换、标题和限制                                           | Typst、注入脚本、限额字面量                        |
+| `src/application/problem-export/service.ts`    | 标签页、任务、端口、调用贴图、文档 5MB 和 Markdown 2MB                             | 第二遍题面解析、Typst 语法、图片和 HTML 限额字面量 |
+| `src/problem/render/statement-to-typst.ts`     | AST 到 Typst 正文                                                                  | 抓取、OJ、shadow                                   |
+| `src/problem/render/template.ts`               | 页眉、页脚和样例框外壳                                                             | 站点块规则                                         |
+| `src/problem/render/style-tokens.ts`           | 字号、边距和字体族名字                                                             | 字体文件路径                                       |
+| `src/problem/render/font-manifest.ts`          | 打包字体路径，以及每个文件人工声明的 Typst 族名                                    | 字号和页边距                                       |
+| `src/problem/render/browser-typst-compiler.ts` | 单个导出页里的 WASM 会话队列                                                       | 文档模型、跨页面协调                               |
+| `entrypoints/problem-export`                   | 下载、本页警告和 90 秒等待                                                         | 提取、限额定义                                     |
+| `src/sources/definitions.ts`                   | 来源显示名等静态事实                                                               | PDF 页眉排版                                       |
 
 约束：
 
@@ -132,15 +134,15 @@ Adapter 一次 extract
 
 每个单元独立完成迁移、删除旧维护点、验证和记录。没有两个调用方的共享模块不新增。
 
-| 阶段 | 内容 | 依赖 | 退出标准 |
-| --- | --- | --- | --- |
-| P0 | 记录基线、现有夹具和已知双路径差异 | 无 | 后续阶段能对照同一基线，不把已有差异当成新回归 |
-| P1 | R1、R2：穷尽 Typst 发射，文本不再重扫 | P0 | 新增块类型无法静默丢弃；公式夹具要么不变，要么有记录过的提取器修正。编译诊断留到 P4 |
-| P2 | R4：合并重复限额，图片类型只判断一次 | P0 | 生产数值不变；512KB 和 2MB 不再出现第二份；页面脚本不再嗅探图片类型 |
-| P3 | R5：取消第二次提取 | P2 | 采图失败仍交付第一次文档；`extract` 只有一次；贴图规则只有一份 |
-| P4 | R6、R7：页内编译互斥和字体清单 | P1 | shadow 操作不交错；超时调用不能抢先重置；资源加载失败、`pdf()` 报错和调用方超时可区分 |
-| P5 | R9、R10：只移动夹具证明的单站清理；显示名和主语言子标签各留一处 | P1、P3 | 通用公式和复制按钮仍在通用提取器；洛谷仍走现有 HTML 中转；探针仍不读 JSON |
-| P6 | R8：只共用样例框外壳，移除 HTML 版式 | P1 | 样例行距不变；行号不进外壳；补两条 Typst 断言后删 HTML，不把 HTTP 白名单搬进 Typst |
+| 阶段 | 内容                                                            | 依赖   | 退出标准                                                                              |
+| ---- | --------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------- |
+| P0   | 记录基线、现有夹具和已知双路径差异                              | 无     | 后续阶段能对照同一基线，不把已有差异当成新回归                                        |
+| P1   | R1、R2：穷尽 Typst 发射，文本不再重扫                           | P0     | 新增块类型无法静默丢弃；公式夹具要么不变，要么有记录过的提取器修正。编译诊断留到 P4   |
+| P2   | R4：合并重复限额，图片类型只判断一次                            | P0     | 生产数值不变；512KB 和 2MB 不再出现第二份；页面脚本不再嗅探图片类型                   |
+| P3   | R5：取消第二次提取                                              | P2     | 采图失败仍交付第一次文档；`extract` 只有一次；贴图规则只有一份                        |
+| P4   | R6、R7：页内编译互斥和字体清单                                  | P1     | shadow 操作不交错；超时调用不能抢先重置；资源加载失败、`pdf()` 报错和调用方超时可区分 |
+| P5   | R9、R10：只移动夹具证明的单站清理；显示名和主语言子标签各留一处 | P1、P3 | 通用公式和复制按钮仍在通用提取器；洛谷仍走现有 HTML 中转；探针仍不读 JSON             |
+| P6   | R8：只共用样例框外壳，移除 HTML 版式                            | P1     | 样例行距不变；行号不进外壳；补两条 Typst 断言后删 HTML，不把 HTTP 白名单搬进 Typst    |
 
 P2 可以和 P1 并行。P5 不提前做。P5 不重写洛谷主解析器。
 
@@ -252,7 +254,7 @@ P2 可以和 P1 并行。P5 不提前做。P5 不重写洛谷主解析器。
 - 先补 Typst 断言，再删 HTML。现有 Typst 测试已经覆盖正文转义，以及未嵌入图片走 `#link` 而不是 `#image`。只补两条：未嵌入图片的链接文字包含“查看原图”；链接 URL 里的引号和 `#` 留在 `#link("...")` 里面。然后删除三则 HTML 测试：打印页相似、HTML 公式 class、打印回退图片。不要把 `safeResourceUrl` 的 http/data 白名单搬进 Typst。PDF 链接不是浏览器跳转，新白名单会是第二套策略。
 - 删除 `HtmlPrintRenderer`、`htmlPrintCss`、`blocksToHtml` 和 `createProblemRenderer`。后者没有生产调用方，不要留一个只负责抛错的工厂。导出页继续直接构造 `TypstProblemRenderer`。`style-tokens.ts` 里把 HTML 打印写成后备的注释改成只描述 Typst。
 
-不把 HTML 重写成另一套 visitor。以后需要预览时展示 Typst 产物或明确诊断，不恢复第二套版式。
+不把 HTML 重写成另一套 visitor。以后需要预览时展示 Typst 产物或明确诊断，不恢复第二套版式。编辑预览的具体页面和交互见 [题面导出交互与编辑预览实现计划](problem-pdf-edit-preview.md)。
 
 ## 6. 验证
 

@@ -2,6 +2,7 @@ import {
   PROBLEM_EXPORT_SCHEMA_VERSION,
   isProblemExportResponse,
   type ProblemExportCommand,
+  type ProblemExportIntent,
   type ProblemExportMessage,
   type ProblemExportResponse,
 } from "./messages";
@@ -70,6 +71,16 @@ async function send(
       { cause },
     );
   }
+  if (
+    raw &&
+    typeof raw === "object" &&
+    "schemaVersion" in raw &&
+    raw.schemaVersion !== PROBLEM_EXPORT_SCHEMA_VERSION
+  )
+    throw new ProblemExportClientError(
+      "invalid_response",
+      "扩展已更新，请重新打开弹窗后重试。",
+    );
   if (!isProblemExportResponse(raw))
     throw new ProblemExportClientError(
       "invalid_response",
@@ -95,7 +106,10 @@ export async function inspectActiveProblemPage() {
   return { tab, preview: response.preview };
 }
 
-export async function startProblemExport(expectedTab?: ActiveTabContext) {
+export async function startProblemExport(
+  expectedTab?: ActiveTabContext,
+  intent: ProblemExportIntent = "download",
+) {
   const tab = await activeTabContext();
   if (
     expectedTab &&
@@ -110,6 +124,7 @@ export async function startProblemExport(expectedTab?: ActiveTabContext) {
     type: "START_PROBLEM_EXPORT",
     tabId: tab.tabId,
     expectedUrl: tab.url,
+    intent,
   });
   if (response.type !== "EXPORT_STARTED")
     throw new ProblemExportClientError(

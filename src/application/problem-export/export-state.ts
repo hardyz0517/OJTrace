@@ -1,9 +1,19 @@
+import {
+  isStoredCnoiRules,
+  type StoredCnoiRules,
+} from "../../domain/cnoi-rules";
+import type { SourceId } from "../../domain/types";
+import type { ProblemWarning } from "../../problem/domain";
+
+export interface RulesSnapshot {
+  rules: StoredCnoiRules;
+  problems: Partial<Record<SourceId, string>>;
+}
 const JOB_KEY_PREFIX = "ojtrace:problem-export:";
 // Keep the hand-off token alive long enough for a newly created extension tab
 // to wake the service worker and retry after a transient port disconnect.
 // The value is still short-lived and is removed after the document is sent.
-export const PROBLEM_EXPORT_JOB_TTL_MS = 5 * 60 * 1_000;
-const claimedTokens = new Set<string>();
+const PROBLEM_EXPORT_JOB_TTL_MS = 5 * 60 * 1_000;
 
 interface JobStorageArea {
   get(key: string | null): Promise<Record<string, unknown>>;
@@ -59,6 +69,8 @@ export interface ProblemExportJob {
   expectedUrl: string;
   createdAt: number;
   expiresAt: number;
+  rulesSnapshot?: RulesSnapshot;
+  warnings?: readonly ProblemWarning[];
 }
 
 function keyFor(token: string): string {
@@ -69,6 +81,10 @@ export function isProblemExportJob(value: unknown): value is ProblemExportJob {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<ProblemExportJob>;
   return (
+    (item.rulesSnapshot === undefined ||
+      (isStoredCnoiRules(item.rulesSnapshot.rules) &&
+        item.rulesSnapshot.problems &&
+        typeof item.rulesSnapshot.problems === "object")) &&
     typeof item.token === "string" &&
     item.token.length >= 12 &&
     typeof item.tabId === "number" &&
@@ -93,6 +109,7 @@ export async function createProblemExportJob(input: {
   expectedUrl: string;
   now?: number;
   ttlMs?: number;
+  rulesSnapshot?: RulesSnapshot;
 }): Promise<ProblemExportJob> {
   if (!Number.isInteger(input.tabId) || input.tabId < 0)
     throw new Error("Invalid export tab");
@@ -109,6 +126,9 @@ export async function createProblemExportJob(input: {
     expectedUrl,
     createdAt,
     expiresAt: createdAt + ttlMs,
+    ...(input.rulesSnapshot
+      ? { rulesSnapshot: structuredClone(input.rulesSnapshot) }
+      : {}),
   };
   await setJob(keyFor(job.token), job);
   return job;
@@ -147,24 +167,8 @@ export async function deleteProblemExportJob(token: string): Promise<void> {
   await removeJob(keyFor(token));
 }
 
-export async function consumeProblemExportJob(
-  token: string,
-  now = Date.now(),
-): Promise<ProblemExportJob | undefined> {
-  if (claimedTokens.has(token)) return undefined;
-  claimedTokens.add(token);
-  try {
-    const job = await readProblemExportJob(token, now);
-    if (!job) return undefined;
-    await deleteProblemExportJob(token);
-    return job;
-  } finally {
-    claimedTokens.delete(token);
-  }
-}
-
 /** Remove malformed or expired short-lived jobs left by a closed export tab. */
-export async function cleanupExpiredProblemExportJobs(
+async function cleanupExpiredProblemExportJobs(
   now = Date.now(),
 ): Promise<void> {
   await Promise.all(

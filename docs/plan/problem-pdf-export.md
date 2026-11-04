@@ -1,8 +1,14 @@
 # 题目页一键导出 NOI 风格 PDF 实现计划
 
+> 2026-10-16：题面链已升级为 Adapter → SourceProblem → CNOI Transformer → CnoiProblem → 共用 Markdown Parser → Renderer；复制始终取 Source，编辑初始化取 CNOI，编辑后不再转换。当前职责与验收见[维护说明](../development/problem-markdown-pipeline.md)和[执行报告](../qa/problem-markdown-pipeline-upgrade.md)。下文与此冲突的数据流属于历史实现。Chrome/Edge 原生矩阵仍待实机。
+
+> 2026-10-15 洛谷全题库修复：题目识别改为校验洛谷域名与完整 `/problem/{id}` 路径，保留旧版 `problem/show?pid=`，不再按 `P/B/U/T` 前缀设白名单。`AT_abc175_f`、`CF1A`、`SP1`、`UVA100` 的公开页面已脱敏为夹具，覆盖识别、序列化采集、样例、元信息、编辑往返与真实 Typst PDF 编译。外站题整份选择页面提供的译文，空章节保留为空，禁止跨语言补齐；仅在没有译文对象时整份使用原文。完整题号大小写及下划线保持不变。
+
 > 状态：功能实现和自动化验证已完成；Chrome/Edge 真实页面矩阵待验收。
 >
 > 本文既保留原始架构方案，也记录当前实现、验证结果和已知限制。后续可靠性与复用升级见 [题面 PDF 可靠性与复用升级计划](problem-pdf-reliability-upgrade.md)。
+>
+> popup 的两种导出路径和编辑预览页见 [题面导出交互与编辑预览实现计划](problem-pdf-edit-preview.md)。那份计划取代下文单一「导出题面 PDF」按钮的交互，但尚未实现。
 
 ## 0. 当前实现状态
 
@@ -103,7 +109,7 @@ OJTrace 新增独立的“题目页工具”：当用户打开支持的 OJ 题�
   -> 读取当前活动标签页
   -> 判断是否为支持的题目页
 
-支持：显示 OJ、题号、题目名称和“导出题面 PDF”主按钮
+支持：显示 OJ、题号、题目名称，以及“直接导出 PDF / 编辑预览后导出”的 Split Button。单一「导出题面 PDF」按钮是已落地行为，下一轮交互以 [编辑预览计划](problem-pdf-edit-preview.md) 为准
 不支持：显示“当前页面暂不支持题面导出”
 
 popup 底部：打开时间线、设置
@@ -380,13 +386,9 @@ interface ProblemPageSnapshot {
 interface ProblemAdapter {
   readonly oj: SourceId;
 
-  inspect(
-    probe: ProblemPageProbe,
-  ): Promise<ProblemPreview | undefined>;
+  inspect(probe: ProblemPageProbe): Promise<ProblemPreview | undefined>;
 
-  extract(
-    snapshot: ProblemPageSnapshot,
-  ): Promise<ProblemExtractionResult>;
+  extract(snapshot: ProblemPageSnapshot): Promise<ProblemExtractionResult>;
 }
 ```
 
@@ -465,7 +467,7 @@ type StatementBlock =
 3. 其他 hydration 数据；
 4. 结构确认后的 `main/article` 回退。
 
-结构化题面 Markdown 先由 MIT 许可的 `marked` 转为中间 HTML，再进入共享的惰性 HTML AST 提取器。当前线上 `#lentille-context` 同时存在 `content` 和 `contenu` 字段；适配器兼容两种字段并将完整许可证随扩展打包。这样可以保留页面 DOM 中只剩 KaTeX 视觉节点时已经不可逆丢失的公式源码。JSON 题目 ID 必须与 URL 中的题号一致；数据字段缺失或不匹配时回退到 DOM，不根据页面标题猜测题目。
+结构化题面 Markdown 先由 MIT 许可的 `marked` 转为中间 HTML，再进入共享的惰性 HTML AST 提取器。`#lentille-context` 可同时存在原文 `content` 和译文 `contenu`；提取前整份选择一个版本，译文空字符串、null、缺失字段或空白内容均不从原文或旧版扁平字段补齐。两个采集路径并存时优先选择含译文的题目记录，避免较长原文覆盖译文。共享样例和限制仍从同一题目记录读取。这样可以保留页面 DOM 中只剩 KaTeX 视觉节点时已经不可逆丢失的公式源码。JSON 题目 ID 必须与 URL 中的题号一致；没有可用结构化正文或题号不匹配时回退到 DOM，不根据页面标题猜测题目。
 
 处理：
 

@@ -1,3 +1,5 @@
+import "./codemirror-geometry";
+import { cnoiFixture } from "../problem/source-test-helpers";
 // @vitest-environment jsdom
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -5,16 +7,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rendererMocks = vi.hoisted(() => ({
   render: vi.fn(),
-  renderHtml: vi.fn(),
+  preview: vi.fn(),
 }));
 
 vi.mock("../../src/problem/render/typst-renderer", () => ({
-  TypstProblemRenderer: class {
-    render = rendererMocks.render;
+  isTypstSvg(value: unknown): value is string {
+    return (
+      typeof value === "string" &&
+      /^\s*(?:<\?xml\b[^>]*>\s*)?<svg\b/i.test(value)
+    );
   },
 }));
-vi.mock("../../src/problem/render/browser-typst-compiler", () => ({
-  BrowserTypstCompiler: class {},
+vi.mock("../../src/problem/render/worker-problem-renderer", () => ({
+  WorkerProblemRenderer: class {
+    pdf = rendererMocks.render;
+    preview = rendererMocks.preview;
+    dispose = vi.fn();
+  },
 }));
 
 import { ProblemExport } from "../../entrypoints/problem-export/ProblemExport";
@@ -55,13 +64,16 @@ const problem = {
   originalUrl: "https://www.luogu.com.cn/problem/P1001",
   timeLimit: { display: "1 s", milliseconds: 1000 },
   memoryLimit: { display: "128 MB", bytes: 128 * 1024 * 1024 },
-  blocks: [
-    {
-      type: "paragraph" as const,
-      children: [{ type: "text" as const, value: "Compute a sum." }],
-    },
-  ],
-  markdown: "Compute a sum.",
+  ast: {
+    type: "root" as const,
+    children: [
+      {
+        type: "paragraph" as const,
+        children: [{ type: "text" as const, value: "Compute a sum." }],
+      },
+    ],
+  },
+
   assets: [],
   warnings: [
     { code: "image-unembedded", message: "图片无法嵌入 PDF。" },
@@ -71,7 +83,7 @@ const problem = {
 
 const token = "0123456789abcdef0123456789abcdef";
 const eventBase = {
-  schemaVersion: 1 as const,
+  schemaVersion: 2 as const,
   requestId: "request-id",
   token,
 };
@@ -82,13 +94,15 @@ let port: ReturnType<typeof makePort>;
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.spyOn(window, "URL", "get").mockReturnValue(URL);
+  const realURL = window.URL;
+  vi.spyOn(window, "URL", "get").mockReturnValue(realURL);
   window.history.replaceState({}, "", `/?token=${token}`);
   port = makePort();
   vi.stubGlobal("browser", {
     runtime: { connect: vi.fn(() => port) },
   });
   rendererMocks.render.mockRejectedValue(new Error("WASM unavailable"));
+  rendererMocks.preview.mockRejectedValue(new Error("preview unused"));
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -113,7 +127,7 @@ function emitDocument(): void {
   port.emit({
     ...eventBase,
     type: "PROBLEM_EXPORT_DOCUMENT",
-    document: problem,
+    problem: cnoiFixture(problem),
   });
 }
 
@@ -133,7 +147,7 @@ describe("problem export page", () => {
         ...eventBase,
         token: "different-token-0123456789",
         type: "PROBLEM_EXPORT_DOCUMENT",
-        document: problem,
+        problem: cnoiFixture(problem),
       });
     });
     expect(container.textContent).toContain("正在读取题面");
@@ -147,7 +161,10 @@ describe("problem export page", () => {
     expect(container.textContent).toContain("题面提示");
     expect(container.textContent).toContain("图片无法嵌入 PDF");
     expect(container.textContent).toContain("部分数学公式无法识别");
-    expect(container.textContent).toContain("PDF 生成失败");
+    expect(
+      container.querySelector('[aria-label="题面 Markdown"]'),
+    ).not.toBeNull();
+    expect(rendererMocks.render).not.toHaveBeenCalled();
     expect(container.querySelector("iframe")).toBeNull();
     expect(container.textContent).not.toContain("打印预览");
   });
@@ -159,20 +176,77 @@ describe("problem export page", () => {
     expect(container.textContent).toContain("回到题目页");
   });
 
-  it("ignores a renderer completion after the page unmounts", async () => {
-    let resolveRender!: (bytes: Uint8Array) => void;
-    rendererMocks.render.mockReturnValue(
-      new Promise<Uint8Array>((resolve) => {
-        resolveRender = resolve;
-      }),
-    );
+  it("ignores document delivery after the editor page unmounts", async () => {
     await renderPage();
-    await act(async () => emitDocument());
-    await act(async () => Promise.resolve());
     await act(async () => root.unmount());
-    resolveRender(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]));
+    emitDocument();
     await act(async () => Promise.resolve());
+    expect(rendererMocks.render).not.toHaveBeenCalled();
+    expect(rendererMocks.preview).not.toHaveBeenCalled();
     expect(container.textContent).not.toContain("PDF 已生成并下载");
+  });
+
+  it("keeps the editor after delivery and does not download or time out", async () => {
+    vi.useFakeTimers();
+    const previousCreate = URL.createObjectURL;
+    const previousRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:preview");
+    URL.revokeObjectURL = vi.fn();
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" class="typst-doc" viewBox="0 0 596 842"><text x="30" y="30">题面预览</text></svg>';
+    let resolveRender: (value: string) => void = () => undefined;
+    rendererMocks.preview.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveRender = resolve;
+        }),
+    );
+    // The page always opens the editor, including old URLs with no intent.
+    window.history.replaceState({}, "", `/?token=${token}`);
+    try {
+      await renderPage();
+      expect(port.postMessage).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        emitDocument();
+        await Promise.resolve();
+      });
+      expect(port.disconnect).toHaveBeenCalledTimes(1);
+      expect(
+        container.querySelector('[aria-label="题面 Markdown"]'),
+      ).not.toBeNull();
+      expect(container.textContent).toContain("导出 PDF");
+      await act(async () => {
+        resolveRender(svg);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(container.querySelector("iframe")).toBeNull();
+      expect(
+        container
+          .querySelector(".typst-preview-host")
+          ?.shadowRoot?.querySelector("svg")
+          ?.getAttribute("style") ?? "",
+      ).toContain("width: 100%");
+      expect(rendererMocks.render).not.toHaveBeenCalled();
+      expect(click).not.toHaveBeenCalled();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(90_000);
+      });
+      expect(container.textContent).toContain("导出 PDF");
+      expect(container.textContent).not.toContain("读取题面超时");
+      expect(container.textContent).not.toContain("PDF 已生成并下载");
+      expect(click).not.toHaveBeenCalled();
+      expect(port.postMessage).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previousCreate) URL.createObjectURL = previousCreate;
+      else delete (URL as { createObjectURL?: unknown }).createObjectURL;
+      if (previousRevoke) URL.revokeObjectURL = previousRevoke;
+      else delete (URL as { revokeObjectURL?: unknown }).revokeObjectURL;
+      vi.useRealTimers();
+    }
   });
 
   it("fails explicitly when no document arrives before the bounded timeout", async () => {
@@ -185,5 +259,18 @@ describe("problem export page", () => {
     expect(container.textContent).toContain("读取题面超时");
     expect(port.disconnect).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
+  });
+  it("fails promptly for an old background protocol", async () => {
+    await renderPage();
+    await act(async () =>
+      port.emit({
+        ...eventBase,
+        schemaVersion: 1,
+        type: "PROBLEM_EXPORT_DOCUMENT",
+        document: problem,
+      }),
+    );
+    expect(container.textContent).toContain("扩展已更新");
+    expect(port.disconnect).toHaveBeenCalledOnce();
   });
 });

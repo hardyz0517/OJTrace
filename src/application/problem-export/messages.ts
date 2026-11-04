@@ -1,8 +1,4 @@
-import type {
-  ProblemDocument,
-  ProblemPageProbe,
-  ProblemPreview,
-} from "../../problem/domain";
+import type { CnoiProblem, ProblemPreview } from "../../problem/domain";
 import type { ProblemExportJob } from "./export-state";
 
 export type ProblemExportFallbackJob = Pick<
@@ -10,8 +6,10 @@ export type ProblemExportFallbackJob = Pick<
   "token" | "tabId" | "expectedUrl" | "createdAt" | "expiresAt"
 >;
 
+export type ProblemExportIntent = "download" | "edit";
+
 /** Messages dedicated to the popup and the problem-export page. */
-export const PROBLEM_EXPORT_SCHEMA_VERSION = 1 as const;
+export const PROBLEM_EXPORT_SCHEMA_VERSION = 2 as const;
 
 export type ProblemExportMessage =
   | {
@@ -20,7 +18,6 @@ export type ProblemExportMessage =
       requestId: string;
       tabId: number;
       expectedUrl?: string;
-      probe?: ProblemPageProbe;
     }
   | {
       schemaVersion: typeof PROBLEM_EXPORT_SCHEMA_VERSION;
@@ -28,6 +25,7 @@ export type ProblemExportMessage =
       requestId: string;
       tabId: number;
       expectedUrl?: string;
+      intent?: ProblemExportIntent;
     }
   | {
       schemaVersion: typeof PROBLEM_EXPORT_SCHEMA_VERSION;
@@ -69,7 +67,7 @@ export type ProblemExportResponse =
       requestId: string;
       ok: true;
       type: "EXPORT_STARTED";
-      job: Pick<ProblemExportJob, "token" | "expiresAt">;
+      job: Pick<ProblemExportJob, "token" | "expiresAt" | "warnings">;
     }
   | {
       schemaVersion: typeof PROBLEM_EXPORT_SCHEMA_VERSION;
@@ -91,27 +89,13 @@ export type ProblemExportResponse =
       error: { code: string; message: string };
     };
 
-export type ProblemExportPortRequest =
-  | {
-      schemaVersion: typeof PROBLEM_EXPORT_SCHEMA_VERSION;
-      type: "PROBLEM_EXPORT_CONNECT";
-      requestId: string;
-      token: string;
-      job?: ProblemExportFallbackJob;
-    }
-  | {
-      schemaVersion: typeof PROBLEM_EXPORT_SCHEMA_VERSION;
-      type: "PROBLEM_EXPORT_START";
-      requestId?: string;
-      token: string;
-      job?: ProblemExportFallbackJob;
-    }
-  | {
-      schemaVersion: typeof PROBLEM_EXPORT_SCHEMA_VERSION;
-      type: "PROBLEM_EXPORT_CANCEL";
-      requestId: string;
-      token: string;
-    };
+export interface ProblemExportPortRequest {
+  schemaVersion: typeof PROBLEM_EXPORT_SCHEMA_VERSION;
+  type: "PROBLEM_EXPORT_CONNECT";
+  requestId: string;
+  token: string;
+  job?: ProblemExportFallbackJob;
+}
 
 export type ProblemExportPortEvent =
   | {
@@ -119,7 +103,7 @@ export type ProblemExportPortEvent =
       type: "PROBLEM_EXPORT_DOCUMENT";
       requestId: string;
       token: string;
-      document: ProblemDocument;
+      problem: CnoiProblem;
     }
   | {
       schemaVersion: typeof PROBLEM_EXPORT_SCHEMA_VERSION;
@@ -161,6 +145,11 @@ export function isProblemExportMessage(
     return false;
   if (item.type === "OPEN_TIMELINE" || item.type === "OPEN_SETTINGS")
     return true;
+  if (item.type === "START_PROBLEM_EXPORT") {
+    const intent = (item as { intent?: unknown }).intent;
+    if (intent !== undefined && intent !== "download" && intent !== "edit")
+      return false;
+  }
   return (
     typeof item.tabId === "number" &&
     Number.isInteger(item.tabId) &&
@@ -172,17 +161,10 @@ export function isProblemExportMessage(
 export function isProblemExportPortRequest(
   value: unknown,
 ): value is ProblemExportPortRequest {
-  if (!value || typeof value !== "object") return false;
-  const item = value as Partial<ProblemExportPortRequest> & {
-    schemaVersion?: unknown;
-    job?: unknown;
-  };
+  if (!isEnvelope(value)) return false;
+  const item = value as Partial<ProblemExportPortRequest>;
   return (
-    (item.schemaVersion === undefined ||
-      item.schemaVersion === PROBLEM_EXPORT_SCHEMA_VERSION) &&
-    (item.type === "PROBLEM_EXPORT_CONNECT" ||
-      item.type === "PROBLEM_EXPORT_START" ||
-      item.type === "PROBLEM_EXPORT_CANCEL") &&
+    item.type === "PROBLEM_EXPORT_CONNECT" &&
     typeof item.token === "string" &&
     item.token.length >= 12 &&
     item.token.length <= 128 &&
@@ -272,6 +254,18 @@ export function isProblemExportResponse(
     job &&
     typeof job === "object" &&
     typeof (job as { token?: unknown }).token === "string" &&
-    typeof (job as { expiresAt?: unknown }).expiresAt === "number",
+    typeof (job as { expiresAt?: unknown }).expiresAt === "number" &&
+    (!("warnings" in job) ||
+      (Array.isArray(job.warnings) &&
+        job.warnings.every((w: unknown) =>
+          Boolean(
+            w &&
+            typeof w === "object" &&
+            "message" in w &&
+            typeof w.message === "string" &&
+            "code" in w &&
+            typeof w.code === "string",
+          ),
+        ))),
   );
 }

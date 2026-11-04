@@ -1,9 +1,13 @@
+import { validateRules } from "../../problem/cnoi/rules/config";
+import type { RulesSnapshot } from "./export-state";
 import type {
   ProblemPageProbe,
   ProblemPageSnapshot,
   ProblemPreview,
   ProblemExtractionResult,
   ProblemCaptureHints,
+  RenderDocument,
+  CnoiProblem,
 } from "../../problem/domain";
 import {
   createProblemExportJob,
@@ -13,7 +17,10 @@ import {
   type ProblemExportJob,
 } from "./export-state";
 import { openProblemExportPage } from "../navigation/extension-pages";
+import { DirectProblemDownload } from "./direct-download";
 import {
+  PROBLEM_MARKDOWN_LIMIT,
+  PROBLEM_DOCUMENT_LIMIT,
   IMAGE_COUNT_LIMIT,
   IMAGE_SINGLE_BYTE_LIMIT,
   IMAGE_TOTAL_BYTE_LIMIT,
@@ -23,26 +30,26 @@ import {
 import { embeddableImageType } from "../../problem/extract/image-type";
 import { normalizeProblemLanguage } from "../../problem/language";
 import { mergeCapturedImages } from "../../problem/merge-images";
-import { formatProblemMarkdown } from "../../problem/format-problem-markdown";
+import { convertSourceToCnoi } from "../../problem/cnoi/convert";
+import { parseProblemMarkdown } from "../../problem/problem-markdown";
 import {
   problemExportEnvelope,
   type ProblemExportFallbackJob,
+  type ProblemExportIntent,
   type ProblemExportPortEvent,
 } from "./messages";
-
-// Document and Markdown limits are export delivery checks. HTML and image
-// ceilings live in src/problem/budget.ts because capture and rendering share them.
-export const PROBLEM_DOCUMENT_LIMIT = 5_000_000;
-export const PROBLEM_MARKDOWN_LIMIT = 2_000_000;
 
 export interface ProblemAdapterRegistryLike {
   captureHints?(url: string): ProblemCaptureHints | undefined;
   inspect(probe: ProblemPageProbe): Promise<ProblemPreview | undefined | null>;
-  extract(snapshot: ProblemPageSnapshot): Promise<ProblemExtractionResult>;
+  extractSource(
+    snapshot: ProblemPageSnapshot,
+  ): Promise<ProblemExtractionResult>;
 }
 
 export interface ProblemExportServiceOptions {
   registry: ProblemAdapterRegistryLike;
+  loadRules?: () => Promise<RulesSnapshot>;
   now?: () => number;
   captureTimeoutMs?: number;
   /**
@@ -60,13 +67,12 @@ export type ProblemExportServiceErrorCode =
   | "tab_unavailable"
   | "tab_changed"
   | "page_access_denied"
-  | "statement_not_found"
-  | "job_expired"
   | "job_not_found"
   | "document_too_large"
   | "capture_failed"
   | "extract_failed"
   | "navigation_failed"
+  | "download_failed"
   | "cancelled"
   | "job_in_progress";
 
@@ -138,6 +144,36 @@ async function capturePage(args: CaptureArgs): Promise<CapturedPage> {
   const sourceData: Record<string, unknown> = {};
   let sourceTooLarge = false;
   if (args.mode === "snapshot") {
+    const copyJsonSource = (
+      input: unknown,
+      hint: {
+        key: string;
+        path: readonly string[];
+        fields: readonly string[];
+        identity?: { field: string; value: string };
+      },
+    ): void => {
+      let value = input;
+      for (const key of hint.path) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return;
+        value = (value as Record<string, unknown>)[key];
+      }
+      if (!value || typeof value !== "object" || Array.isArray(value)) return;
+      const fields = value as Record<string, unknown>;
+      if (hint.identity) {
+        const id = fields[hint.identity.field];
+        if (
+          typeof id !== "string" ||
+          id.toUpperCase() !== hint.identity.value.toUpperCase()
+        )
+          return;
+      }
+      sourceData[hint.key] = Object.fromEntries(
+        hint.fields
+          .filter((key) => Object.hasOwn(fields, key))
+          .map((key) => [key, fields[key]]),
+      );
+    };
     for (const hint of args.hints?.jsonScripts ?? []) {
       const script = document.querySelector(hint.selector);
       const scriptType = script?.getAttribute("type")?.toLowerCase() ?? "";
@@ -155,24 +191,53 @@ async function capturePage(args: CaptureArgs): Promise<CapturedPage> {
         continue;
       }
       try {
-        let value: unknown = JSON.parse(text);
-        for (const key of hint.path) {
-          if (!value || typeof value !== "object" || Array.isArray(value)) {
-            value = undefined;
-            break;
-          }
-          value = (value as Record<string, unknown>)[key];
-        }
-        if (!value || typeof value !== "object" || Array.isArray(value))
-          continue;
-        const fields = value as Record<string, unknown>;
-        sourceData[hint.key] = Object.fromEntries(
-          hint.fields
-            .filter((key) => Object.hasOwn(fields, key))
-            .map((key) => [key, fields[key]]),
-        );
+        copyJsonSource(JSON.parse(text), hint);
       } catch {
         // A malformed source leaves DOM extraction available.
+      }
+    }
+    const request = args.hints?.jsonRequest;
+    if (request && !Object.keys(sourceData).length) {
+      // SPA navigation can leave the initial script pointing at a previous
+      // problem. Read the site's own current response, never rendered glyphs.
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5_000);
+      try {
+        const response = await fetch(currentUrl, {
+          headers: request.headers,
+          credentials: "same-origin",
+          mode: "same-origin",
+          redirect: "error",
+          signal: controller.signal,
+        });
+        if (response.ok && response.body) {
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let bytes = 0;
+          let text = "";
+          try {
+            while (true) {
+              const chunk = await reader.read();
+              if (chunk.done) break;
+              bytes += chunk.value.byteLength;
+              if (bytes > args.htmlLimit) {
+                sourceTooLarge = true;
+                break;
+              }
+              text += decoder.decode(chunk.value, { stream: true });
+            }
+            if (!sourceTooLarge) {
+              text += decoder.decode();
+              copyJsonSource(JSON.parse(text), request);
+            }
+          } finally {
+            await reader.cancel();
+          }
+        }
+      } catch {
+        // DOM sources with actual TeX remain usable if the native request fails.
+      } finally {
+        clearTimeout(timeout);
       }
     }
   }
@@ -463,6 +528,7 @@ function stringSize(value: unknown): number {
 
 export class ProblemExportService {
   private readonly registry: ProblemAdapterRegistryLike;
+  private readonly loadRules?: () => Promise<RulesSnapshot>;
   private readonly now: () => number;
   private readonly captureTimeoutMs: number;
   private readonly loadImage: (
@@ -470,9 +536,11 @@ export class ProblemExportService {
     signal: AbortSignal,
   ) => Promise<Response>;
   private readonly activeExports = new Map<string, AbortController>();
+  private readonly directDownload = new DirectProblemDownload();
 
   constructor(options: ProblemExportServiceOptions) {
     this.registry = options.registry;
+    this.loadRules = options.loadRules;
     this.now = options.now ?? Date.now;
     this.captureTimeoutMs = Math.max(
       1,
@@ -524,7 +592,7 @@ export class ProblemExportService {
   ): Promise<string> {
     const page = await this.capture(tabId, expectedUrl, "snapshot");
     const extraction = await this.withCancellation(
-      this.registry.extract({
+      this.registry.extractSource({
         url: page.url,
         title: page.title,
         html: page.html,
@@ -545,12 +613,12 @@ export class ProblemExportService {
           : "extract_failed",
         extraction.message ?? "当前页面没有可复制的题面。",
       );
-    if (!extraction.document.markdown.trim())
+    if (!extraction.source.sourceMarkdown.trim())
       throw new ProblemExportServiceError(
         "extract_failed",
         "当前页面没有可复制的题面。",
       );
-    const markdown = formatProblemMarkdown(extraction.document);
+    const markdown = extraction.source.sourceMarkdown;
     if (stringSize(markdown) > PROBLEM_MARKDOWN_LIMIT)
       throw new ProblemExportServiceError(
         "document_too_large",
@@ -559,7 +627,11 @@ export class ProblemExportService {
     return markdown;
   }
 
-  async start(tabId: number, expectedUrl?: string): Promise<ProblemExportJob> {
+  async start(
+    tabId: number,
+    expectedUrl?: string,
+    intent: ProblemExportIntent = "download",
+  ): Promise<ProblemExportJob> {
     const page = await this.getTab(tabId);
     this.assertExpectedUrl(page.url, expectedUrl);
     let job: ProblemExportJob | undefined;
@@ -568,18 +640,54 @@ export class ProblemExportService {
         tabId,
         expectedUrl: page.url,
         now: this.now(),
+        rulesSnapshot: await this.loadRules?.(),
       });
-      await openProblemExportPage(job);
+      if (intent === "edit") {
+        await openProblemExportPage(job);
+      } else {
+        const downloadJob = job;
+        try {
+          await this.directDownload.run(downloadJob.token, (signal) =>
+            this.readExportDocument(downloadJob, signal),
+          );
+        } finally {
+          await this.cancel(downloadJob.token);
+          await deleteProblemExportJob(downloadJob.token).catch(() => {});
+        }
+      }
       return job;
     } catch (error) {
       if (job) await deleteProblemExportJob(job.token).catch(() => {});
       if (error instanceof ProblemExportServiceError) throw error;
       throw new ProblemExportServiceError(
-        "navigation_failed",
-        "无法打开题面导出页面，请重试。",
+        intent === "edit" ? "navigation_failed" : "download_failed",
+        intent === "edit"
+          ? "无法打开题面编辑页面，请重试。"
+          : error instanceof Error
+            ? error.message
+            : "PDF 导出失败，请重试。",
         { cause: error },
       );
     }
+  }
+
+  private async readExportDocument(
+    job: ProblemExportJob,
+    signal: AbortSignal,
+  ): Promise<RenderDocument> {
+    return this.prepareCnoiProblem(
+      job.token,
+      job,
+      () => {},
+      (problem) => {
+        job.warnings = problem.warnings;
+        const parsed = parseProblemMarkdown(problem.cnoiMarkdown, problem);
+        if (!parsed.ok)
+          throw new ProblemExportServiceError("extract_failed", parsed.message);
+        return { delivered: true, value: parsed.value };
+      },
+      signal,
+    );
   }
 
   async deliver(
@@ -587,24 +695,70 @@ export class ProblemExportService {
     token: string,
     fallbackJob?: ProblemExportFallbackJob,
   ): Promise<void> {
-    if (this.activeExports.has(token)) {
-      this.sendError(
-        port,
+    try {
+      await this.prepareCnoiProblem(
         token,
+        fallbackJob,
+        (phase) => {
+          this.send(port, {
+            ...problemExportEnvelope(requestId()),
+            type: "PROBLEM_EXPORT_PROGRESS",
+            token,
+            phase,
+          });
+        },
+        (problem) => ({
+          delivered: this.send(port, {
+            ...problemExportEnvelope(requestId()),
+            type: "PROBLEM_EXPORT_DOCUMENT",
+            token,
+            problem,
+          }),
+          value: undefined,
+        }),
+      );
+    } catch (error) {
+      if (
+        error instanceof ProblemExportServiceError &&
+        error.code === "cancelled"
+      )
+        return;
+      const failure =
+        error instanceof ProblemExportServiceError
+          ? error
+          : new ProblemExportServiceError(
+              "extract_failed",
+              "题面提取失败，请确认页面已加载完成。",
+              { cause: error },
+            );
+      this.sendError(port, token, failure.code, failure.message);
+    }
+  }
+
+  /** Capture, transform once, then hand off typed data to either consumer. */
+  private async prepareCnoiProblem<T>(
+    token: string,
+    fallbackJob: ProblemExportFallbackJob | undefined,
+    progress: (phase: "capturing" | "extracting" | "ready") => void,
+    consume: (problem: CnoiProblem) => { delivered: boolean; value: T },
+    signal?: AbortSignal,
+  ): Promise<T> {
+    if (this.activeExports.has(token))
+      throw new ProblemExportServiceError(
         "job_in_progress",
         "导出任务已在另一个页面中进行。",
       );
-      return;
-    }
     const controller = new AbortController();
     this.activeExports.set(token, controller);
-    const request = requestId();
     let timedOut = false;
     let extracted = false;
     let totalTimer: ReturnType<typeof setTimeout> | undefined;
     const imageController = new AbortController();
     const abortImages = () => imageController.abort();
     controller.signal.addEventListener("abort", abortImages);
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) controller.abort();
     try {
       let job = await readProblemExportJob(token, this.now());
       if (
@@ -620,26 +774,22 @@ export class ProblemExportService {
         job = fallbackJob;
       }
       this.throwIfCancelled(controller.signal);
-      if (!job) {
-        this.sendError(
-          port,
-          token,
+      if (!job)
+        throw new ProblemExportServiceError(
           "job_not_found",
           "导出任务已失效，请重新发起导出。",
         );
-        return;
-      }
+      if (this.loadRules && !job.rulesSnapshot)
+        throw new ProblemExportServiceError(
+          "job_not_found",
+          "导出任务的规则快照已失效，请重新发起导出。",
+        );
       totalTimer = setTimeout(() => {
         timedOut = true;
         if (extracted) imageController.abort();
         else controller.abort();
       }, this.captureTimeoutMs * 3);
-      this.send(port, {
-        ...problemExportEnvelope(request),
-        type: "PROBLEM_EXPORT_PROGRESS",
-        token,
-        phase: "capturing",
-      });
+      progress("capturing");
       const page = await this.capture(
         job.tabId,
         job.expectedUrl,
@@ -647,14 +797,9 @@ export class ProblemExportService {
         controller.signal,
       );
       this.throwIfCancelled(controller.signal);
-      this.send(port, {
-        ...problemExportEnvelope(request),
-        type: "PROBLEM_EXPORT_PROGRESS",
-        token,
-        phase: "extracting",
-      });
+      progress("extracting");
       const extraction = await this.withCancellation(
-        this.registry.extract({
+        this.registry.extractSource({
           url: page.url,
           title: page.title,
           html: page.html,
@@ -676,9 +821,9 @@ export class ProblemExportService {
             : "extract_failed",
           extraction.message ?? "当前页面没有可导出的题面。",
         );
-      let document = extraction.document;
+      let source = extraction.source;
       extracted = true;
-      if (document.assets.length > 0) {
+      if (source.assets.length > 0) {
         let capturedImages: {
           imageAssets: NonNullable<CapturedPage["imageAssets"]>;
           imageWarnings: NonNullable<CapturedPage["imageWarnings"]>;
@@ -687,7 +832,7 @@ export class ProblemExportService {
           capturedImages = await this.captureImages(
             job.tabId,
             job.expectedUrl,
-            document.assets,
+            source.assets,
             imageController.signal,
           );
         } catch (error) {
@@ -706,7 +851,7 @@ export class ProblemExportService {
             throw error;
           capturedImages = {
             imageAssets: [],
-            imageWarnings: document.assets.map((asset) => ({
+            imageWarnings: source.assets.map((asset) => ({
               code: "image-unembedded",
               message: `图片无法嵌入 PDF，已保留原图链接：${asset.sourceUrl}`,
             })),
@@ -714,61 +859,73 @@ export class ProblemExportService {
         }
         if (controller.signal.aborted) throw this.cancelledError();
         const merged = mergeCapturedImages(
-          document.assets,
-          document.warnings,
+          source.assets,
+          source.warnings,
           capturedImages.imageAssets,
           capturedImages.imageWarnings,
         );
-        document = {
-          ...document,
+        source = {
+          ...source,
           assets: merged.assets,
           warnings: merged.warnings,
         };
       }
-      if (stringSize(document) > PROBLEM_DOCUMENT_LIMIT)
+      const entry = job.rulesSnapshot?.rules.bySource[source.metadata.oj];
+      const ruleIssues = entry
+        ? validateRules(source.metadata.oj, entry.overrides)
+        : [];
+      const problemMessage = job.rulesSnapshot?.problems[source.metadata.oj];
+      if (ruleIssues.length || problemMessage)
+        source = {
+          ...source,
+          warnings: [
+            ...source.warnings,
+            {
+              code: "cnoi-config-fallback",
+              message:
+                problemMessage ??
+                `规则配置不再有效，已使用默认规则：${ruleIssues.map((i) => i.message).join("；")}`,
+            },
+          ],
+        };
+      const transformed = convertSourceToCnoi(
+        source,
+        ruleIssues.length ? {} : entry?.overrides,
+      );
+      if (!transformed.ok)
+        throw new ProblemExportServiceError(
+          "extract_failed",
+          transformed.message,
+        );
+      const problem = transformed.value;
+      if (
+        stringSize(problem) > PROBLEM_DOCUMENT_LIMIT ||
+        stringSize(problem.cnoiMarkdown) > PROBLEM_MARKDOWN_LIMIT
+      )
         throw new ProblemExportServiceError(
           "document_too_large",
           "题面内容过大，无法在扩展内完成导出。",
         );
-      this.send(port, {
-        ...problemExportEnvelope(request),
-        type: "PROBLEM_EXPORT_PROGRESS",
-        token,
-        phase: "ready",
-      });
-      const delivered = this.send(port, {
-        ...problemExportEnvelope(request),
-        type: "PROBLEM_EXPORT_DOCUMENT",
-        token,
-        document,
-      });
-      // Delete only after the complete document has been handed to the
-      // export page. If the port closes before this point, the short-lived
-      // job remains available for one automatic/manual retry.
-      if (delivered) await deleteProblemExportJob(token);
+      progress("ready");
+      this.throwIfCancelled(controller.signal);
+      const result = consume(problem);
+      // A failed handoff leaves the short-lived job available for retry.
+      if (result.delivered) await deleteProblemExportJob(token);
+      return result.value;
     } catch (error) {
       if (controller.signal.aborted) {
         if (timedOut)
-          this.sendError(
-            port,
-            token,
+          throw new ProblemExportServiceError(
             "capture_failed",
             "题面导出处理超时，请重试。",
           );
-        return;
+        throw this.cancelledError();
       }
       await deleteProblemExportJob(token).catch(() => {});
-      const serviceError =
-        error instanceof ProblemExportServiceError
-          ? error
-          : new ProblemExportServiceError(
-              "extract_failed",
-              "题面提取失败，请确认页面已加载完成。",
-              { cause: error },
-            );
-      this.sendError(port, token, serviceError.code, serviceError.message);
+      throw error;
     } finally {
       controller.signal.removeEventListener("abort", abortImages);
+      signal?.removeEventListener("abort", abort);
       if (totalTimer !== undefined) clearTimeout(totalTimer);
       if (this.activeExports.get(token) === controller)
         this.activeExports.delete(token);

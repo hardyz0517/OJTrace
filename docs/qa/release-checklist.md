@@ -9,7 +9,7 @@
 - [x] `pnpm format:check`
 - [x] `pnpm build`
 - [x] `pnpm audit:architecture`：纯模块/UI 运行时依赖及正反 fixture
-- [x] 生产 manifest 与权限审计一致：允许 `storage/tabs/cookies/activeTab/scripting/clipboardWrite`，不含 `webRequest` 或 `<all_urls>`；Hydro 可选模式仅用于精确实例授权
+- [x] 生产 manifest 与权限审计一致：允许 `storage/tabs/cookies/activeTab/scripting/clipboardWrite/offscreen/downloads`，不含 `webRequest` 或 `<all_urls>`；Hydro 可选模式仅用于精确实例授权
 - [x] 生产代码不上传 Cookie、密码或 token；用户明确输入的凭证仅保存在本地 `chrome.storage.local`
 - [x] 设置页支持清除全部本地数据
 - [x] Hydro HTTP 集成：普通、比赛、作业、密码重新登录和站点品牌
@@ -30,3 +30,9 @@
 2026-10-09 复用升级：核心代码与自动门禁完成，598 个用例通过，1 个可选 live 用例跳过；contract 276 个用例通过。应用内浏览器通过共享下拉、日期/同步弹层、窄屏与页面切换验收。Chrome/Edge 真实扩展验收仍未完成，发布边界不变；详情见[执行记录](./code-reuse-audit.md#升级执行记录2026-10-09)。
 
 2026-10-14 题面 PDF：自动门禁完成，719 个用例通过，1 个可选 live 用例跳过；contract 276 个用例通过。Chrome/Edge 加载扩展后的下载和 PDF 视觉验收仍未完成，发布边界不变；详情见[题面浏览器矩阵](./problem-pdf-browser-matrix.md)。
+
+2026-10-16 Markdown 数据流：升级实现与自动门禁完成，887 个用例通过、1 个可选 live 用例跳过，contract 276 个通过。丰富内容经实际 Typst 编译与逐页视觉复核，生产构建在内置浏览器完成编辑、预览与 PDF 下载。Chrome/Edge 原生扩展矩阵仍未完成，发布边界不变；详见[执行报告](./problem-markdown-pipeline-upgrade.md)。
+
+2026-10-16 旧链路补查：确认并清除了未使用的任务消费、旧端口命令、注册表包装及片段类型；测试快照构造迁出生产目录。清理后 891 个用例通过、1 个可选 live 用例跳过，全部自动门禁通过；未提交/发布，Chrome/Edge 人工门禁仍待执行。
+
+2026-10-16 测试清理：删除/归并两个冗余测试文件，净移除 3 个重复用例；真实 OJ 保真、字体、图片、合并表格、PDF 编译与生命周期回归保留。完整测试 888 个通过、1 个可选 live 跳过，contract 276 个通过，全部自动门禁通过；详情见[执行报告](./problem-markdown-pipeline-upgrade.md#测试冗余补查与清理2026-10-16)。人工发布边界不变。

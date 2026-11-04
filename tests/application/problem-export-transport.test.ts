@@ -16,6 +16,28 @@ const job: ProblemExportFallbackJob = {
 };
 
 describe("problem export transport", () => {
+  it.each(["PROBLEM_EXPORT_START", "PROBLEM_EXPORT_CANCEL"])(
+    "rejects the retired port command %s",
+    (type) => {
+      expect(
+        isProblemExportPortRequest({
+          ...createProblemExportConnectMessage(job.token, job),
+          type,
+        }),
+      ).toBe(false);
+    },
+  );
+
+  it("requires a request id for the current connection handshake", () => {
+    const message = createProblemExportConnectMessage(job.token, job);
+    expect(
+      isProblemExportPortRequest({ ...message, requestId: undefined }),
+    ).toBe(false);
+    expect(isProblemExportPortRequest({ ...message, requestId: "" })).toBe(
+      false,
+    );
+  });
+
   it("accepts a recovery job in the connection handshake", () => {
     const message = createProblemExportConnectMessage(job.token, job);
     expect(isProblemExportPortRequest(message)).toBe(true);
@@ -35,7 +57,7 @@ describe("problem export responses", () => {
   it("accepts a failure response that has no type field", () => {
     expect(
       isProblemExportResponse({
-        schemaVersion: 1,
+        schemaVersion: 2,
         requestId: "req-1",
         ok: false,
         error: {
@@ -49,7 +71,7 @@ describe("problem export responses", () => {
   it("rejects a failure response without an error message", () => {
     expect(
       isProblemExportResponse({
-        schemaVersion: 1,
+        schemaVersion: 2,
         requestId: "req-1",
         ok: false,
         error: { code: "problem_export_failed" },
@@ -60,7 +82,7 @@ describe("problem export responses", () => {
   it("accepts extracted markdown and rejects an empty copy", () => {
     expect(
       isProblemExportMessage({
-        schemaVersion: 1,
+        schemaVersion: 2,
         requestId: "req-1",
         type: "EXTRACT_PROBLEM_MARKDOWN",
         tabId: 7,
@@ -69,7 +91,7 @@ describe("problem export responses", () => {
     ).toBe(true);
     expect(
       isProblemExportResponse({
-        schemaVersion: 1,
+        schemaVersion: 2,
         requestId: "req-1",
         ok: true,
         type: "PROBLEM_MARKDOWN",
@@ -78,12 +100,31 @@ describe("problem export responses", () => {
     ).toBe(true);
     expect(
       isProblemExportResponse({
-        schemaVersion: 1,
+        schemaVersion: 2,
         requestId: "req-1",
         ok: true,
         type: "PROBLEM_MARKDOWN",
         markdown: "   ",
       }),
     ).toBe(false);
+  });
+
+  it("rejects an unknown export intent", () => {
+    const message = {
+      schemaVersion: 2,
+      requestId: "req-1",
+      type: "START_PROBLEM_EXPORT",
+      tabId: 7,
+      expectedUrl: "https://www.luogu.com.cn/problem/P1001",
+    };
+    expect(isProblemExportMessage(message)).toBe(true);
+    expect(isProblemExportMessage({ ...message, intent: "download" })).toBe(
+      true,
+    );
+    expect(isProblemExportMessage({ ...message, intent: "edit" })).toBe(true);
+    expect(isProblemExportMessage({ ...message, intent: "preview" })).toBe(
+      false,
+    );
+    expect(isProblemExportMessage({ ...message, intent: "" })).toBe(false);
   });
 });

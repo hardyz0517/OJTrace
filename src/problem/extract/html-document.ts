@@ -1,3 +1,8 @@
+import {
+  STATEMENT_HTML_LIMIT,
+  STATEMENT_NODE_LIMIT,
+  STATEMENT_DEPTH_LIMIT,
+} from "../budget";
 import { decodeHtml } from "../../adapters/shared/html";
 
 export interface HtmlTextNode {
@@ -41,10 +46,15 @@ const VOID_TAGS = new Set([
 const RAW_TEXT_TAGS = new Set(["script", "style"]);
 
 export function parseHtmlDocument(html: string): HtmlRootNode {
+  if (html.length > STATEMENT_HTML_LIMIT)
+    throw new RangeError("Statement HTML exceeds budget");
+  let nodeCount = 0;
   const root: HtmlRootNode = { type: "root", children: [] };
   const stack: HtmlElementNode[] = [];
   let cursor = 0;
   const append = (node: HtmlNode): void => {
+    if (++nodeCount > STATEMENT_NODE_LIMIT)
+      throw new RangeError("Statement node budget exceeded");
     const parent = stack[stack.length - 1];
     if (parent) {
       node.parent = parent;
@@ -113,6 +123,8 @@ export function parseHtmlDocument(html: string): HtmlRootNode {
     append(element);
     cursor = end + 1;
     if (!selfClosing && !VOID_TAGS.has(tagName)) {
+      if (stack.length >= STATEMENT_DEPTH_LIMIT)
+        throw new RangeError("Statement depth budget exceeded");
       stack.push(element);
       if (RAW_TEXT_TAGS.has(tagName)) {
         const close = html.toLowerCase().indexOf(`</${tagName}`, cursor);

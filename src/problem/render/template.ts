@@ -1,7 +1,7 @@
-import type { ProblemDocument } from "../domain";
+import type { RenderDocument } from "../domain";
 import { problemDisplayName } from "../domain";
 import { CODE_THEME_PATH } from "./code-theme";
-import { statementBlocksToTypst } from "./statement-to-typst";
+import { markdownBlocksToTypst } from "./markdown-to-typst";
 import { problemRenderStyle } from "./style-tokens";
 import { escapeTypstContent, typstStringLiteral } from "./typst-escape";
 
@@ -9,20 +9,20 @@ function fontList(fonts: readonly string[]): string {
   return `(${fonts.map((font) => `"${font}"`).join(", ")})`;
 }
 
-function limitLine(document: ProblemDocument): string {
+function limitLine(document: RenderDocument): string {
   const parts = [
     document.timeLimit
-      ? `时间限制#h(0.45em)${escapeTypstContent(document.timeLimit.display)}`
+      ? `${document.displayLabels ? `${escapeTypstContent(document.displayLabels.timeLimit)}#h(0.45em)` : ""}${escapeTypstContent(document.timeLimit.display)}`
       : "",
     document.memoryLimit
-      ? `内存限制#h(0.45em)${escapeTypstContent(document.memoryLimit.display)}`
+      ? `${document.displayLabels ? `${escapeTypstContent(document.displayLabels.memoryLimit)}#h(0.45em)` : ""}${escapeTypstContent(document.memoryLimit.display)}`
       : "",
   ].filter(Boolean);
   if (!parts.length) return "";
   return `#align(center)[#set par(first-line-indent: 0pt); ${parts.join("#h(1.6em)")}]`;
 }
 
-function headerRight(document: ProblemDocument): string {
+function headerRight(document: RenderDocument): string {
   const id = document.problemId.trim();
   const title = document.title.trim();
   if (!id) return escapeTypstContent(title);
@@ -48,7 +48,7 @@ function headerRight(document: ProblemDocument): string {
  * the 12pt strut. The 10pt header run is an inner text element; sizing the
  * whole header to 10pt sits the words 1.4pt too close to the rule.
  */
-export function problemDocumentToTypst(document: ProblemDocument): string {
+export function problemDocumentToTypst(document: RenderDocument): string {
   const style = problemRenderStyle;
   const lang =
     document.language === "zh"
@@ -58,6 +58,7 @@ export function problemDocumentToTypst(document: ProblemDocument): string {
         : "en";
   const platform = escapeTypstContent(problemDisplayName(document.oj));
   const sample = style.sample;
+  const page = document.displayLabels?.page;
   return `
 #import "@preview/mitex:0.2.5": mi
 #set document(title: ${typstStringLiteral(document.title)})
@@ -88,7 +89,7 @@ export function problemDocumentToTypst(document: ProblemDocument): string {
   ],
   numbering: (now, total) => [
     #text(size: ${style.footer.sizePt}pt)[
-      第 #(now) 页 ~~~~ 共 #link((page: total, x: 2.5cm, y: 1.5cm))[#text(fill: rgb("${style.footer.link}"))[#(total)]] 页
+      ${escapeTypstContent(page?.prefix ?? "")}#(now)${escapeTypstContent(page?.suffix ?? "")} ~~~~ ${escapeTypstContent(page?.totalPrefix ?? "")}#link((page: total, x: 2.5cm, y: 1.5cm))[#text(fill: rgb("${style.footer.link}"))[#(total)]]${escapeTypstContent(page?.totalSuffix ?? "")}
     ]
   ],
 )
@@ -112,9 +113,9 @@ export function problemDocumentToTypst(document: ProblemDocument): string {
         h(source.body-indent)
       }
       context {
-        set par(first-line-indent: 0pt, hanging-indent: measure(front).width)
-        pad(left: source.indent, {
-          front
+        set par(first-line-indent: 0pt, hanging-indent: 0pt)
+        pad(left: source.indent + measure(front).width, {
+          place(dx: -measure(front).width, front)
           nesting.update(value => value + 1)
           item.body
           parbreak()
@@ -159,9 +160,9 @@ export function problemDocumentToTypst(document: ProblemDocument): string {
       }
       let saved = number
       context {
-        set par(first-line-indent: 0pt, hanging-indent: measure(front).width)
-        pad(left: source.indent, {
-          front
+        set par(first-line-indent: 0pt, hanging-indent: 0pt)
+        pad(left: source.indent + measure(front).width, {
+          place(dx: -measure(front).width, front)
           parents.update(chain => chain + (saved,))
           item.body
           parbreak()
@@ -300,6 +301,6 @@ export function problemDocumentToTypst(document: ProblemDocument): string {
 
 ${limitLine(document)}
 
-${statementBlocksToTypst(document.blocks, document.assets)}
+${markdownBlocksToTypst(document.ast.children, document.assets)}
 `;
 }

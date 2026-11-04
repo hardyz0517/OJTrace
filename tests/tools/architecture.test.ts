@@ -17,7 +17,7 @@ function fixture(files: Record<string, string>): string[] {
           paths: { "@/*": ["./*"] },
           noEmit: true,
         },
-        include: ["**/*.ts"],
+        include: ["**/*.ts", "**/*.tsx"],
       }),
       "src/adapters/qoj/index.ts":
         "export const adapter = {}; export interface Contract {}",
@@ -110,6 +110,88 @@ describe("architecture dependency gate", () => {
           'import { language } from "../../src/adapters/hydroj/leaf"; console.log(language);',
         "src/domain/window.ts":
           "export function size(window: { length: number }) { return window.length; }",
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("problem pipeline dependency gate", () => {
+  it("does not allow a test-only fixture back into the production pipeline", () => {
+    const errors = fixture({
+      "tests/problem/snapshot-fixtures.ts":
+        "export const createSnapshot=()=>({});",
+      "src/problem/adapters/luogu.ts":
+        'export {createSnapshot} from "../../../tests/problem/snapshot-fixtures";',
+    });
+    expect(
+      errors.some((error) =>
+        error.includes(
+          "src/problem/adapters/luogu.ts -> tests/problem/snapshot-fixtures.ts",
+        ),
+      ),
+    ).toBe(true);
+  });
+  it.each([
+    [
+      "src/problem/markdown/parse.ts",
+      'export {rule} from "../cnoi/rules/luogu";',
+    ],
+    [
+      "src/problem/markdown/serialize.ts",
+      'export {adapter} from "../adapters/luogu";',
+    ],
+    [
+      "src/problem/render/markdown-to-typst.ts",
+      'export {rule} from "../cnoi/rules/luogu";',
+    ],
+    [
+      "src/problem/cnoi/transform.ts",
+      'import {render} from "../render/browser-typst-compiler"; export const transform=render;',
+    ],
+    [
+      "src/problem/extract/codec.ts",
+      'export {adapter} from "../adapters/luogu";',
+    ],
+    [
+      "src/problem/render/template.ts",
+      'export {rule} from "../cnoi/rules/luogu";',
+    ],
+    [
+      "src/problem/adapters/luogu.ts",
+      'export {rule} from "../cnoi/rules/luogu";',
+    ],
+    [
+      "entrypoints/problem-export/main.ts",
+      'export {adapter} from "../../src/problem/adapters/luogu";',
+    ],
+    [
+      "entrypoints/problem-export/ProblemStudio.tsx",
+      'export {rule} from "../../src/problem/cnoi/rules/luogu";',
+    ],
+    ["src/problem/cnoi/rules/luogu.ts", "export const rule=window.location;"],
+  ])("rejects reversed dependencies from %s", (path, body) => {
+    expect(
+      fixture({
+        "src/problem/adapters/luogu.ts": "export const adapter={};",
+        "src/problem/cnoi/rules/luogu.ts": "export const rule=()=>{};",
+        "src/problem/render/browser-typst-compiler.ts":
+          "export const render=()=>{};",
+        [path]: body,
+      }).length,
+    ).toBeGreaterThan(0);
+  });
+  it("allows pure codecs/shared HTML utilities and parser-driven rendering", () => {
+    expect(
+      fixture({
+        "src/adapters/shared/html.ts":
+          "export const decode=(value:string)=>value;",
+        "src/problem/extract/codec.ts":
+          'export {decode} from "../../adapters/shared/html";',
+        "src/problem/cnoi/transform.ts":
+          'export {decode} from "../extract/codec";',
+        "src/problem/render/typst-renderer.ts": "export const render=()=>{};",
+        "entrypoints/problem-export/main.ts":
+          'import {render} from "../../src/problem/render/typst-renderer"; import {decode} from "../../src/problem/extract/codec"; render(); decode("a");',
       }),
     ).toEqual([]);
   });

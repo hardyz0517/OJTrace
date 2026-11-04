@@ -1,3 +1,5 @@
+import { recognizeCodeforcesMarkup } from "./codeforces-markup";
+import { inferProblemLanguage, normalizeProblemLanguage } from "../language";
 import type { ProblemAdapter } from "../adapter";
 import type {
   ProblemExtractionResult,
@@ -6,7 +8,7 @@ import type {
   ProblemPreview,
 } from "../domain";
 import {
-  extractDocument,
+  extractSourceDocument,
   findRoot,
   memoryText,
   parseProbe,
@@ -17,6 +19,8 @@ import {
   timeText,
 } from "./common";
 import {
+  attr,
+  trimmedText,
   findFirst,
   hasClass,
   type HtmlElementNode,
@@ -124,10 +128,11 @@ export const codeforcesProblemAdapter: ProblemAdapter = {
       probe,
       `${route.contestId}${route.index}`,
       title,
-      "en",
+      normalizeProblemLanguage(attr(statement, "lang")) ??
+        inferProblemLanguage(trimmedText(codeforcesBody(statement))),
     );
   },
-  async extract(
+  async extractSource(
     snapshot: ProblemPageSnapshot,
   ): Promise<ProblemExtractionResult> {
     if (!this.match(snapshot.url))
@@ -141,13 +146,18 @@ export const codeforcesProblemAdapter: ProblemAdapter = {
     const title = rootTitle(header ?? statement) ?? snapshot.title;
     const body = codeforcesBody(statement);
     stripInputOutputCopiers(body);
-    return extractDocument({
+    recognizeCodeforcesMarkup(body);
+    return extractSourceDocument({
       source: "codeforces",
       snapshot,
       problemId: `${route.contestId}${route.index}`,
       title,
       root: body,
-      language: "en",
+      language:
+        normalizeProblemLanguage(attr(body, "lang")) ??
+        inferProblemLanguage(trimmedText(body)) ??
+        snapshot.language ??
+        "other",
       timeText: textFromClass(statement, ["time-limit"]) ?? timeText(statement),
       memoryText:
         textFromClass(statement, ["memory-limit"]) ?? memoryText(statement),

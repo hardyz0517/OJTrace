@@ -50,8 +50,13 @@ export function auditArchitecture({
         if (["wxt/browser", "webextension-polyfill"].includes(specifier))
           issues.push(`browser global module ${specifier}`);
         // CSS/assets have no runtime TypeScript closure; require the actual file.
-        if (/\.(css|svg|png)$/.test(specifier) && specifier.startsWith(".")) {
-          if (!existsSync(resolve(dirname(file), specifier)))
+        if (
+          /\.(css|svg|png|md)(\?raw)?$/.test(specifier) &&
+          specifier.startsWith(".")
+        ) {
+          if (
+            !existsSync(resolve(dirname(file), specifier.replace(/\?raw$/, "")))
+          )
             issues.push(`missing asset ${specifier}`);
           return;
         }
@@ -154,9 +159,26 @@ export function auditArchitecture({
       /^src\/adapters\/(?:index\.[cm]?[jt]s|(?!shared\/)[^/]+\/index\.[cm]?[jt]sx?)$/;
     for (const [start] of graph) {
       const name = localName(start);
-      const pure = /^src\/(domain|sources)\//.test(name);
+      const domainPure = /^src\/(domain|sources)\//.test(name);
+      const problemPure =
+        /^src\/problem\/(adapters|extract|markdown|cnoi)\//.test(name) ||
+        /^src\/problem\/(domain|localization|problem-markdown|markdown-front-matter|budget|registry)\.ts$/.test(
+          name,
+        );
+      const renderPure =
+        /^src\/problem\/render\/(template|markdown-to-typst|typst-renderer|style-tokens)\.ts$/.test(
+          name,
+        );
+      const pure = domainPure || problemPure || renderPure;
+      const adapter =
+        /^src\/problem\/adapters\//.test(name) ||
+        name === "src/problem/registry.ts";
+      const codec =
+        /^src\/problem\/(extract|markdown)\//.test(name) ||
+        name === "src/problem/problem-markdown.ts";
+      const transformer = /^src\/problem\/cnoi\//.test(name);
       const ui =
-        /^entrypoints\/(settings|timeline|popup|problem-export|shared)\//.test(
+        /^entrypoints\/(settings|timeline|popup|problem-export|pdf-worker|shared)\//.test(
           name,
         );
       if (!pure && !ui) continue;
@@ -176,8 +198,27 @@ export function auditArchitecture({
           const nextName = localName(next);
           const nextPath = [...path, nextName];
           if (
-            (pure && pureForbidden.test(nextName)) ||
-            (ui && adapterEntry.test(nextName))
+            nextName.startsWith("tests/") ||
+            (domainPure && pureForbidden.test(nextName)) ||
+            ((problemPure || renderPure) &&
+              /^(entrypoints\/|src\/(application|platform)\/|src\/adapters\/(?!shared\/))/.test(
+                nextName,
+              )) ||
+            ((problemPure || renderPure) &&
+              /^src\/problem\/render\/(browser-typst-compiler|worker-problem-renderer|problem-render\.worker|render-problem-pdf)\.ts$/.test(
+                nextName,
+              )) ||
+            (adapter && /^src\/problem\/(cnoi|render)\//.test(nextName)) ||
+            ((codec || transformer || renderPure) &&
+              /^src\/problem\/(adapters\/|registry\.ts)/.test(nextName)) ||
+            ((codec || transformer) &&
+              /^src\/problem\/render\//.test(nextName)) ||
+            ((codec || renderPure) && /^src\/problem\/cnoi\//.test(nextName)) ||
+            (ui &&
+              (adapterEntry.test(nextName) ||
+                /^src\/problem\/(adapters\/|cnoi\/|registry\.ts)/.test(
+                  nextName,
+                )))
           )
             errors.push(nextPath.join(" -> "));
           else walk(next, nextPath);

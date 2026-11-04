@@ -1,5 +1,4 @@
 import type {
-  ProblemDocument,
   ProblemExtractionResult,
   ProblemLanguage,
   ProblemPageProbe,
@@ -19,9 +18,11 @@ import {
   type HtmlElementNode,
   type HtmlRootNode,
 } from "../extract/html-document";
-import { htmlToStatement } from "../extract/html-to-statement";
+import { htmlToAst } from "../markdown/html";
+import { inferFigureCaptions } from "../extract/figure-layout";
+import { parseMarkdown, markdownAssets } from "../markdown/parse";
 import { mergeCapturedImages } from "../merge-images";
-import { serializeMarkdown } from "../extract/markdown-serializer";
+import { serializeMarkdown } from "../markdown/serialize";
 import {
   cleanTitle,
   findLimitByLabels,
@@ -58,12 +59,14 @@ export function preview(
   };
 }
 
-export function extractDocument(input: {
+/** Produce the only source of statement content; temporary trees never escape. */
+export function extractSourceDocument(input: {
   source: SourceId;
   snapshot: ProblemPageSnapshot;
   problemId?: string;
   title?: string;
-  root: HtmlElementNode;
+  root?: HtmlElementNode;
+  sourceMarkdown?: string;
   language?: ProblemLanguage;
   timeText?: string;
   memoryText?: string;
@@ -72,22 +75,7 @@ export function extractDocument(input: {
   const problemId = input.problemId?.trim();
   const title = cleanTitle(input.title);
   if (!problemId || !title) return { ok: false, reason: "ambiguous-problem" };
-  const extraction = htmlToStatement(
-    serializeNode(input.root),
-    input.snapshot.baseUrl,
-    input.language,
-  );
-  if (extraction.blocks.length === 0)
-    return { ok: false, reason: "statement-not-found" };
-  const merged = mergeCapturedImages(
-    extraction.assets,
-    [...(input.warnings ?? []), ...extraction.warnings],
-    input.snapshot.imageAssets,
-    input.snapshot.imageWarnings,
-  );
-  const warnings = merged.warnings;
-  const assets = merged.assets;
-  const document: ProblemDocument = {
+  const metadata = {
     oj: input.source,
     problemId,
     title,
@@ -98,13 +86,78 @@ export function extractDocument(input: {
     ...(parseMemoryLimit(input.memoryText)
       ? { memoryLimit: parseMemoryLimit(input.memoryText) }
       : {}),
-    blocks: extraction.blocks,
-    markdown: serializeMarkdown(extraction.blocks),
     ...(input.language ? { language: input.language } : {}),
-    assets,
-    warnings,
   };
-  return { ok: true, document };
+  try {
+    const parsed =
+      input.sourceMarkdown != null
+        ? parseMarkdown(input.sourceMarkdown, {
+            baseUrl: input.snapshot.baseUrl,
+          })
+        : (() => {
+            if (!input.root) throw new Error("Source root is missing");
+            // HTML parsing owns script/style filtering and recognizes TeX scripts.
+            // Adapter cleanup must not erase formula sources before that parse.
+            const value = htmlToAst(
+              serializeNode(input.root),
+              input.snapshot.baseUrl,
+            );
+            return {
+              ast: {
+                type: "root" as const,
+                children: inferFigureCaptions(value.blocks),
+              },
+              warnings: value.warnings,
+            };
+          })();
+    const sourceMarkdown =
+      input.sourceMarkdown ?? serializeMarkdown(parsed.ast.children);
+    if (!sourceMarkdown.trim())
+      return { ok: false, reason: "statement-not-found" };
+    const merged = mergeCapturedImages(
+      "assets" in parsed ? parsed.assets : markdownAssets(parsed.ast),
+      [...(input.warnings ?? []), ...parsed.warnings],
+      input.snapshot.imageAssets,
+      input.snapshot.imageWarnings,
+    );
+    return {
+      ok: true,
+      source: {
+        metadata,
+        sourceMarkdown,
+        assets: merged.assets,
+        warnings: merged.warnings,
+      },
+    };
+  } catch (error) {
+    if (input.sourceMarkdown?.trim())
+      return {
+        ok: true,
+        source: {
+          metadata,
+          sourceMarkdown: input.sourceMarkdown,
+          assets: [],
+          warnings: [
+            ...(input.warnings ?? []),
+            {
+              code: "source-syntax-incomplete",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "源 Markdown 无法完整解析。",
+            },
+          ],
+        },
+      };
+    return {
+      ok: false,
+      reason: error instanceof RangeError ? "size-limit" : "invalid-snapshot",
+      message:
+        error instanceof SyntaxError
+          ? error.message
+          : "题面无法完整提取，请检查页面或内容规模。",
+    };
+  }
 }
 
 export function findRoot(

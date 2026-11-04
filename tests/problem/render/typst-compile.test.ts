@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { ProblemDocument } from "../../../src/problem/domain";
+import type { RenderDocument } from "../../../src/problem/domain";
 import { bundledPreviewPackages } from "../../../src/problem/render/browser-typst-compiler";
 import {
   CODE_THEME_PATH,
@@ -9,31 +9,9 @@ import {
   MITEX_PACKAGE_KEY,
 } from "../../../src/problem/render/code-theme";
 import { problemDocumentToTypst } from "../../../src/problem/render/template";
+import { bundledFontPaths } from "../../../src/problem/render/font-manifest";
 
-const FONT_FILES = [
-  "lmroman10-regular.otf",
-  "lmroman10-bold.otf",
-  "lmroman10-italic.otf",
-  "lmroman10-bolditalic.otf",
-  "lmroman12-regular.otf",
-  "lmroman12-bold.otf",
-  "lmroman12-italic.otf",
-  "lmroman17-regular.otf",
-  "SimSun.ttf",
-  "simhei.ttf",
-  "FiraMono-Regular.ttf",
-  "FiraMono-Medium.ttf",
-  "FiraMono-Bold.ttf",
-  "NewCMMath-Book.otf",
-  "NewCMMath-Regular.otf",
-  "NewCMMath-Bold.otf",
-  "NotoSerifCJKsc-Regular.otf",
-  "NotoSerifCJKsc-Bold.otf",
-  "OJTraceMincho-Regular.otf",
-  "OJTraceHei-Regular.otf",
-] as const;
-
-const statement: ProblemDocument = {
+const statement: RenderDocument = {
   oj: "luogu",
   problemId: "P1450",
   title: "购物",
@@ -41,100 +19,102 @@ const statement: ProblemDocument = {
   timeLimit: { display: "1 s", milliseconds: 1_000 },
   memoryLimit: { display: "128 MB", bytes: 128 * 1024 * 1024 },
   language: "zh",
-  blocks: [
-    {
-      type: "heading",
-      level: 2,
-      children: [{ type: "text", value: "题目描述" }],
-    },
-    {
-      type: "paragraph",
-      children: [
-        { type: "text", value: "共有 " },
-        { type: "inline-math", value: "n" },
-        { type: "text", value: " 种硬币，其中 " },
-        { type: "strong", children: [{ type: "text", value: "至多" }] },
-        { type: "text", value: " 买 " },
-        { type: "inline-math", value: "c_i" },
-        { type: "text", value: "。" },
-      ],
-    },
-    {
-      type: "paragraph",
-      children: [
-        { type: "text", value: "从文件 " },
-        { type: "emphasis", children: [{ type: "text", value: "duel.in" }] },
-        { type: "text", value: " 读入。" },
-      ],
-    },
-    {
-      type: "paragraph",
-      children: [
-        { type: "text", value: "见 " },
-        { type: "inline-code", value: "down/graph/" },
-        { type: "text", value: "。" },
-      ],
-    },
-    {
-      type: "table",
-      style: "tuack",
-      headers: [
-        [{ type: "text", value: "子任务" }],
-        [{ type: "inline-code", value: "n" }],
-      ],
-      rows: [
-        [
-          [{ type: "text", value: "1" }],
-          [{ type: "text", value: "11" }],
-          [{ type: "text", value: "任意时刻都没有简单环" }],
+  ast: {
+    type: "root" as const,
+    children: [
+      {
+        type: "heading",
+        level: 2,
+        children: [{ type: "text", value: "题目描述" }],
+      },
+      {
+        type: "paragraph",
+        children: [
+          { type: "text", value: "共有 " },
+          { type: "inline-math", value: "n" },
+          { type: "text", value: " 种硬币，其中 " },
+          { type: "strong", children: [{ type: "text", value: "至多" }] },
+          { type: "text", value: " 买 " },
+          { type: "inline-math", value: "c_i" },
+          { type: "text", value: "。" },
         ],
-        [[{ type: "text", value: "12" }], [{ type: "text", value: "紧" }]],
-      ],
-      spans: [
-        [
-          { colspan: 2, rowspan: 1 },
-          { colspan: 1, rowspan: 1 },
+      },
+      {
+        type: "paragraph",
+        children: [
+          { type: "text", value: "从文件 " },
+          { type: "emphasis", children: [{ type: "text", value: "duel.in" }] },
+          { type: "text", value: " 读入。" },
         ],
-        [
-          { colspan: 1, rowspan: 2 },
-          { colspan: 1, rowspan: 1 },
-          { colspan: 1, rowspan: 1 },
+      },
+      {
+        type: "paragraph",
+        children: [
+          { type: "text", value: "见 " },
+          { type: "inline-code", value: "down/graph/" },
+          { type: "text", value: "。" },
         ],
-        [
-          { colspan: 1, rowspan: 1 },
-          { colspan: 1, rowspan: 1 },
+      },
+      {
+        type: "table",
+        style: "tuack",
+        headers: [
+          [{ type: "text", value: "子任务" }],
+          [{ type: "inline-code", value: "n" }],
         ],
-      ],
-    },
-    {
-      type: "paragraph",
-      children: [{ type: "text", value: "高橋王国の構造" }],
-    },
-    {
-      type: "code",
-      value: "N\nA_1, 1 A_1, N",
-      lines: [
-        [{ type: "inline-math", value: "N" }],
-        [
-          { type: "inline-math", value: "A_{1, 1}" },
-          { type: "text", value: " " },
-          { type: "inline-math", value: "A_{1, N}" },
+        rows: [
+          [
+            [{ type: "text", value: "1" }],
+            [{ type: "text", value: "11" }],
+            [{ type: "text", value: "任意时刻都没有简单环" }],
+          ],
+          [[{ type: "text", value: "12" }], [{ type: "text", value: "紧" }]],
         ],
-      ],
-    },
-    {
-      type: "sample",
-      input: { type: "code", value: "5\n1 2 3 1 2" },
-      output: { type: "code", value: "2" },
-    },
-  ],
-  markdown: "",
+        spans: [
+          [
+            { colspan: 2, rowspan: 1 },
+            { colspan: 1, rowspan: 1 },
+          ],
+          [
+            { colspan: 1, rowspan: 2 },
+            { colspan: 1, rowspan: 1 },
+            { colspan: 1, rowspan: 1 },
+          ],
+          [
+            { colspan: 1, rowspan: 1 },
+            { colspan: 1, rowspan: 1 },
+          ],
+        ],
+      },
+      {
+        type: "paragraph",
+        children: [{ type: "text", value: "高橋王国の構造" }],
+      },
+      {
+        type: "code",
+        value: "N\nA_1, 1 A_1, N",
+        lines: [
+          [{ type: "inline-math", value: "N" }],
+          [
+            { type: "inline-math", value: "A_{1, 1}" },
+            { type: "text", value: " " },
+            { type: "inline-math", value: "A_{1, N}" },
+          ],
+        ],
+      },
+      ...([
+        { type: "code", value: "5\n1 2 3 1 2" },
+        { type: "code", value: "2" },
+      ] as const),
+    ],
+  },
+
   assets: [],
   warnings: [],
 };
 
 describe("typst statement compile", () => {
-  it("compiles a Chinese statement with math, emphasis, and a numbered sample", async () => {
+  it("compiles Chinese and Japanese text, math, emphasis, merged tables and samples with the packaged fonts", async () => {
     const view = globalThis as { window?: unknown; document?: unknown };
     view.window ??= globalThis;
     view.document ??= { documentElement: { lang: "zh" } };
@@ -151,9 +131,8 @@ describe("typst statement compile", () => {
         withPackageRegistry: (registry: unknown) => unknown;
       };
     };
-    const fonts = FONT_FILES.map(
-      (name) =>
-        new Uint8Array(readFileSync(resolve("public/problem-fonts", name))),
+    const fonts = bundledFontPaths.map(
+      (path) => new Uint8Array(readFileSync(resolve("public", path.slice(1)))),
     );
     const mitex = new Uint8Array(
       readFileSync(resolve("public/problem-packages/mitex-0.2.5.tar.gz")),

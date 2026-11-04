@@ -1,6 +1,6 @@
 import type { SourceId } from "../domain/types";
 import { sourceDefinitions } from "../sources/definitions";
-import type { StatementBlock } from "./statement";
+import type { MarkdownRoot } from "./markdown/ast";
 
 export type ProblemLanguage = "zh" | "en" | "ja" | "other";
 
@@ -21,14 +21,21 @@ export interface ProblemPageProbe {
   baseUrl: string;
 }
 
-/** Declarative page sources. Adapters own selectors; capture only copies JSON. */
+interface ProblemJsonSource {
+  key: string;
+  path: readonly string[];
+  fields: readonly string[];
+  /** Match the current problem id, ignoring the casing used in bank routes. */
+  identity?: { field: string; value: string };
+}
+
+/** Declarative page sources. Capture copies only the Adapter's allowlisted JSON. */
 export interface ProblemCaptureHints {
-  jsonScripts?: readonly {
-    selector: string;
-    key: string;
-    path: readonly string[];
-    fields: readonly string[];
-  }[];
+  jsonScripts?: readonly (ProblemJsonSource & { selector: string })[];
+  /** Same-page JSON fallback when initial scripts are absent or belong to a previous SPA route. */
+  jsonRequest?: ProblemJsonSource & {
+    headers: Readonly<Record<string, string>>;
+  };
 }
 
 export interface ProblemPageSnapshot {
@@ -37,7 +44,7 @@ export interface ProblemPageSnapshot {
   html: string;
   baseUrl: string;
   language?: ProblemLanguage;
-  /** Allowlisted statement source fields copied from page-owned JSON scripts. */
+  /** Allowlisted statement fields from page JSON or its same-origin native response. */
   sourceData?: Readonly<Record<string, unknown>>;
   /** Images captured from the live page, when same-origin/CORS permits. */
   imageAssets?: readonly ProblemAsset[];
@@ -47,25 +54,25 @@ export interface ProblemPageSnapshot {
 }
 
 export interface ProblemLimit {
-  display: string;
-  milliseconds?: number;
-  bytes?: number;
+  readonly display: string;
+  readonly milliseconds?: number;
+  readonly bytes?: number;
 }
 
 export interface ProblemAsset {
-  sourceUrl: string;
-  alt?: string;
-  width?: number;
-  height?: number;
-  dataUrl?: string;
-  mimeType?: string;
+  readonly sourceUrl: string;
+  readonly alt?: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly dataUrl?: string;
+  readonly mimeType?: string;
   /** Renderer-private virtual path, populated only for an embedded asset. */
-  typstPath?: string;
+  readonly typstPath?: string;
 }
 
 export interface ProblemWarning {
-  code: string;
-  message: string;
+  readonly code: string;
+  readonly message: string;
 }
 
 export interface ProblemPreview {
@@ -77,29 +84,47 @@ export interface ProblemPreview {
   language?: ProblemLanguage;
 }
 
-export interface ProblemDocument {
-  oj: SourceId;
-  problemId: string;
-  title: string;
-  originalUrl: string;
-  timeLimit?: ProblemLimit;
-  memoryLimit?: ProblemLimit;
-  blocks: readonly StatementBlock[];
-  markdown: string;
-  language?: ProblemLanguage;
-  assets: readonly ProblemAsset[];
-  warnings: readonly ProblemWarning[];
+export interface ProblemMetadata {
+  readonly oj: SourceId;
+  readonly problemId: string;
+  readonly title: string;
+  readonly originalUrl: string;
+  readonly timeLimit?: ProblemLimit;
+  readonly memoryLimit?: ProblemLimit;
+  readonly language?: ProblemLanguage;
 }
 
-export interface StatementFragment {
-  rootHtml: string;
-  title?: string;
-  metadataNodes?: readonly string[];
-  language?: ProblemLanguage;
+/** A rendering value derived entirely from the current final Markdown. */
+export interface RenderDocument extends ProblemMetadata {
+  readonly ast: MarkdownRoot;
+  readonly assets: readonly ProblemAsset[];
+  readonly warnings: readonly ProblemWarning[];
+  displayLabels?: {
+    readonly timeLimit: string;
+    readonly memoryLimit: string;
+    readonly page?: {
+      readonly prefix: string;
+      readonly suffix: string;
+      readonly totalPrefix: string;
+      readonly totalSuffix: string;
+    };
+  };
+}
+
+export interface SourceProblem {
+  readonly metadata: ProblemMetadata;
+  readonly sourceMarkdown: string;
+  readonly assets: readonly ProblemAsset[];
+  readonly warnings: readonly ProblemWarning[];
+}
+export interface CnoiProblem {
+  readonly cnoiMarkdown: string;
+  readonly assets: readonly ProblemAsset[];
+  readonly warnings: readonly ProblemWarning[];
 }
 
 export type ProblemExtractionResult =
-  | { ok: true; document: ProblemDocument }
+  | { ok: true; source: SourceProblem }
   | {
       ok: false;
       reason: ProblemFailureReason;

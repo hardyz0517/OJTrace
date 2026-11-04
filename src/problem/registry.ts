@@ -1,3 +1,4 @@
+import { PROBLEM_SNAPSHOT_HTML_LIMIT } from "./budget";
 import type {
   ProblemExtractionResult,
   ProblemPageProbe,
@@ -12,7 +13,7 @@ import { hydrojProblemAdapter } from "./adapters/hydroj";
 import { luoguProblemAdapter } from "./adapters/luogu";
 import { qojProblemAdapter } from "./adapters/qoj";
 
-export const problemAdapters: readonly ProblemAdapter[] = [
+const problemAdapters: readonly ProblemAdapter[] = [
   codeforcesProblemAdapter,
   atcoderProblemAdapter,
   qojProblemAdapter,
@@ -20,7 +21,7 @@ export const problemAdapters: readonly ProblemAdapter[] = [
   hydrojProblemAdapter,
 ];
 
-export class ProblemAdapterRegistry {
+class ProblemAdapterRegistry {
   constructor(readonly adapters: readonly ProblemAdapter[] = problemAdapters) {}
 
   find(url: string): ProblemAdapter | undefined {
@@ -28,7 +29,7 @@ export class ProblemAdapterRegistry {
   }
 
   captureHints(url: string): ProblemCaptureHints | undefined {
-    return this.find(url)?.captureHints;
+    return this.find(url)?.captureHints?.(url);
   }
 
   async inspect(probe: ProblemPageProbe): Promise<ProblemPreview | undefined> {
@@ -40,25 +41,22 @@ export class ProblemAdapterRegistry {
     return undefined;
   }
 
-  async extract(
+  async extractSource(
     snapshot: ProblemPageSnapshot,
   ): Promise<ProblemExtractionResult> {
     const adapter = this.find(snapshot.url);
     if (!adapter) return { ok: false, reason: "unsupported-url" };
-    return adapter.extract(snapshot);
+    if (snapshot.html.length > PROBLEM_SNAPSHOT_HTML_LIMIT)
+      return { ok: false, reason: "size-limit" };
+    try {
+      return await adapter.extractSource(snapshot);
+    } catch (error) {
+      return {
+        ok: false,
+        reason: error instanceof RangeError ? "size-limit" : "invalid-snapshot",
+      };
+    }
   }
 }
 
 export const problemAdapterRegistry = new ProblemAdapterRegistry();
-
-export async function inspectProblemPage(
-  probe: ProblemPageProbe,
-): Promise<ProblemPreview | undefined> {
-  return problemAdapterRegistry.inspect(probe);
-}
-
-export async function extractProblemPage(
-  snapshot: ProblemPageSnapshot,
-): Promise<ProblemExtractionResult> {
-  return problemAdapterRegistry.extract(snapshot);
-}

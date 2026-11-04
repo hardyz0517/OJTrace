@@ -1,4 +1,4 @@
-import type { ProblemDocument } from "../domain";
+import type { RenderDocument } from "../domain";
 import { IMAGE_SINGLE_BYTE_LIMIT, IMAGE_TOTAL_BYTE_LIMIT } from "../budget";
 import { embeddableImageType, imageFileExtension } from "../extract/image-type";
 import { problemDocumentToTypst } from "./template";
@@ -12,19 +12,27 @@ export interface ProblemRenderOptions {
 
 export interface ProblemRenderer {
   render(
-    document: ProblemDocument,
+    document: RenderDocument,
     options?: ProblemRenderOptions,
   ): Promise<Uint8Array>;
 }
 
+export interface TypstCompileOptions {
+  readonly assets?: ReadonlyMap<string, Uint8Array>;
+  readonly filename?: string;
+}
+
 export interface TypstCompiler {
-  compile(
-    source: string,
-    options?: {
-      readonly assets?: ReadonlyMap<string, Uint8Array>;
-      readonly filename?: string;
-    },
-  ): Promise<Uint8Array>;
+  compile(source: string, options?: TypstCompileOptions): Promise<Uint8Array>;
+  /** Same source and shadow files as `compile`, rendered to SVG for preview. */
+  compileSvg(source: string, options?: TypstCompileOptions): Promise<string>;
+}
+
+/** Typst.ts SVG documents start with the root element, optionally after XML. */
+export function isTypstSvg(value: unknown): value is string {
+  return (
+    typeof value === "string" && /^\s*(?:<\?xml\b[^>]*>\s*)?<svg\b/i.test(value)
+  );
 }
 
 function decodeEmbeddedImage(
@@ -45,8 +53,8 @@ function decodeEmbeddedImage(
   }
 }
 
-function prepareTypstDocument(document: ProblemDocument): {
-  document: ProblemDocument;
+function prepareTypstDocument(document: RenderDocument): {
+  document: RenderDocument;
   assets: Map<string, Uint8Array>;
 } {
   const assets = new Map<string, Uint8Array>();
@@ -75,23 +83,44 @@ function prepareTypstDocument(document: ProblemDocument): {
 }
 
 /**
- * Adapter around typst.ts (or another WASM compiler).  The compiler is
- * injected to keep the core extension free from a hard dependency until the
- * MV3 CSP/size validation in phase 0 succeeds.
+ * Shares Typst source and resource preparation between PDF and SVG output.
+ * Compiler injection also supports the real WASM and controlled test compilers.
  */
 export class TypstProblemRenderer implements ProblemRenderer {
   constructor(private readonly compiler: TypstCompiler) {}
 
   render(
-    document: ProblemDocument,
+    document: RenderDocument,
     options: ProblemRenderOptions = {},
   ): Promise<Uint8Array> {
-    const prepared = prepareTypstDocument(document);
-    for (const [path, bytes] of options.assets ?? [])
-      prepared.assets.set(path, bytes);
-    return this.compiler.compile(problemDocumentToTypst(prepared.document), {
+    const prepared = this.prepared(document, options);
+    return this.compiler.compile(prepared.source, {
       assets: prepared.assets,
       filename: options.filename,
     });
+  }
+
+  /** Preview uses the PDF's Typst source. It does not build a second layout. */
+  preview(
+    document: RenderDocument,
+    options: ProblemRenderOptions = {},
+  ): Promise<string> {
+    const prepared = this.prepared(document, options);
+    return this.compiler.compileSvg(prepared.source, {
+      assets: prepared.assets,
+    });
+  }
+
+  private prepared(
+    document: RenderDocument,
+    options: ProblemRenderOptions,
+  ): { source: string; assets: Map<string, Uint8Array> } {
+    const prepared = prepareTypstDocument(document);
+    for (const [path, bytes] of options.assets ?? [])
+      prepared.assets.set(path, bytes);
+    return {
+      source: problemDocumentToTypst(prepared.document),
+      assets: prepared.assets,
+    };
   }
 }

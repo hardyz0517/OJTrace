@@ -1,0 +1,91 @@
+<!doctype html>
+<!-- Native fields/samples: CF1209F, captured 2026-10-16. Rendered sample markup reproduces the reported Luogu page structure; this is a reduced regression fixture. -->
+<html lang="zh-CN"><head><title>CF1209F Koala and Notebook - 洛谷</title>
+<script id="lentille-context" type="application/json">{"data":{"problem":{"pid":"CF1209F","name":"Koala and Notebook","content":{"name":"Koala and Notebook","background":"","description":"Koala Land consists of $ m $ bidirectional roads connecting $ n $ cities. The roads are numbered from $ 1 $ to $ m $ by order in input. It is guaranteed, that one can reach any city from every other city.\n\nKoala starts traveling from city $ 1 $ . Whenever he travels on a road, he writes its number down in his notebook. He doesn't put spaces between the numbers, so they all get concatenated into a single number.\n\nBefore embarking on his trip, Koala is curious about the resulting number for all possible destinations. For each possible destination, what is the smallest number he could have written for it?\n\nSince these numbers may be quite large, print their remainders modulo $ 10^9+7 $ . Please note, that you need to compute the remainder of the minimum possible number, not the minimum possible remainder.","formatI":"The first line contains two integers $ n $ and $ m $ ( $ 2 \\le n \\le 10^5, n - 1 \\le m \\le 10^5 $ ), the number of cities and the number of roads, respectively.\n\nThe $ i $ -th of the following $ m $ lines contains integers $ x_i $ and $ y_i $ ( $ 1 \\le x_i, y_i \\le n $ , $ x_i \\ne y_i $ ), representing a bidirectional road between cities $ x_i $ and $ y_i $ .\n\nIt is guaranteed, that for any pair of cities there is at most one road connecting them, and that one can reach any city from every other city.","formatO":"Print $ n - 1 $ integers, the answer for every city except for the first city.\n\nThe $ i $ -th integer should be equal to the smallest number he could have written for destination $ i+1 $ . Since this number may be large, output its remainder modulo $ 10^9+7 $ .","hint":"","locale":"en"},"contenu":{"name":"Koala and Notebook","background":null,"description":"考拉之国有 $m$ 条双向道路连接着 $n$ 座城市。道路按输入顺序编号为 $1$ 到 $m$。保证任意两座城市之间都可以互相到达。\n\n考拉从第 $1$ 座城市出发旅行。每当他经过一条道路时，他会把这条道路的编号记在笔记本上。考拉不会在编号之间加空格，因此所有编号会被直接拼接成一个数字。\n\n在出发前，考拉很好奇，对于所有可能的目的地，他最终写下的数字分别是多少。对于每一个目的地，考拉想知道他可能写下的最小数字是多少。\n\n由于这些数字可能非常大，请输出它们对 $10^9+7$ 取模的结果。请注意，你需要输出最小可能数字的余数，而不是最小余数。","formatI":"第一行包含两个整数 $n$ 和 $m$（$2 \\le n \\le 10^5,\\, n-1 \\le m \\le 10^5$），分别表示城市数量和道路数量。\n\n接下来的 $m$ 行中，第 $i$ 行包含两个整数 $x_i$ 和 $y_i$（$1 \\le x_i, y_i \\le n,\\, x_i \\ne y_i$），表示一条连接城市 $x_i$ 和 $y_i$ 的双向道路。\n\n保证任意两座城市之间至多有一条道路直接相连，且任意两座城市之间都可以互相到达。","formatO":"输出 $n-1$ 个整数，第 $i$ 个整数表示到达第 $i+1$ 座城市时，考拉可能写下的最小数字对 $10^9+7$ 取模的结果。","hint":"\n\n由 ChatGPT 4.1 翻译","locale":"zh-CN"},"samples":[["11 10\n1 2\n2 3\n3 4\n4 5\n5 6\n6 7\n7 8\n8 9\n9 10\n10 11\n","1\n12\n123\n1234\n12345\n123456\n1234567\n12345678\n123456789\n345678826\n"],["12 19\n1 2\n2 3\n2 4\n2 5\n2 6\n2 7\n2 8\n2 9\n2 10\n3 11\n11 12\n1 3\n1 4\n1 5\n1 6\n1 7\n1 8\n1 9\n1 10\n","1\n12\n13\n14\n15\n16\n17\n18\n19\n1210\n121011\n"],["12 14\n1 2\n2 3\n3 4\n4 5\n5 6\n6 7\n7 8\n8 9\n9 10\n10 11\n11 12\n1 3\n1 4\n1 10\n","1\n12\n13\n134\n1345\n13456\n1498\n149\n14\n1410\n141011\n"]],"limits":{"time":[2000],"memory":[512000]}}}}</script>
+</head><body><main><h1>CF1209F Koala and Notebook</h1><article class="problem">
+<h2>题目描述</h2><p>考拉之国有 $m$ 条双向道路连接着 $n$ 座城市。</p>
+<h2>输入格式</h2><p>第一行包含两个整数 $n$ 和 $m$。</p>
+<h2>输出格式</h2><p>输出 $n-1$ 个整数。</p>
+<h2>输入输出样例</h2>
+<div class="io-sample"><div class="io-sample-block"><p><b>输入 #1</b><button>复制</button></p><pre>11 10
+1 2
+2 3
+3 4
+4 5
+5 6
+6 7
+7 8
+8 9
+9 10
+10 11
+</pre></div><div class="io-sample-block"><p><b>输出 #1</b><button>复制</button></p><pre>1
+12
+123
+1234
+12345
+123456
+1234567
+12345678
+123456789
+345678826
+</pre></div></div>
+<div class="io-sample"><div class="io-sample-block"><p><b>输入 #2</b><button>复制</button></p><pre>12 19
+1 2
+2 3
+2 4
+2 5
+2 6
+2 7
+2 8
+2 9
+2 10
+3 11
+11 12
+1 3
+1 4
+1 5
+1 6
+1 7
+1 8
+1 9
+1 10
+</pre></div><div class="io-sample-block"><p><b>输出 #2</b><button>复制</button></p><pre>1
+12
+13
+14
+15
+16
+17
+18
+19
+1210
+121011
+</pre></div></div>
+<div class="io-sample"><div class="io-sample-block"><p><b>输入 #3</b><button>复制</button></p><pre>12 14
+1 2
+2 3
+3 4
+4 5
+5 6
+6 7
+7 8
+8 9
+9 10
+10 11
+11 12
+1 3
+1 4
+1 10
+</pre></div><div class="io-sample-block"><p><b>输出 #3</b><button>复制</button></p><pre>1
+12
+13
+134
+1345
+13456
+1498
+149
+14
+1410
+141011
+</pre></div></div>
+</article></main></body></html>

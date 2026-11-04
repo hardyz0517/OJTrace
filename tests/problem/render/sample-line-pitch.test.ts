@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { ProblemDocument } from "../../../src/problem/domain";
+import type { RenderDocument } from "../../../src/problem/domain";
 import { bundledPreviewPackages } from "../../../src/problem/render/browser-typst-compiler";
 import {
   CODE_THEME_PATH,
@@ -9,29 +9,7 @@ import {
   MITEX_PACKAGE_KEY,
 } from "../../../src/problem/render/code-theme";
 import { problemDocumentToTypst } from "../../../src/problem/render/template";
-
-const FONT_FILES = [
-  "lmroman10-regular.otf",
-  "lmroman10-bold.otf",
-  "lmroman10-italic.otf",
-  "lmroman10-bolditalic.otf",
-  "lmroman12-regular.otf",
-  "lmroman12-bold.otf",
-  "lmroman12-italic.otf",
-  "lmroman17-regular.otf",
-  "SimSun.ttf",
-  "simhei.ttf",
-  "FiraMono-Regular.ttf",
-  "FiraMono-Medium.ttf",
-  "FiraMono-Bold.ttf",
-  "NewCMMath-Book.otf",
-  "NewCMMath-Regular.otf",
-  "NewCMMath-Bold.otf",
-  "NotoSerifCJKsc-Regular.otf",
-  "NotoSerifCJKsc-Bold.otf",
-  "OJTraceMincho-Regular.otf",
-  "OJTraceHei-Regular.otf",
-] as const;
+import { bundledFontPaths } from "../../../src/problem/render/font-manifest";
 
 const SAMPLE_ROWS = ["ROW-A", "ROW-B", "ROW-C", "ROW-D"] as const;
 
@@ -139,9 +117,8 @@ describe("math sample line pitch", () => {
         withPackageRegistry: (registry: unknown) => unknown;
       };
     };
-    const fonts = FONT_FILES.map(
-      (name) =>
-        new Uint8Array(readFileSync(resolve("public/problem-fonts", name))),
+    const fonts = bundledFontPaths.map(
+      (path) => new Uint8Array(readFileSync(resolve("public", path.slice(1)))),
     );
     const mitex = new Uint8Array(
       readFileSync(resolve("public/problem-packages/mitex-0.2.5.tar.gz")),
@@ -157,7 +134,7 @@ describe("math sample line pitch", () => {
     await typst.$typst.mapShadow(CODE_THEME_PATH, codeThemeBytes());
     const subscript = (row: string) =>
       mathLine([`A_{${row}, 1}`, `A_{${row}, 2}`, "\\ldots", `A_{${row}, N}`]);
-    const document: ProblemDocument = {
+    const document: RenderDocument = {
       oj: "atcoder",
       problemId: "arc083_b",
       title: "Restoring Road Network",
@@ -165,29 +142,29 @@ describe("math sample line pitch", () => {
       timeLimit: { display: "2 sec", milliseconds: 2_000 },
       memoryLimit: { display: "256 MiB", bytes: 256 * 1024 * 1024 },
       language: "en",
-      blocks: [
-        {
-          type: "heading",
-          level: 2,
-          children: [{ type: "text", value: "Inputs" }],
-        },
-        {
-          type: "code",
-          value: "N",
-          lines: [
-            [{ type: "inline-math", value: "N" }],
-            subscript("1"),
-            subscript("2"),
-            [{ type: "inline-math", value: "\\frac{A_{1, 1}}{A_{N, N}}" }],
-            subscript("N"),
-          ],
-        },
-        {
-          type: "sample",
-          input: { type: "code", value: SAMPLE_ROWS.join("\n") },
-        },
-      ],
-      markdown: "",
+      ast: {
+        type: "root" as const,
+        children: [
+          {
+            type: "heading",
+            level: 2,
+            children: [{ type: "text", value: "Inputs" }],
+          },
+          {
+            type: "code",
+            value: "N",
+            lines: [
+              [{ type: "inline-math", value: "N" }],
+              subscript("1"),
+              subscript("2"),
+              [{ type: "inline-math", value: "\\frac{A_{1, 1}}{A_{N, N}}" }],
+              subscript("N"),
+            ],
+          },
+          ...([{ type: "code", value: SAMPLE_ROWS.join("\n") }] as const),
+        ],
+      },
+
       assets: [],
       warnings: [],
     };

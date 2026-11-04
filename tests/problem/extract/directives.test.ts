@@ -1,17 +1,29 @@
+import { parseMarkdown } from "../../../src/problem/markdown/parse";
 import { describe, expect, it } from "vitest";
-import { htmlToStatement } from "../../../src/problem/extract/html-to-statement";
-import { markdownToHtml } from "../../../src/problem/extract/markdown-to-html";
-import { statementBlocksToTypst } from "../../../src/problem/render/statement-to-typst";
-import type { StatementBlock } from "../../../src/problem/statement";
+import { markdownBlocksToTypst } from "../../../src/problem/render/markdown-to-typst";
+import type { MarkdownBlock } from "../../../src/problem/markdown/ast";
 
-function blocksFrom(markdown: string): StatementBlock[] {
+function blocksFrom(markdown: string): MarkdownBlock[] {
   return [
-    ...htmlToStatement(markdownToHtml(markdown), "https://www.luogu.com.cn/")
-      .blocks,
+    ...parseMarkdown(markdown, { baseUrl: "https://www.luogu.com.cn/" }).ast
+      .children,
   ];
 }
 
 describe("Luogu statement directives", () => {
+  it("keeps unknown directives literal and respects same-fence nested containers", () => {
+    const unknown = blocksFrom(
+      ":::unknown[title]\n\ncontent\n\n:::\n\n::custom[data]",
+    );
+    expect(JSON.stringify(unknown)).toContain(":::unknown");
+    expect(JSON.stringify(unknown)).toContain("::custom");
+    const nested = blocksFrom(
+      ":::align{center}\n\n:::warning[Note]\n\ncontent\n\n:::\n\n:::",
+    );
+    expect(nested).toMatchObject([
+      { type: "align", align: "center", blocks: [{ type: "quote" }] },
+    ]);
+  });
   it("styles the next table as tuack and merges caret cells", () => {
     const blocks = blocksFrom(`::cute-table{tuack}
 
@@ -31,7 +43,7 @@ describe("Luogu statement directives", () => {
     expect(table.spans?.[3]?.[2]).toEqual({ colspan: 1, rowspan: 2 });
     expect(table.spans?.[4]?.[2]).toBeNull();
 
-    const typst = statementBlocksToTypst(blocks);
+    const typst = markdownBlocksToTypst(blocks);
     expect(typst).toContain(
       "#figure(table(columns: 4, align: (center + horizon, center + horizon, center + horizon, center + horizon)",
     );
@@ -56,11 +68,11 @@ describe("Luogu statement directives", () => {
     expect(table.style).toBeUndefined();
     expect(table.spans?.[1]?.[0]).toEqual({ colspan: 2, rowspan: 1 });
     expect(table.spans?.[1]?.[1]).toBeNull();
-    expect(statementBlocksToTypst([table])).toContain("colspan: 2");
-    expect(statementBlocksToTypst([table])).toContain(
+    expect(markdownBlocksToTypst([table])).toContain("colspan: 2");
+    expect(markdownBlocksToTypst([table])).toContain(
       "#figure(table(columns: 2",
     );
-    expect(statementBlocksToTypst([table])).not.toContain("table.header");
+    expect(markdownBlocksToTypst([table])).not.toContain("table.header");
   });
 
   it("consumes align and callout fences instead of printing them", () => {
@@ -82,7 +94,7 @@ describe("Luogu statement directives", () => {
     expect(rendered).not.toContain(":::");
     expect(rendered).toContain("注意");
     expect(rendered).toContain("小心");
-    expect(statementBlocksToTypst(blocks)).toContain("#align(center)");
+    expect(markdownBlocksToTypst(blocks)).toContain("#align(center)");
   });
 
   it("does not treat a directive mentioned in a sentence as a marker", () => {
@@ -108,7 +120,7 @@ describe("Luogu statement directives", () => {
       type: "table",
       alignments: ["left", "center", "right"],
     });
-    expect(statementBlocksToTypst(blocks)).toContain(
+    expect(markdownBlocksToTypst(blocks)).toContain(
       "align: (left + horizon, center + horizon, right + horizon)",
     );
   });
@@ -124,7 +136,7 @@ describe("Luogu statement directives", () => {
       type: "figure",
       caption: "示意图",
     });
-    const typst = statementBlocksToTypst(blocks);
+    const typst = markdownBlocksToTypst(blocks);
     expect(typst).toContain('#figure(caption: "示意图", )[');
     expect(typst).not.toContain(":::figure");
   });

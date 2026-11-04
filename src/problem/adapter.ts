@@ -9,8 +9,10 @@ import type { SourceId } from "../domain/types";
 
 export interface ProblemAdapter {
   readonly oj: SourceId;
-  readonly captureHints?: ProblemCaptureHints;
+  captureHints?(url: string): ProblemCaptureHints;
   match(url: string): boolean;
   inspect(probe: ProblemPageProbe): Promise<ProblemPreview | undefined>;
-  extract(snapshot: ProblemPageSnapshot): Promise<ProblemExtractionResult>;
+  extractSource(
+    snapshot: ProblemPageSnapshot,
+  ): Promise<ProblemExtractionResult>;
 }

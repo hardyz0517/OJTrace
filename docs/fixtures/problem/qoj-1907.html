@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<!-- Reconstructed from the user's complete QOJ 1907 report and public page.
+     The page's H3/H4 hierarchy is intentional. This is not a browser capture. -->
+<html lang="zh-CN">
+  <head><title>博弈 - 题目 - QOJ.ac</title></head>
+  <body>
+    <h1>QOJ.ac</h1>
+    <div class="uoj-content">
+      <span class="badge">时间限制：3 s</span>
+      <span class="badge">内存限制：1024 MB</span>
+      <h1 class="page-header">#1907. 博弈</h1>
+      <ul class="nav nav-tabs"><li>描述</li><li>语言</li><li>提交</li></ul>
+      <div id="tab-statement">
+        <article class="uoj-article top-buffer-md" lang="zh-CN">
+          <p>这是一道大原题。</p>
+          <p>给定 $n$ 个矩形，第 $i$ 个大小为 $w_i \times h_i$。现在有一个博弈，每次玩家可以选择一个矩形，以及一个可以切的方向，均匀切成 $n &gt; 1$ 份，要求切完后长宽仍是整数。对于第 $i$ 个矩形，还会有参数 $a_i, b_i \in \{0, 1\}$。若 $a_i = 1$，则第 $i$ 个矩形与它切出来的所有小矩形双方都可以在 $w$ 这一维横着切，否则只有左方能横着切。若 $b_i = 1$，则第 $i$ 个矩形与它切出来的所有小矩形双方都可以在 $h$ 这一维竖着切，否则只有右方能竖着切。</p>
+          <p>现在给定 $q$ 个询问，第 $i$ 个询问为若仅留下第 $l \sim r$ 个矩形，左方先手能否获胜。</p>
+          <h3>输入格式</h3>
+          <p>输入的第一行包含两个整数 $n, q$。</p>
+          <p>接下来 $n$ 行，每行四个整数 $a_i, b_i, w_i, h_i$，描述每个矩形。</p>
+          <p>接下来 $q$ 行，每行两个整数 $l_i, r_i$。</p>
+          <h3>输出格式</h3>
+          <p>输出一行，对于每个询问，如果可以获胜，输出 <code>Y</code>，否则输出 <code>N</code>。</p>
+          <h3>样例数据</h3>
+          <h4>样例 1 输入</h4>
+          <pre><code>6 8
+1 0 3 5
+0 1 5 10
+1 1 6 4
+1 1 8 12
+0 1 4 6
+1 0 8 10
+1 2
+1 4
+1 5
+2 4
+2 5
+3 3
+3 6
+4 4
+</code></pre>
+          <h4>样例 1 输出</h4>
+          <pre><code>NNNNNYYY
+</code></pre>
+          <h4>样例 2</h4>
+          <p>见下发文件。</p>
+          <h3>子任务</h3>
+          <p>对于所有数据，$1 \le n \le 10^5$，$1 \le q \le 10^6$，$1 \le h_i, w_i \le 10^5$，$1 \le l_i \le r_i \le n$。</p>
+          <ul>
+            <li>Subtask 1（10 分）：$n,q \le 10$。</li>
+            <li>Subtask 2（20 分）：$n \le 2\,000$。</li>
+            <li>Subtask 3（15 分）：$a_i = b_i = 1$。</li>
+            <li>Subtask 4（5 分）：$a_i = 1$。</li>
+            <li>Subtask 5（5 分）：$b_i = 1$。</li>
+            <li>Subtask 6（45 分）：没有额外的限制。</li>
+          </ul>
+        </article>
+      </div>
+      <div id="tab-submit-answer"><form>提交源代码</form></div>
+    </div>
+  </body>
+</html>

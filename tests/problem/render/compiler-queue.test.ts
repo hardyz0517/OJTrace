@@ -56,4 +56,51 @@ describe("browser typst compiler queue", () => {
       events.indexOf("reset", 3),
     );
   });
+
+  it("does not map the preview shadow while a pdf compile is in flight", async () => {
+    const events: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    const firstPdf = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const api = {
+      async resetShadow() {
+        events.push("reset");
+      },
+      async mapShadow() {
+        events.push("map");
+      },
+      async pdf() {
+        events.push("pdf");
+        await firstPdf;
+        return new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
+      },
+      async svg() {
+        events.push("svg");
+        return '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
+      },
+      use() {},
+    };
+    const compiler = new BrowserTypstCompiler(
+      api as unknown as ConstructorParameters<typeof BrowserTypstCompiler>[0],
+    );
+    const first = compiler.compile("first");
+    const second = compiler.compileSvg("second");
+    for (let turn = 0; turn < 20 && !events.includes("pdf"); turn += 1)
+      await Promise.resolve();
+    expect(events).toEqual(["reset", "map", "pdf"]);
+    releaseFirst?.();
+    await first;
+    await second;
+    expect(events).toEqual([
+      "reset",
+      "map",
+      "pdf",
+      "reset",
+      "reset",
+      "map",
+      "svg",
+      "reset",
+    ]);
+  });
 });

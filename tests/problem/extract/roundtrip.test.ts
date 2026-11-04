@@ -1,11 +1,15 @@
+import { parseMarkdown } from "../../../src/problem/markdown/parse";
+import { recognizeCodeforcesMarkup } from "../../../src/problem/adapters/codeforces-markup";
+import { prepareCodeforcesAst } from "../../../src/problem/cnoi/rules/codeforces";
 import { describe, expect, it } from "vitest";
 import {
   parseHtmlDocument,
   serializeNode,
 } from "../../../src/problem/extract/html-document";
-import { htmlToStatement } from "../../../src/problem/extract/html-to-statement";
-import { serializeMarkdown } from "../../../src/problem/extract/markdown-serializer";
-import { statementBlocksToTypst } from "../../../src/problem/render/statement-to-typst";
+import { htmlToAst } from "../../../src/problem/markdown/html";
+import { inferFigureCaptions } from "../../../src/problem/extract/figure-layout";
+import { serializeMarkdown } from "../../../src/problem/markdown/serialize";
+import { markdownBlocksToTypst } from "../../../src/problem/render/markdown-to-typst";
 
 const BASE_URL = "https://example.org/problem/1";
 
@@ -13,7 +17,7 @@ describe("statement extraction round trips", () => {
   it("escapes decoded text during the intermediate HTML serialization", () => {
     const original = `<p>Text &lt;tag&gt; &amp; entity: &quot;x&quot;</p><p>&lt;img src=x onerror=alert(1)&gt;</p>`;
     const root = parseHtmlDocument(original);
-    const result = htmlToStatement(serializeNode(root), BASE_URL);
+    const result = htmlToAst(serializeNode(root), BASE_URL);
 
     expect(result.blocks).toEqual([
       {
@@ -28,7 +32,7 @@ describe("statement extraction round trips", () => {
   });
 
   it("preserves adjacent paragraphs instead of dropping or flattening them", () => {
-    const result = htmlToStatement(
+    const result = htmlToAst(
       "<p>First paragraph.</p><p>Second paragraph.</p>",
       BASE_URL,
     );
@@ -45,27 +49,23 @@ describe("statement extraction round trips", () => {
   });
 
   it("keeps Codeforces example lines separated inside preformatted blocks", () => {
-    const result = htmlToStatement(
+    const result = codeforcesHtml(
       `<div class="input"><div class="title">Input</div><pre><div class="test-example-line">2 3</div><div class="test-example-line">4 5</div></pre></div>`,
       BASE_URL,
     );
     expect(result.blocks).toMatchObject([
       {
-        type: "sample",
-        input: { type: "code", value: "2 3\n4 5" },
-        inputLabel: {
-          type: "paragraph",
-          children: [{ type: "text", value: "Input" }],
-        },
+        type: "heading",
+        level: 2,
+        children: [{ type: "text", value: "Input" }],
       },
+      { type: "code", value: "2 3\n4 5" },
     ]);
-    expect(serializeMarkdown(result.blocks)).toBe(
-      "Input\n```text\n2 3\n4 5\n```\n",
-    );
+    expect(serializeMarkdown(result.blocks)).toContain("2 3\n4 5");
   });
 
-  it("keeps wrapped list text and inline formulas in a single sentence", () => {
-    const result = htmlToStatement(
+  it("preserves authored paragraphs and inline formulas inside a wrapped list item", () => {
+    const result = htmlToAst(
       `<ul><li><div><p>对于</p><p>$100\\%$</p><p>的数据，保证 <span class="katex" data-math="1 &lt;= n &lt;= 1000"></span>。</p></div></li></ul>`,
       BASE_URL,
     );
@@ -79,10 +79,16 @@ describe("statement extraction round trips", () => {
             children: [
               {
                 type: "paragraph",
+                children: [{ type: "text", value: "对于" }],
+              },
+              {
+                type: "paragraph",
+                children: [{ type: "inline-math", value: "100\\%" }],
+              },
+              {
+                type: "paragraph",
                 children: [
-                  { type: "text", value: "对于 " },
-                  { type: "inline-math", value: "100\\%" },
-                  { type: "text", value: " 的数据，保证 " },
+                  { type: "text", value: "的数据，保证 " },
                   { type: "inline-math", value: "1 <= n <= 1000" },
                   { type: "text", value: "。" },
                 ],
@@ -95,7 +101,7 @@ describe("statement extraction round trips", () => {
   });
 
   it("retains inline and display math source in typed AST nodes", () => {
-    const result = htmlToStatement(
+    const result = htmlToAst(
       `<p>Inline $x+1$ and \\(y+2\\).</p><p>Display $$a+b$$ or \\[c+d\\]</p><p><span data-math="q^2" class="katex"><span class="katex-mathml"><math><semantics><mrow><mi>wrong fallback</mi></mrow><annotation encoding="application/x-tex">rendered-value</annotation></semantics></math></span></span></p><span class="katex-display"><span class="katex"><math alttext="z=3"></math></span></span>`,
       BASE_URL,
     );
@@ -127,7 +133,7 @@ describe("statement extraction round trips", () => {
   });
 
   it("treats standalone MathML as a display math block by default", () => {
-    const result = htmlToStatement(
+    const result = htmlToAst(
       `<math alttext="x^2"><semantics><annotation>x^2</annotation></semantics></math>`,
       BASE_URL,
     );
@@ -135,7 +141,7 @@ describe("statement extraction round trips", () => {
   });
 
   it("uses MathJax's TeX script once and avoids its adjacent visual duplicate", () => {
-    const result = htmlToStatement(
+    const result = htmlToAst(
       `<p><span class="MathJax_Preview">preview glyphs</span><script type="math/tex">x^2+1</script><span class="MathJax" id="MathJax-Element-1">rendered glyphs</span></p>`,
       BASE_URL,
     );
@@ -148,7 +154,7 @@ describe("statement extraction round trips", () => {
   });
 
   it("extracts TeX scripts before removing unsafe scripts", () => {
-    const result = htmlToStatement(
+    const result = htmlToAst(
       `<p>Before<script type="math/tex">x &lt; y</script> after</p><script type="math/tex; mode=display">\\sum_{i=1}^n i</script><script>alert(1)</script>`,
       BASE_URL,
     );
@@ -167,7 +173,7 @@ describe("statement extraction round trips", () => {
   });
 
   it("does not promote the first body row into an implicit table header", () => {
-    const result = htmlToStatement(
+    const result = htmlToAst(
       `<table><tbody><tr><td>first</td><td>row</td></tr><tr><td>second</td><td>row</td></tr></tbody></table>`,
       BASE_URL,
     );
@@ -181,13 +187,12 @@ describe("statement extraction round trips", () => {
     });
   });
 
-  it("labels sample input/output, escapes table pipes, and grows code fences", () => {
+  it("encodes explicit samples without invented labels and escapes table pipes", () => {
     const markdown = serializeMarkdown([
-      {
-        type: "sample",
-        input: { type: "code", value: "a```b", language: "text" },
-        output: { type: "code", value: "x|y", language: "text" },
-      },
+      ...([
+        { type: "code", value: "a```b", language: "text" },
+        { type: "code", value: "x|y", language: "text" },
+      ] as const),
       {
         type: "table",
         headers: [[{ type: "text", value: "A|B" }]],
@@ -195,8 +200,12 @@ describe("statement extraction round trips", () => {
       },
     ]);
 
-    expect(markdown).toContain("**输入**\n````text\na```b\n````");
-    expect(markdown).toContain("**输出**\n```text\nx|y\n```");
+    expect(markdown).toContain("````text\na```b\n````");
+    expect(markdown).not.toContain("<pre");
+    expect(markdown).toContain("a```b");
+    expect(markdown).not.toContain("**输入**");
+    expect(markdown).not.toContain("data-ojtrace-sample");
+    expect(markdown).toContain("x|y");
     expect(markdown).toContain("| A\\|B |");
     expect(markdown).toContain("| `x\\|y` |");
   });
@@ -218,9 +227,16 @@ describe("statement extraction round trips", () => {
         ],
       },
     ]);
-    expect(markdown).toContain("|  |  |");
-    expect(markdown).toContain("| first | row |");
-    expect(markdown).toContain("| second | row |");
+    expect(markdown).toContain('<table data-ojtrace-table="plain">');
+    const parsed = parseMarkdown(markdown, { baseUrl: BASE_URL }).ast.children;
+    expect(parsed[0]).toMatchObject({
+      type: "table",
+      headers: [],
+      rows: [
+        [[{ type: "text", value: "first" }], [{ type: "text", value: "row" }]],
+        [[{ type: "text", value: "second" }], [{ type: "text", value: "row" }]],
+      ],
+    });
   });
 
   it("uses one TeX source for rendered AtCoder vars and code templates", () => {
@@ -228,7 +244,7 @@ describe("statement extraction round trips", () => {
       `<var><span class="katex"><span class="katex-mathml"><math><semantics><mrow>${visual}</mrow><annotation encoding="application/x-tex">${tex}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true">${visual}</span></span></var>`;
     const variable = katexVar("N", "N");
     const limit = katexVar(String.raw`2 \leq N \leq 400`, "2≤N≤400");
-    const result = htmlToStatement(
+    const result = htmlToAst(
       `<p>${variable} 個と ${limit}。</p><p><var>H_1</var> と <var>x<sub>i</sub></var> と <var>\\(T_i\\)</var></p><pre>${variable} ${katexVar("M", "M")}
 ${katexVar("A_{1, 1}", "A11")} ${katexVar("A_{1, 2}", "A12")} ${katexVar("...", "...")} ${katexVar("A_{1, N}", "A1N")}
 ${katexVar(String.raw`\mathrm{query}_1`, "query1")}
@@ -277,7 +293,7 @@ ${katexVar(String.raw`\vdots`, "vdots")}</pre>`,
         [{ type: "inline-math", value: String.raw`\vdots` }],
       ],
     });
-    const typst = statementBlocksToTypst(result.blocks);
+    const typst = markdownBlocksToTypst(result.blocks);
     expect(typst).toContain('#mi(block: false, "N")');
     expect(typst).toContain(
       String.raw`#mi(block: false, "2 \\leq N \\leq 400")`,
@@ -293,7 +309,7 @@ ${katexVar(String.raw`\vdots`, "vdots")}</pre>`,
   });
 
   it("keeps Codeforces triple-dollar formulas on the same line", () => {
-    const result = htmlToStatement(
+    const result = htmlToAst(
       "<p>A $$$3$$$-beautiful necklace is also $$$k$$$-beautiful.</p><p>$$$$$$a+b$$$$$$</p>",
       BASE_URL,
     );
@@ -314,7 +330,7 @@ ${katexVar(String.raw`\vdots`, "vdots")}</pre>`,
         children: [{ type: "inline-math", value: "a+b", display: true }],
       },
     ]);
-    const typst = statementBlocksToTypst(result.blocks);
+    const typst = markdownBlocksToTypst(result.blocks);
     expect(typst).toContain('#mi(block: false, "3")\\-beautiful');
     expect(typst).toContain('#mi(block: false, "k")\\-beautiful');
     expect(typst).not.toMatch(/\$\s+3\s+\$/);
@@ -323,7 +339,7 @@ ${katexVar(String.raw`\vdots`, "vdots")}</pre>`,
   it("keeps a Codeforces centered caption together and records image zoom", () => {
     const narrow = "https://espresso.codeforces.com/narrow.png";
     const wide = "https://espresso.codeforces.com/wide.png";
-    const result = htmlToStatement(
+    const result = codeforcesHtml(
       `<div><p>We call a necklace <span class="tex-span"><i>k</i></span>-beautiful.</p><center><img class="tex-graphics" src="${narrow}" alt="narrow" style="zoom: 75%;max-width: 100%;max-height: 100%;" /><br />The first necklace cannot be assembled because it has three beads "<span class="tex-span"><i>a</i></span>" (of the two available).</center><center>As you can see, this necklace is, for example, <span class="tex-font-style-bf">3</span>-beautiful, <span class="tex-font-style-bf">6</span>-beautiful, <span class="tex-font-style-bf">9</span>-beautiful, and so on.</center><center><img class="tex-graphics" src="${wide}" alt="wide" style="zoom: 75%;max-width: 100%;max-height: 100%;" /></center></div>`,
       "https://codeforces.com/problemset/problem/1367/E",
     );
@@ -400,7 +416,7 @@ ${katexVar(String.raw`\vdots`, "vdots")}</pre>`,
         ],
       },
     ]);
-    const typst = statementBlocksToTypst(result.blocks);
+    const typst = markdownBlocksToTypst(result.blocks);
     expect(typst).toContain(
       '#text(size: 10.5pt)[The first necklace cannot be assembled because it has three beads "_a_" (of the two available).]',
     );
@@ -412,12 +428,17 @@ ${katexVar(String.raw`\vdots`, "vdots")}</pre>`,
   });
 
   it("keeps quoted typewriter words as prose and leaves bare identifiers as code", () => {
-    const result = htmlToStatement(
+    const result = codeforcesHtml(
       '<p>It has three beads <span class="tex-font-style-tt">"a"</span> (of the two available). The second contains a bead "<span class="tex-font-style-tt">d</span>", which is not sold. Use <span class="tex-font-style-tt">n</span> and <span class="tex-font-style-tt">\u201ca\u201d</span>.</p>',
       BASE_URL,
     );
 
-    expect(result.blocks).toEqual([
+    expect(JSON.stringify(result.blocks)).toContain("inline-code");
+    const transformed = prepareCodeforcesAst({
+      type: "root" as const,
+      children: result.blocks,
+    }).children;
+    expect(transformed).toEqual([
       {
         type: "paragraph",
         children: [
@@ -431,7 +452,7 @@ ${katexVar(String.raw`\vdots`, "vdots")}</pre>`,
         ],
       },
     ]);
-    const typst = statementBlocksToTypst(result.blocks);
+    const typst = markdownBlocksToTypst(transformed);
     expect(typst).toContain('beads "a" (of the two available)');
     expect(typst).toContain('bead "d", which is not sold');
     expect(typst).not.toContain('#raw("\\"a\\""');
@@ -440,7 +461,7 @@ ${katexVar(String.raw`\vdots`, "vdots")}</pre>`,
   });
 
   it("treats a centered note under a separate image as a smaller caption", () => {
-    const result = htmlToStatement(
+    const result = codeforcesHtml(
       '<center><img src="https://example.org/beads.png" alt="beads" /></center><center>The first necklace cannot be assembled.</center><p>We call a necklace beautiful.</p>',
       BASE_URL,
     );
@@ -465,7 +486,7 @@ ${katexVar(String.raw`\vdots`, "vdots")}</pre>`,
       type: "paragraph",
       children: [{ type: "text", value: "We call a necklace beautiful." }],
     });
-    const typst = statementBlocksToTypst(result.blocks);
+    const typst = markdownBlocksToTypst(result.blocks);
     expect(typst).toContain(
       "#text(size: 10.5pt)[The first necklace cannot be assembled.]",
     );
@@ -475,3 +496,10 @@ ${katexVar(String.raw`\vdots`, "vdots")}</pre>`,
     );
   });
 });
+
+function codeforcesHtml(html: string, baseUrl: string) {
+  const root = parseHtmlDocument(html);
+  recognizeCodeforcesMarkup(root);
+  const parsed = htmlToAst(serializeNode(root), baseUrl);
+  return { ...parsed, blocks: inferFigureCaptions(parsed.blocks) };
+}

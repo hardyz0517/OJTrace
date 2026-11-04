@@ -1,4 +1,4 @@
-import type { TypstCompiler } from "./typst-renderer";
+import { isTypstSvg, type TypstCompiler } from "./typst-renderer";
 import {
   CODE_THEME_PATH,
   codeThemeBytes,
@@ -9,6 +9,10 @@ import { ProblemCompileError, compileDiagnostic } from "./compile-diagnostic";
 
 interface TypstApi {
   pdf(options: { mainContent: string }): Promise<Uint8Array>;
+  svg(options: {
+    mainContent: string;
+    data_selection: { body: true; defs: true; css: true; js: false };
+  }): Promise<string>;
   mapShadow(path: string, data: Uint8Array): Promise<void>;
   resetShadow(): Promise<void>;
   use(...providers: unknown[]): void;
@@ -115,8 +119,12 @@ interface TypstModule {
 
 let apiPromise: Promise<TypstApi> | undefined;
 
-async function loadAsset(path: string): Promise<Uint8Array> {
-  const extensionPageUrl = browser.runtime.getURL("/problem-export.html");
+async function loadAsset(
+  path: string,
+  assetBaseUrl?: string,
+): Promise<Uint8Array> {
+  const extensionPageUrl =
+    assetBaseUrl ?? browser.runtime.getURL("/problem-export.html");
   const assetUrl = new URL(path.replace(/^\//, ""), extensionPageUrl);
   const response = await fetch(assetUrl);
   if (!response.ok)
@@ -128,7 +136,7 @@ async function loadAsset(path: string): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-async function loadApi(): Promise<TypstApi> {
+async function loadApi(assetBaseUrl?: string): Promise<TypstApi> {
   const module =
     (await import("@myriaddreamin/typst-all-in-one.ts")) as unknown as TypstModule;
   const api = module.$typst;
@@ -141,8 +149,8 @@ async function loadApi(): Promise<TypstApi> {
     module.TypstSnippet.disableDefaultFontAssets?.(),
   ].filter((provider) => provider !== undefined);
   const [fonts, mitex] = await Promise.all([
-    Promise.all(bundledFontPaths.map((path) => loadAsset(path))),
-    loadAsset("/problem-packages/mitex-0.2.5.tar.gz"),
+    Promise.all(bundledFontPaths.map((path) => loadAsset(path, assetBaseUrl))),
+    loadAsset("/problem-packages/mitex-0.2.5.tar.gz", assetBaseUrl),
   ]);
   const preloadFonts = module.TypstSnippet.preloadFonts;
   if (!preloadFonts) throw new Error("Typst font loader is unavailable");
@@ -161,8 +169,8 @@ async function loadApi(): Promise<TypstApi> {
   return api;
 }
 
-function typstApi(): Promise<TypstApi> {
-  apiPromise ??= loadApi().catch((error) => {
+function typstApi(assetBaseUrl?: string): Promise<TypstApi> {
+  apiPromise ??= loadApi(assetBaseUrl).catch((error) => {
     apiPromise = undefined;
     throw error;
   });
@@ -188,21 +196,51 @@ function sourceDiagnostic(error: unknown): ProblemCompileError {
 
 /** Browser-local Typst compiler. It never reaches a remote font or compiler URL. */
 export class BrowserTypstCompiler implements TypstCompiler {
-  constructor(private readonly apiOverride?: TypstApi) {}
+  constructor(
+    private readonly apiOverride?: TypstApi,
+    private readonly assetBaseUrl?: string,
+  ) {}
 
-  async compile(
+  compile(
     source: string,
     options?: { assets?: ReadonlyMap<string, Uint8Array> },
   ): Promise<Uint8Array> {
-    const api = this.apiOverride ?? (await typstApi());
+    return this.inShadow(
+      (api) => api.pdf({ mainContent: source }),
+      options?.assets,
+    );
+  }
+
+  compileSvg(
+    source: string,
+    options?: { assets?: ReadonlyMap<string, Uint8Array> },
+  ): Promise<string> {
+    return this.inShadow(async (api) => {
+      // The default output embeds browser helpers containing HTML entities
+      // (e.g. &nbsp;) which are invalid in XML. Our static SVG preview needs
+      // the drawing, glyph definitions and CSS, but none of those scripts.
+      const svg = await api.svg({
+        mainContent: source,
+        data_selection: { body: true, defs: true, css: true, js: false },
+      });
+      if (!isTypstSvg(svg)) throw new Error("Typst 没有返回可预览的页面");
+      return svg;
+    }, options?.assets);
+  }
+
+  private async inShadow<T>(
+    produce: (api: TypstApi) => Promise<T>,
+    assets?: ReadonlyMap<string, Uint8Array>,
+  ): Promise<T> {
+    const api = this.apiOverride ?? (await typstApi(this.assetBaseUrl));
     return enqueueShadow(async () => {
       await api.resetShadow();
       try {
         await api.mapShadow(CODE_THEME_PATH, codeThemeBytes());
-        for (const [path, data] of options?.assets ?? [])
+        for (const [path, data] of assets ?? [])
           await api.mapShadow(path, data);
         try {
-          return await api.pdf({ mainContent: source });
+          return await produce(api);
         } catch (error) {
           throw sourceDiagnostic(error);
         }

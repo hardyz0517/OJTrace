@@ -1,3 +1,4 @@
+import { inferProblemLanguage, normalizeProblemLanguage } from "../language";
 import type { ProblemAdapter } from "../adapter";
 import type {
   ProblemExtractionResult,
@@ -6,7 +7,7 @@ import type {
   ProblemPreview,
 } from "../domain";
 import {
-  extractDocument,
+  extractSourceDocument,
   idFromUrl,
   looksLikeLoginOrChallenge,
   parseProbe,
@@ -61,21 +62,52 @@ function hydroRoot(root: HtmlRootNode): HtmlElementNode | undefined {
     root,
     (node) =>
       hasClass(node, "problem-content") &&
-      attr(node, "data-marker-enabled") !== undefined,
+      Object.hasOwn(node.attrs, "data-marker-enabled"),
   );
 }
 
 /**
- * Hydro injects contest and system callouts into the statement fragment
- * (`blockquote.note` / `blockquote.warn`). They are not part of the problem.
+ * Known UI notices precede rendered content in Hydro's default template:
+ * https://github.com/hydro-dev/Hydro/blob/master/packages/ui-default/templates/partials/problem_description.html
+ * A note/warn class alone is insufficient evidence to remove author content.
  */
 function stripHydroChrome(statement: HtmlElementNode): void {
+  // Hydro's Prism highlighter wraps code and adds Copy/Fill-to-Pretest UI.
+  // A toolbar outside this generated wrapper can be authored problem content.
   removeNodes(
     statement,
     (node) =>
-      node.tagName === "blockquote" &&
-      (hasClass(node, "note") || hasClass(node, "warn")),
+      hasClass(node, "toolbar") &&
+      !!node.parent &&
+      hasClass(node.parent, "code-toolbar") &&
+      node.parent.children.some(
+        (child) => child.type === "element" && child.tagName === "pre",
+      ),
   );
+  let prefix = true;
+  statement.children = statement.children.filter((node) => {
+    if (node.type === "text" && !node.value.trim()) return true;
+    if (
+      node.type === "element" &&
+      prefix &&
+      node.tagName === "blockquote" &&
+      (hasClass(node, "note") || hasClass(node, "warn"))
+    ) {
+      const text = trimmedText(node);
+      if (
+        /^No\s+testdata\s+at\s+current\./i.test(text) ||
+        /^No submission language\b/i.test(text) ||
+        (/^(?:You cannot submit|The contest)\b/i.test(text) &&
+          /contest.*ended/i.test(text)) ||
+        /^(?:暂无测试数据[。.]|该比赛已结束，您无法在比赛模式下递交|比赛已结束)/u.test(
+          text,
+        )
+      )
+        return false;
+    }
+    prefix = false;
+    return true;
+  });
 }
 
 function looksLikeHydroChallenge(root: HtmlRootNode): boolean {
@@ -136,7 +168,7 @@ export const hydrojProblemAdapter: ProblemAdapter = {
       snapshotLanguage(probe),
     );
   },
-  async extract(
+  async extractSource(
     snapshot: ProblemPageSnapshot,
   ): Promise<ProblemExtractionResult> {
     if (!this.match(snapshot.url))
@@ -149,13 +181,18 @@ export const hydrojProblemAdapter: ProblemAdapter = {
     stripHydroChrome(statement);
     if (trimmedText(statement).length < 40)
       return { ok: false, reason: "page-not-ready" };
-    return extractDocument({
+    return extractSourceDocument({
       source: "hydroj",
       snapshot,
       problemId: idFromUrl(snapshot.url, URL_PATTERNS),
       title: rootTitle(root) ?? snapshot.title,
       root: statement,
-      language: snapshotLanguage(snapshot) ?? snapshot.language ?? "other",
+      language:
+        normalizeProblemLanguage(attr(statement, "lang")) ??
+        inferProblemLanguage(trimmedText(statement)) ??
+        snapshotLanguage(snapshot) ??
+        snapshot.language ??
+        "other",
       timeText: hydroTimeText(root, statement),
       memoryText: hydroMemoryText(root, statement),
     });

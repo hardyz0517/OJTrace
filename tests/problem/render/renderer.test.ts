@@ -1,9 +1,23 @@
 import { describe, expect, it } from "vitest";
-import type { ProblemDocument } from "../../../src/problem/domain";
+import type { RenderDocument } from "../../../src/problem/domain";
 import { problemDocumentToTypst } from "../../../src/problem/render/template";
-import { TypstProblemRenderer } from "../../../src/problem/render/typst-renderer";
+import { markdownBlocksToTypst } from "../../../src/problem/render/markdown-to-typst";
+import { parseMarkdown } from "../../../src/problem/markdown/parse";
+import {
+  isTypstSvg,
+  type TypstCompiler,
+  TypstProblemRenderer,
+} from "../../../src/problem/render/typst-renderer";
 
-const document: ProblemDocument = {
+function pdfCompiler(compile: TypstCompiler["compile"]): TypstCompiler {
+  return {
+    compile,
+    compileSvg: () =>
+      Promise.reject(new Error("SVG preview was not requested")),
+  };
+}
+
+const document: RenderDocument = {
   oj: "codeforces",
   problemId: "1A",
   title: "Theatre Square",
@@ -11,50 +25,82 @@ const document: ProblemDocument = {
   timeLimit: { display: "1 second", milliseconds: 1_000 },
   memoryLimit: { display: "256 megabytes", bytes: 256 * 1024 * 1024 },
   language: "en",
-  blocks: [
-    {
-      type: "heading",
-      level: 2,
-      children: [{ type: "text", value: "Problem" }],
-    },
-    {
-      type: "paragraph",
-      children: [
-        { type: "text", value: "Compute " },
-        { type: "inline-math", value: "n^2" },
-        { type: "text", value: "." },
-      ],
-    },
-    { type: "code", value: "6 6 4", language: "text" },
-    {
-      type: "sample",
-      input: { type: "code", value: "6 6 4", language: "text" },
-      output: { type: "code", value: "4", language: "text" },
-    },
-    {
-      type: "table",
-      headers: [
-        [{ type: "text", value: "变量" }],
-        [{ type: "text", value: "范围" }],
-      ],
-      rows: [
-        [
-          [{ type: "inline-code", value: "n" }],
-          [{ type: "text", value: "1 到 10^9" }],
+  displayLabels: { timeLimit: "Time Limit", memoryLimit: "Memory Limit" },
+  ast: {
+    type: "root" as const,
+    children: [
+      {
+        type: "heading",
+        level: 2,
+        children: [{ type: "text", value: "Problem" }],
+      },
+      {
+        type: "paragraph",
+        children: [
+          { type: "text", value: "Compute " },
+          { type: "inline-math", value: "n^2" },
+          { type: "text", value: "." },
         ],
-      ],
-    },
-  ],
-  markdown: "## Problem\n\nCompute $n^2$.\n",
+      },
+      { type: "code", value: "6 6 4", language: "text" },
+      ...([
+        {
+          type: "heading",
+          level: 2,
+          children: [{ type: "text", value: "Sample Input 7" }],
+        },
+        { type: "code", value: "6 6 4", language: "text" },
+        {
+          type: "heading",
+          level: 2,
+          children: [{ type: "text", value: "Sample Output 7" }],
+        },
+        { type: "code", value: "4", language: "text" },
+      ] as const),
+      {
+        type: "table",
+        headers: [
+          [{ type: "text", value: "变量" }],
+          [{ type: "text", value: "范围" }],
+        ],
+        rows: [
+          [
+            [{ type: "inline-code", value: "n" }],
+            [{ type: "text", value: "1 到 10^9" }],
+          ],
+        ],
+      },
+    ],
+  },
+
   assets: [],
   warnings: [],
 };
 
 describe("problem renderer", () => {
+  it("renders all six final Markdown heading levels without semantic normalization", () => {
+    const markdown =
+      "# Author title\n\n## Input\n\n### Examples\n\n#### Input #7\n\n##### Detail\n\n###### Deep detail\n";
+    const ast = parseMarkdown(markdown).ast;
+    const before = JSON.stringify(ast);
+    expect(markdownBlocksToTypst(ast.children)).toBe(
+      "= Author title\n\n== Input\n\n=== Examples\n\n==== Input \\#7\n\n===== Detail\n\n====== Deep detail",
+    );
+    expect(JSON.stringify(ast)).toBe(before);
+  });
+
+  it("keeps real list-item paragraph breaks and nested headings in the final Markdown", () => {
+    const markdown =
+      "- First paragraph.\n\n  Second paragraph.\n\n  #### Author detail\n\n  - Nested paragraph.\n\n    Nested continuation.\n";
+    expect(markdownBlocksToTypst(parseMarkdown(markdown).ast.children)).toBe(
+      "- First paragraph.\n\n  Second paragraph.\n\n  ==== Author detail\n\n  - Nested paragraph.\n\n    Nested continuation.",
+    );
+  });
   it("converts canonical blocks to a self-contained Typst document", () => {
     const source = problemDocumentToTypst(document);
     expect(source).toContain("Theatre Square");
-    expect(source).toContain("时间限制");
+    expect(source).toContain("Time Limit");
+    expect(source).not.toContain("时间限制");
     expect(source).toContain('#mi(block: false, "n^2")');
     expect(source).toContain("6 6 4");
     expect(source).toContain("#figure(table(columns: 2");
@@ -66,12 +112,13 @@ describe("problem renderer", () => {
     expect(source).not.toContain("[*变量*]");
     expect(source).not.toContain("[object Object]");
     expect(source).toContain('paper: "a4"');
-    expect(source).toContain("第 #(now) 页");
+    expect(source).toContain("#(now)");
+    expect(source).not.toContain("第 #(now) 页");
     expect(source).toContain("Codeforces #h(1fr) 1A#h(0.5em)Theatre Square");
     expect(source).toContain("size: 18pt");
     expect(source).toContain("first-line-indent: (amount: 2em, all: true)");
-    expect(source).toContain("样例 1 输入");
-    expect(source).toContain("样例 1 输出");
+    expect(source).toContain("Sample Input 7");
+    expect(source).toContain("Sample Output 7");
     expect(source).toContain('rgb("#0000ff")');
     expect(source).toContain("leading: 0.65em");
     expect(source).toContain("spacing: 0em");
@@ -84,42 +131,52 @@ describe("problem renderer", () => {
   });
 
   it("escapes Typst markup characters in untrusted statement text", () => {
-    const untrustedDocument: ProblemDocument = {
+    const untrustedDocument: RenderDocument = {
       ...document,
       title: "#let(x) *title* [label]",
-      blocks: [
-        {
-          type: "paragraph",
-          children: [
-            {
-              type: "text",
-              value: "// #show raw: *bold* _em_ cost $5 <label> @ref `code`",
-            },
-          ],
-        },
-      ],
+      ast: {
+        type: "root" as const,
+        children: [
+          {
+            type: "paragraph",
+            children: [
+              {
+                type: "text",
+                value:
+                  "// #show raw: *bold* _em_ cost $5 and $n$ <label> @ref `code`",
+              },
+              { type: "inline-math", value: "n^2" },
+            ],
+          },
+        ],
+      },
     };
     const source = problemDocumentToTypst(untrustedDocument);
 
     expect(source).toContain("\\#let(x) \\*title\\* \\[label\\]");
     expect(source).toContain(
-      String.raw`\/\/ \#show raw: \*bold\* \_em\_ cost \$5 \<label\> \@ref \`code\``,
+      String.raw`\/\/ \#show raw: \*bold\* \_em\_ cost \$5 and \$n\$ \<label\> \@ref \`code\``,
     );
     expect(source).not.toContain("#show raw: *bold*");
+    expect(source).toContain('#mi(block: false, "n^2")');
+    expect(source).not.toContain('#mi(block: false, "n")');
   });
 
   it("normalizes common LaTeX formula commands for Typst", () => {
-    const formulaDocument: ProblemDocument = {
+    const formulaDocument: RenderDocument = {
       ...document,
-      blocks: [
-        {
-          type: "paragraph",
-          children: [
-            { type: "inline-math", value: String.raw`\frac{a}{b} \le c` },
-          ],
-        },
-        { type: "math", value: String.raw`\sqrt{x}` },
-      ],
+      ast: {
+        type: "root" as const,
+        children: [
+          {
+            type: "paragraph",
+            children: [
+              { type: "inline-math", value: String.raw`\frac{a}{b} \le c` },
+            ],
+          },
+          { type: "math", value: String.raw`\sqrt{x}` },
+        ],
+      },
     };
     const source = problemDocumentToTypst(formulaDocument);
     expect(source).toContain(
@@ -130,22 +187,25 @@ describe("problem renderer", () => {
   });
 
   it("preserves display math embedded in paragraph content", () => {
-    const formulaDocument: ProblemDocument = {
+    const formulaDocument: RenderDocument = {
       ...document,
-      blocks: [
-        {
-          type: "paragraph",
-          children: [
-            { type: "text", value: "The result is " },
-            {
-              type: "inline-math",
-              value: String.raw`\sum_{i=1}^n i`,
-              display: true,
-            },
-            { type: "text", value: "." },
-          ],
-        },
-      ],
+      ast: {
+        type: "root" as const,
+        children: [
+          {
+            type: "paragraph",
+            children: [
+              { type: "text", value: "The result is " },
+              {
+                type: "inline-math",
+                value: String.raw`\sum_{i=1}^n i`,
+                display: true,
+              },
+              { type: "text", value: "." },
+            ],
+          },
+        ],
+      },
     };
 
     const source = problemDocumentToTypst(formulaDocument);
@@ -154,19 +214,22 @@ describe("problem renderer", () => {
   });
 
   it("converts nested radicals and fractions while keeping Typst code inert", () => {
-    const formulaDocument: ProblemDocument = {
+    const formulaDocument: RenderDocument = {
       ...document,
-      blocks: [
-        {
-          type: "paragraph",
-          children: [
-            {
-              type: "inline-math",
-              value: String.raw`\frac{\sqrt{x+1}}{y} #let(a=1)`,
-            },
-          ],
-        },
-      ],
+      ast: {
+        type: "root" as const,
+        children: [
+          {
+            type: "paragraph",
+            children: [
+              {
+                type: "inline-math",
+                value: String.raw`\frac{\sqrt{x+1}}{y} #let(a=1)`,
+              },
+            ],
+          },
+        ],
+      },
     };
     const source = problemDocumentToTypst(formulaDocument);
 
@@ -179,41 +242,44 @@ describe("problem renderer", () => {
   it("counts merged table columns by span instead of cell count", () => {
     const source = problemDocumentToTypst({
       ...document,
-      blocks: [
-        {
-          type: "table",
-          headers: [
-            [{ type: "text", value: "Group" }],
-            [{ type: "text", value: "Limit" }],
-          ],
-          rows: [
-            [
-              [{ type: "text", value: "1" }],
-              [{ type: "text", value: "11" }],
-              [{ type: "inline-code", value: "n" }],
+      ast: {
+        type: "root" as const,
+        children: [
+          {
+            type: "table",
+            headers: [
+              [{ type: "text", value: "Group" }],
+              [{ type: "text", value: "Limit" }],
             ],
-            [
-              [{ type: "text", value: "12" }],
-              [{ type: "text", value: "tight" }],
+            rows: [
+              [
+                [{ type: "text", value: "1" }],
+                [{ type: "text", value: "11" }],
+                [{ type: "inline-code", value: "n" }],
+              ],
+              [
+                [{ type: "text", value: "12" }],
+                [{ type: "text", value: "tight" }],
+              ],
             ],
-          ],
-          spans: [
-            [
-              { colspan: 2, rowspan: 1 },
-              { colspan: 1, rowspan: 1 },
+            spans: [
+              [
+                { colspan: 2, rowspan: 1 },
+                { colspan: 1, rowspan: 1 },
+              ],
+              [
+                { colspan: 1, rowspan: 2 },
+                { colspan: 1, rowspan: 1 },
+                { colspan: 1, rowspan: 1 },
+              ],
+              [
+                { colspan: 1, rowspan: 1 },
+                { colspan: 1, rowspan: 1 },
+              ],
             ],
-            [
-              { colspan: 1, rowspan: 2 },
-              { colspan: 1, rowspan: 1 },
-              { colspan: 1, rowspan: 1 },
-            ],
-            [
-              { colspan: 1, rowspan: 1 },
-              { colspan: 1, rowspan: 1 },
-            ],
-          ],
-        },
-      ],
+          },
+        ],
+      },
     });
     expect(source).toContain("#figure(table(columns: 3");
     expect(source).toContain("table.cell(colspan: 2)[Group]");
@@ -221,31 +287,20 @@ describe("problem renderer", () => {
     expect(source).toContain('#raw("n", lang: "txt", block: false)');
   });
 
-  it("keeps the compiler injectable", async () => {
-    let source = "";
-    const renderer = new TypstProblemRenderer({
-      compile: async (next) => {
-        source = next;
-        return new Uint8Array([37, 80, 68, 70]);
-      },
-    });
-    await expect(renderer.render(document)).resolves.toEqual(
-      new Uint8Array([37, 80, 68, 70]),
-    );
-    expect(source).toContain("Theatre Square");
-  });
-
   it("does not pass unembedded remote images to Typst", () => {
-    const imageDocument: ProblemDocument = {
+    const imageDocument: RenderDocument = {
       ...document,
       assets: [],
-      blocks: [
-        {
-          type: "image",
-          url: "https://cdn.example.test/diagram.png",
-          alt: "图示",
-        },
-      ],
+      ast: {
+        type: "root" as const,
+        children: [
+          {
+            type: "image",
+            url: "https://cdn.example.test/diagram.png",
+            alt: "图示",
+          },
+        ],
+      },
     };
     const source = problemDocumentToTypst(imageDocument);
 
@@ -254,31 +309,35 @@ describe("problem renderer", () => {
     );
     expect(source).toContain('#link("https://cdn.example.test/diagram.png")');
     expect(source).toContain("图示");
-    expect(source).toContain("查看原图");
+    expect(source).toContain("↗");
+    expect(source).not.toContain("查看原图");
   });
 
   it("keeps quotes and hashes inside a Typst link string", () => {
     const source = problemDocumentToTypst({
       ...document,
-      blocks: [
-        {
-          type: "paragraph",
-          children: [
-            {
-              type: "link",
-              url: 'https://cdn.example.test/a"b#c',
-              children: [{ type: "text", value: "site" }],
-            },
-          ],
-        },
-      ],
+      ast: {
+        type: "root" as const,
+        children: [
+          {
+            type: "paragraph",
+            children: [
+              {
+                type: "link",
+                url: 'https://cdn.example.test/a"b#c',
+                children: [{ type: "text", value: "site" }],
+              },
+            ],
+          },
+        ],
+      },
     });
     expect(source).toContain('#link("https://cdn.example.test/a\\"b#c")[site]');
   });
 
   it("maps embedded image bytes to a renderer-owned Typst virtual path", async () => {
     const sourceUrl = "https://cdn.example.test/diagram.png";
-    const imageDocument: ProblemDocument = {
+    const imageDocument: RenderDocument = {
       ...document,
       assets: [
         {
@@ -289,17 +348,20 @@ describe("problem renderer", () => {
             "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/WioAAAAASUVORK5CYII=",
         },
       ],
-      blocks: [{ type: "image", url: sourceUrl, alt: "图示" }],
+      ast: {
+        type: "root" as const,
+        children: [{ type: "image", url: sourceUrl, alt: "图示" }],
+      },
     };
     let compiledSource = "";
     let compiledAssets: ReadonlyMap<string, Uint8Array> | undefined;
-    const renderer = new TypstProblemRenderer({
-      compile: async (next, options) => {
+    const renderer = new TypstProblemRenderer(
+      pdfCompiler(async (next, options) => {
         compiledSource = next;
         compiledAssets = options?.assets;
         return new Uint8Array([37, 80, 68, 70]);
-      },
-    });
+      }),
+    );
 
     await renderer.render(imageDocument);
 
@@ -317,7 +379,7 @@ describe("problem renderer", () => {
   it("keeps an author-less image at its natural size", async () => {
     const narrowUrl = "https://espresso.codeforces.com/narrow.png";
     const wideUrl = "https://espresso.codeforces.com/wide.png";
-    const imageDocument: ProblemDocument = {
+    const imageDocument: RenderDocument = {
       ...document,
       assets: [
         {
@@ -331,31 +393,34 @@ describe("problem renderer", () => {
           dataUrl: pngDataUrl(800, 180),
         },
       ],
-      blocks: [
-        {
-          type: "image",
-          url: narrowUrl,
-          alt: "narrow",
-          zoom: 0.75,
-          maxWidthRatio: 1,
-          maxHeightRatio: 1,
-        },
-        {
-          type: "image",
-          url: wideUrl,
-          alt: "wide",
-          zoom: 0.75,
-          maxWidthRatio: 1,
-        },
-      ],
+      ast: {
+        type: "root" as const,
+        children: [
+          {
+            type: "image",
+            url: narrowUrl,
+            alt: "narrow",
+            zoom: 0.75,
+            maxWidthRatio: 1,
+            maxHeightRatio: 1,
+          },
+          {
+            type: "image",
+            url: wideUrl,
+            alt: "wide",
+            zoom: 0.75,
+            maxWidthRatio: 1,
+          },
+        ],
+      },
     };
     let compiledSource = "";
-    const renderer = new TypstProblemRenderer({
-      compile: async (next) => {
+    const renderer = new TypstProblemRenderer(
+      pdfCompiler(async (next) => {
         compiledSource = next;
         return new Uint8Array([37, 80, 68, 70]);
-      },
-    });
+      }),
+    );
 
     await renderer.render(imageDocument);
 
@@ -365,41 +430,47 @@ describe("problem renderer", () => {
     expect(compiledSource).not.toMatch(/image\([^)]*width:/);
   });
 
-  it("flattens paragraphs inside a list item", () => {
+  it("preserves authored paragraphs inside a list item", () => {
     const source = problemDocumentToTypst({
       ...document,
-      blocks: [
-        {
-          type: "list",
-          ordered: false,
-          items: [
-            {
-              children: [
-                {
-                  type: "paragraph",
-                  children: [{ type: "text", value: "第一句。" }],
-                },
-                {
-                  type: "paragraph",
-                  children: [{ type: "text", value: "第二句。" }],
-                },
-              ],
-            },
-          ],
-        },
-      ],
+      ast: {
+        type: "root" as const,
+        children: [
+          {
+            type: "list",
+            ordered: false,
+            items: [
+              {
+                children: [
+                  {
+                    type: "paragraph",
+                    children: [{ type: "text", value: "第一句。" }],
+                  },
+                  {
+                    type: "paragraph",
+                    children: [{ type: "text", value: "第二句。" }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
     });
-    expect(source).toContain("- 第一句。 第二句。");
-    expect(source).not.toContain("- 第一句。\n\n第二句。");
+    expect(source).toContain("- 第一句。\n\n  第二句。");
+    expect(source).not.toContain("- 第一句。 第二句。");
   });
 
   it("maps plain and markdown code languages onto the code theme", () => {
     const source = problemDocumentToTypst({
       ...document,
-      blocks: [
-        { type: "code", value: "int a = 1;", language: "plain" },
-        { type: "code", value: "# title", language: "markdown" },
-      ],
+      ast: {
+        type: "root" as const,
+        children: [
+          { type: "code", value: "int a = 1;", language: "plain" },
+          { type: "code", value: "# title", language: "markdown" },
+        ],
+      },
     });
     expect(source).toContain('lang: "txt"');
     expect(source).toContain('lang: "md"');
@@ -417,18 +488,48 @@ describe("problem renderer", () => {
           typstPath: "/ojtrace-assets/image-0.png",
         },
       ],
-      blocks: [
-        {
-          type: "image",
-          url: "https://cdn.example.test/diagram.png",
-          alt: "图",
-          width: 200,
-        },
-      ],
+      ast: {
+        type: "root" as const,
+        children: [
+          {
+            type: "image",
+            url: "https://cdn.example.test/diagram.png",
+            alt: "图",
+            width: 200,
+          },
+        ],
+      },
     });
     expect(source).toContain(
       '#box(image("/ojtrace-assets/image-0.png", width: 150pt, alt: "图"))',
     );
+  });
+
+  it("previews from the same Typst source as the PDF export", async () => {
+    const sources: string[] = [];
+    const renderer = new TypstProblemRenderer({
+      async compile(source) {
+        sources.push(source);
+        return new Uint8Array([37, 80, 68, 70]);
+      },
+      async compileSvg(source) {
+        sources.push(source);
+        return '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
+      },
+    });
+    await expect(renderer.render(document)).resolves.toEqual(
+      new Uint8Array([37, 80, 68, 70]),
+    );
+    await expect(renderer.preview(document)).resolves.toBe(
+      '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+    );
+    expect(sources).toHaveLength(2);
+    expect(sources[0]).toContain("Theatre Square");
+    expect(sources[1]).toBe(sources[0]);
+    expect(isTypstSvg('<svg xmlns="http://www.w3.org/2000/svg"></svg>')).toBe(
+      true,
+    );
+    expect(isTypstSvg("not an svg")).toBe(false);
   });
 });
 

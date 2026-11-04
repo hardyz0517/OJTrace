@@ -7,7 +7,7 @@ import type {
   ProblemPreview,
 } from "../domain";
 import {
-  extractDocument,
+  extractSourceDocument,
   findRoot,
   idFromUrl,
   memoryText,
@@ -183,21 +183,6 @@ function languageVariant(
   return visible ?? variants[0] ?? statement;
 }
 
-const SCORE_LINE =
-  /^(?:配点|score)\s*[:：]\s*\d[\d,\s]*\s*(?:点|points?)\s*\.?\s*$/i;
-
-function stripContestScore(root: HtmlElementNode): void {
-  removeNodes(root, (node) => {
-    if (node.tagName !== "p") return false;
-    const text = trimmedText(node).replace(/\s+/g, " ");
-    return text.length <= 120 && SCORE_LINE.test(text);
-  });
-}
-
-function stripSectionRules(root: HtmlElementNode): void {
-  removeNodes(root, (node) => node.tagName === "hr");
-}
-
 function selectedLanguage(
   url: string,
   statement: HtmlElementNode,
@@ -212,6 +197,15 @@ function selectedLanguage(
     snapshotLanguage ??
     "en";
   return normalized === "ja" ? "ja" : "en";
+}
+
+/** AtCoder's contest.js adds these controls and hidden clipboard mirrors. */
+function removeCopyControls(statement: HtmlElementNode): void {
+  removeNodes(statement, (node) =>
+    ["btn-copy", "div-btn-copy", "source-code-for-copy"].some((name) =>
+      hasClass(node, name),
+    ),
+  );
 }
 
 export const atcoderProblemAdapter: ProblemAdapter = {
@@ -244,7 +238,7 @@ export const atcoderProblemAdapter: ProblemAdapter = {
       language,
     );
   },
-  async extract(
+  async extractSource(
     snapshot: ProblemPageSnapshot,
   ): Promise<ProblemExtractionResult> {
     if (!this.match(snapshot.url))
@@ -261,9 +255,8 @@ export const atcoderProblemAdapter: ProblemAdapter = {
       snapshot.language,
     );
     const selectedStatement = languageVariant(statement, language);
-    stripContestScore(selectedStatement);
-    stripSectionRules(selectedStatement);
-    return extractDocument({
+    removeCopyControls(selectedStatement);
+    return extractSourceDocument({
       source: "atcoder",
       snapshot,
       problemId: idFromUrl(snapshot.url, URL_PATTERNS),

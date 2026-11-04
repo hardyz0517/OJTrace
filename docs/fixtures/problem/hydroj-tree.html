@@ -1,0 +1,59 @@
+<!doctype html>
+<!-- Reconstructed from the user's complete tree statement and screenshot, 2026-10-18.
+The instance requires login; this is not an authenticated page capture.
+KaTeX nodes and Prism toolbar markup reproduce Hydro's public component structure. -->
+<html lang="zh-CN"><body>
+<h1 class="section__title">生成树很爽（tree）</h1>
+<span class="icon-stopwatch">1000ms</span><span class="icon-comparison">256MiB</span>
+<div class="problem-content" data-marker-enabled>
+<div class="section__body typo richmedia" data-fragment-id="problem-description">
+<h3>生成树很爽（tree）</h3>
+<h3>题目描述</h3>
+<p>给定 $n,l$ 和 $m$ 个三元组 $(l_i, r_i, w_i)$。 定义 $G_k$ 为：</p>
+<ul>
+<li>新建一个 $n\times (k+1)$ 个点的图。</li>
+<li>对于每个三元组 <span class="katex"><span class="katex-mathml"><math><semantics><mrow>visual tuple</mrow><annotation encoding="application/x-tex">(l_i,r_i,w_i)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true">visual tuple</span></span>，在图上加入 <span class="katex"><span class="katex-mathml"><math><semantics><mrow>visual k</mrow><annotation encoding="application/x-tex">k</annotation></semantics></math></span><span class="katex-html" aria-hidden="true">visual k</span></span> 条边：
+<ul>
+<li>第 $j$ 条边连接节点 $l_i + (j-1) \times n$ 和节点 $r_i+j\times n$，边权为 $w_i$。</li>
+</ul>
+</li>
+<li>所有边加入完毕后，$G_k$ 即为该图最小生成树的边权和。</li>
+</ul>
+<p>你要求出 $G_1\sim G_l$。给定的 $m$ 个三元组保证上述生成的所有图连通。</p>
+<h3>输入格式</h3>
+<p>第一行三个整数 $n,l,m$。</p>
+<p>接下来 $m$ 行，每行一个三元组 $(l_i, r_i, w_i)$。</p>
+<h3>输出格式</h3>
+<p>依次输出 $G_1\sim G_l$。</p>
+<h3>输入样例 1</h3>
+<div class="code-toolbar"><pre><code class="language-plain">4 4 8
+3 4 12
+1 1 20
+1 3 22
+4 2 12
+4 4 2
+2 2 2
+1 2 2
+1 4 2
+</code></pre><div class="toolbar"><div class="toolbar-item"><a href="javascript:;">Copy</a></div><div class="toolbar-item scratchpad-fill-button"><a href="javascript:;">Fill to Pretest</a></div></div></div>
+<h3>输出样例 1</h3>
+<div class="code-toolbar"><pre><code class="language-plain">62
+80
+98
+116
+</code></pre><div class="toolbar"><div class="toolbar-item"><a href="javascript:;">Copy</a></div></div></div>
+<h3>数据范围与约定</h3>
+<p>对于 $100\%$ 的数据，保证 $1\le n,l\le 10^5, 1\le m\le 2\times 10^5, 1\le w_i\le 30$。</p>
+<table>
+<thead><tr><th align="center">子任务编号</th><th align="center">特殊性质</th><th align="center">分值</th></tr></thead>
+<tbody>
+<tr><td>$1$</td><td>$l=1$</td><td rowspan="2">$5$</td></tr>
+<tr><td>$2$</td><td>$n,l,m\le 200$</td></tr>
+<tr><td>$3$</td><td>$n,l\le 1000$</td><td>$25$</td></tr>
+<tr><td>$4$</td><td>$w_i\le 2$</td><td>$15$</td></tr>
+<tr><td>$5$</td><td>$n\le 1000$</td><td rowspan="2">$25$</td></tr>
+<tr><td>$6$</td><td>无特殊性质</td></tr>
+</tbody>
+</table>
+<p><a href="/p/100/file/tree.zip?type=additional_file">附加文件</a></p>
+</div></div></body></html>

@@ -1,3 +1,4 @@
+import { inferProblemLanguage, normalizeProblemLanguage } from "../language";
 import type { ProblemAdapter } from "../adapter";
 import type {
   ProblemExtractionResult,
@@ -6,7 +7,7 @@ import type {
   ProblemPreview,
 } from "../domain";
 import {
-  extractDocument,
+  extractSourceDocument,
   findRoot,
   idFromUrl,
   looksLikeLoginOrChallenge,
@@ -116,10 +117,8 @@ function normalizeQojTitle(value: string): string {
 function qojBody(statement: HtmlElementNode): HtmlElementNode {
   const children = statement.children.filter((child) => {
     if (child.type !== "element") return true;
-    if (child.tagName === "script" || child.tagName === "style") return false;
     if (child.tagName === "h1") {
-      const text = trimmedText(child);
-      return !hasClass(child, "page-header") && !/^\s*#?\d+\s*[.)]/.test(text);
+      return !hasClass(child, "page-header");
     }
     return !isQojChrome(child);
   });
@@ -130,14 +129,9 @@ function qojBody(statement: HtmlElementNode): HtmlElementNode {
 
 function isQojChrome(node: HtmlElementNode): boolean {
   if (node.tagName === "nav") return true;
-  return [
-    "nav",
-    "nav-tabs",
-    "alert",
-    "btn",
-    "uoj-click-zan-block",
-    "uoj-favourite-block",
-  ].some((name) => hasClass(node, name));
+  return ["nav", "nav-tabs", "uoj-click-zan-block", "uoj-favourite-block"].some(
+    (name) => hasClass(node, name),
+  );
 }
 
 const LIMIT_QUANTITY =
@@ -197,10 +191,11 @@ export const qojProblemAdapter: ProblemAdapter = {
       probe,
       idFromUrl(probe.url, URL_PATTERNS),
       qojTitle(root, probe.title),
-      "en",
+      normalizeProblemLanguage(attr(statement, "lang")) ??
+        inferProblemLanguage(trimmedText(statement)),
     );
   },
-  async extract(
+  async extractSource(
     snapshot: ProblemPageSnapshot,
   ): Promise<ProblemExtractionResult> {
     if (!this.match(snapshot.url))
@@ -211,13 +206,17 @@ export const qojProblemAdapter: ProblemAdapter = {
     const statement = qojStatementRoot(root);
     if (!statement) return { ok: false, reason: "statement-not-found" };
     const body = qojBody(statement);
-    return extractDocument({
+    return extractSourceDocument({
       source: "qoj",
       snapshot,
       problemId: idFromUrl(snapshot.url, URL_PATTERNS),
       title: qojTitle(root, snapshot.title),
       root: body,
-      language: snapshot.language ?? "en",
+      language:
+        normalizeProblemLanguage(attr(body, "lang")) ??
+        inferProblemLanguage(trimmedText(body)) ??
+        snapshot.language ??
+        "other",
       timeText: qojMeasuredLimit(
         root,
         body,

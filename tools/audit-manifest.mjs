@@ -14,7 +14,6 @@ const unexpected = forbidden.filter(
 );
 const expectedHosts = [
   "https://codeforces.com/*",
-  "https://www.luogu.com.cn/*",
   "https://atcoder.jp/*",
   "https://kenkoooo.com/*",
   "https://*/*",
@@ -24,11 +23,14 @@ const expectedHosts = [
 if (!hostPermissions.has("https://qoj.ac/*")) {
   throw new Error("QOJ must remain a fixed host permission");
 }
+if (!hostPermissions.has("https://www.luogu.com.cn/*")) {
+  throw new Error("Luogu problem enhancement requires a fixed host permission");
+}
 
 if (unexpected.length > 0) {
   throw new Error(`Forbidden permissions found: ${unexpected.join(", ")}`);
 }
-for (const permission of ["activeTab", "scripting"]) {
+for (const permission of ["activeTab", "scripting", "offscreen", "downloads"]) {
   if (!permissions.has(permission))
     throw new Error(`Problem export requires ${permission}`);
 }
@@ -43,12 +45,19 @@ if (
     `Unexpected optional host permissions: ${[...optionalHosts].join(", ")}`,
   );
 }
-const luoguContentScript = (manifest.content_scripts ?? []).find((item) =>
-  (item.matches ?? []).includes("https://www.luogu.com.cn/*"),
+const luoguSolutionScript = (manifest.content_scripts ?? []).find(
+  (item) =>
+    (item.matches ?? []).includes("https://www.luogu.com.cn/problem/*") &&
+    (item.js ?? []).some((file) => file.includes("luogu-solution-channel")),
 );
-if (luoguContentScript) {
-  throw new Error(
-    "Luogu page-session content script must not be bundled; sync is service-worker-only",
-  );
+if (!luoguSolutionScript) {
+  throw new Error("Luogu solution-channel script must target problem pages");
+}
+const luoguRuntimeScript = new URL(
+  "../.output/chrome-mv3/content-scripts/luogu-cross-oj.js",
+  import.meta.url,
+);
+if (!(await readFile(luoguRuntimeScript)).byteLength) {
+  throw new Error("Luogu runtime content script was not emitted");
 }
 console.log("Manifest permission audit passed.");

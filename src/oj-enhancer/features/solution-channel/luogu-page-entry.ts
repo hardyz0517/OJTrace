@@ -98,7 +98,6 @@ function cloneNativeLuoguTag(
   wrapper.removeAttribute("href");
   wrapper.removeAttribute("target");
   wrapper.removeAttribute("rel");
-  wrapper.style.cursor = "pointer";
   wrapper.setAttribute("role", "status");
   wrapper.setAttribute("aria-label", SOLUTION_CHANNEL_LABEL);
   wrapper.setAttribute(LUOGU_SOLUTION_CHANNEL_BADGE_ATTRIBUTE, "true");
@@ -120,7 +119,6 @@ function makeEmptyCardBadge(): HTMLElement {
   wrapper.append(label);
   // Luogu's global `a:hover` rule provides the native brightness effect.
   // No href keeps this informational status from navigating anywhere.
-  wrapper.style.cursor = "pointer";
   wrapper.setAttribute("role", "status");
   wrapper.setAttribute("aria-label", SOLUTION_CHANNEL_LABEL);
   wrapper.setAttribute(LUOGU_SOLUTION_CHANNEL_BADGE_ATTRIBUTE, "true");

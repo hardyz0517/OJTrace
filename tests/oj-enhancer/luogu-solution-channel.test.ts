@@ -80,6 +80,7 @@ describe("Luogu solution submission channel badge", () => {
       `[${LUOGU_SOLUTION_CHANNEL_BADGE_ATTRIBUTE}]`,
     );
     expect(badge).not.toBeNull();
+    expect(badge?.tagName).toBe("A");
     expect(badge?.textContent?.trim()).toBe("题解通道开放");
     expect(badge?.querySelector("span")?.className).toBe("native-luogu-tag");
     expect(badge?.querySelector("span")?.style.backgroundColor).toBe(
@@ -89,6 +90,7 @@ describe("Luogu solution submission channel badge", () => {
       "rgb(217, 139, 5)",
     );
     expect(badge?.hasAttribute("href")).toBe(false);
+    expect(badge?.style.cursor).toBe("");
     expect(badge?.getAttribute("role")).toBe("status");
     expect(
       document.querySelectorAll(`[${LUOGU_SOLUTION_CHANNEL_BADGE_ATTRIBUTE}]`),
@@ -121,6 +123,8 @@ describe("Luogu solution submission channel badge", () => {
       `[${LUOGU_SOLUTION_CHANNEL_BADGE_ATTRIBUTE}]`,
     );
     expect(badge?.dataset.ojtraceFallbackTag).toBe("true");
+    expect(badge?.tagName).toBe("A");
+    expect(badge?.hasAttribute("href")).toBe(false);
     expect(badge?.textContent?.trim()).toBe("题解通道开放");
     expect(badge?.querySelector("span")?.style.backgroundColor).toBe(
       "rgb(243, 156, 17)",

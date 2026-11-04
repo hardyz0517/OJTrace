@@ -1,6 +1,7 @@
 import { defineConfig } from "wxt";
 
 export default defineConfig({
+  vite: () => ({ worker: { format: "es" } }),
   manifest: {
     name: "OJTrace（题迹）",
     description: "Local-first cross-OJ submission timeline",
@@ -8,16 +9,20 @@ export default defineConfig({
     permissions: [
       "storage",
       "tabs",
+      "alarms",
       "cookies",
       "activeTab",
       "scripting",
+      // Direct PDF generation runs without opening a tab; downloads owns the
+      // hand-off so its offscreen Blob survives until the file is complete.
+      "offscreen",
+      "downloads",
       // Statement extraction finishes after the click gesture expires.
       "clipboardWrite",
     ],
-    host_permissions: ["https://qoj.ac/*"],
+    host_permissions: ["https://qoj.ac/*", "https://www.luogu.com.cn/*"],
     optional_host_permissions: [
       "https://codeforces.com/*",
-      "https://www.luogu.com.cn/*",
       "https://atcoder.jp/*",
       "https://kenkoooo.com/*",
       // Chrome only permits permissions.request() for patterns declared here.

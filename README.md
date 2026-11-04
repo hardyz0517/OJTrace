@@ -34,6 +34,10 @@ OJTrace 将这些记录按时间统一整理，方便每日回顾、比赛或训
 - 管理多个账号，自定义同步账号和采集范围（最近 35 天内）。
 - 跳转到原题或提交记录，复制单条记录的复盘 Markdown。
 
+## 题面 Markdown 与 PDF
+
+五个 OJ 的 Adapter 只交付 Source Markdown、元信息和资源；Source Markdown 经通用 Parser → AST Transformer（通用及五站独立规则）→ Serializer 生成 CNOI Markdown。复制直接使用 Source；直接导出和编辑未改导出共用最终 Markdown 解析与 Typst 渲染，用户编辑后不再执行转换。保留原题语言、原样例编号、图片尺寸与合并表格。开发与新增站点规则见[数据流维护说明](docs/development/problem-markdown-pipeline.md)。
+
 ## 支持的 OJ
 
 | OJ         | 添加账号方式                                          | 备注                                         |
@@ -96,12 +100,15 @@ OJTrace 采用本地优先存储：账号配置、提交记录和手动填写的
 
 扩展不会向开发者服务器上传 Cookie、密码、提交记录或代码。数据请求只发往已连接的 OJ 或 AtCoder Problems（`kenkoooo.com`）公开数据服务；登录凭证仅用于对应 OJ 的认证。
 
-| 权限             | 用途                                |
-| ---------------- | ----------------------------------- |
-| `storage`        | 保存本地数据                        |
-| `tabs`           | 打开或聚焦 OJTrace 页面             |
-| `cookies`        | 在需要登录态的 OJ 上处理对应 Cookie |
-| host permissions | 访问对应 OJ 和所需的公开数据服务    |
+| 权限                      | 用途                                   |
+| ------------------------- | -------------------------------------- |
+| `storage`                 | 保存本地数据                           |
+| `tabs`                    | 打开或聚焦 OJTrace 页面                |
+| `cookies`                 | 在需要登录态的 OJ 上处理对应 Cookie    |
+| `activeTab` / `scripting` | 按需读取用户当前题目页的题面           |
+| `clipboardWrite`          | 复制题目 Markdown                      |
+| `offscreen` / `downloads` | 本地生成并直接下载 PDF，无需打开标签页 |
+| host permissions          | 访问对应 OJ 和所需的公开数据服务       |
 
 站点授权范围和 Cookie 处理细节见 [隐私说明](./docs/privacy.md)。
 

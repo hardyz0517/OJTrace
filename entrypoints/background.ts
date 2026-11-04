@@ -1,3 +1,5 @@
+import { isRulesMessage } from "../src/application/cnoi-rules/messages";
+import { handleRulesMessage } from "../src/application/cnoi-rules/service";
 import { createBrowserHttpClient } from "../src/platform/network/browser-http-client";
 import { createStoragePort } from "../src/application/storage/store";
 import {
@@ -37,6 +39,7 @@ import { createPaginationRuntime } from "../src/platform/network/pagination-thro
 import { createAccountCollector } from "../src/application/sync/collect-account";
 import { SyncRangeError } from "../src/domain";
 import { updatePaginationPreference } from "../src/application/preferences/pagination-preferences";
+import { updateLuoguSolutionChannelPreference } from "../src/application/preferences/luogu-solution-channel";
 import {
   isProblemExportMessage,
   isProblemExportPortRequest,
@@ -47,10 +50,21 @@ import {
 import { PROBLEM_EXPORT_PORT_NAME } from "../src/application/problem-export/transport";
 import { ProblemExportService } from "../src/application/problem-export/service";
 import {
+  isPdfWorkerTarget,
+  PDF_WORKER_ALIVE,
+  PDF_WORKER_PATH,
+} from "../src/application/problem-export/pdf-worker-messages";
+import {
   openOrFocusSettings,
   openOrFocusTimeline,
 } from "../src/application/navigation/extension-pages";
 import { problemAdapterRegistry } from "../src/problem/registry";
+import {
+  clearCrossOjHistory,
+  handleCrossOjSubmitMessage,
+  isCrossOjSubmitMessage,
+  registerCrossOjSubmitBackground,
+} from "../src/oj-enhancer/features/cross-oj-submit/background-bridge";
 
 const storage = createStoragePort(browser.storage.local);
 const rateLimits = createRateLimitRegistry({
@@ -89,6 +103,13 @@ function requestIdOf(raw: unknown): string {
 
 const problemExport = new ProblemExportService({
   registry: problemAdapterRegistry,
+  loadRules: async () => {
+    const data = await storage.load();
+    return {
+      rules: data.preferences.cnoiRules ?? { formatVersion: 1, bySource: {} },
+      problems: data.preferences.cnoiRuleProblems ?? {},
+    };
+  },
 });
 
 async function authorizeAccount(
@@ -99,10 +120,45 @@ async function authorizeAccount(
 }
 
 export default defineBackground(() => {
+  registerCrossOjSubmitBackground();
   browser.runtime.onMessage.addListener((raw: unknown, sender) => {
     if (sender.id !== browser.runtime.id) return undefined;
+    if (isCrossOjSubmitMessage(raw))
+      return handleCrossOjSubmitMessage(raw, sender);
+    if (isRulesMessage(raw)) return handleRulesMessage(storage, raw);
+    if (isPdfWorkerTarget(raw)) return undefined;
+    if (
+      raw &&
+      typeof raw === "object" &&
+      (raw as { type?: unknown }).type === PDF_WORKER_ALIVE
+    ) {
+      if (sender.url !== browser.runtime.getURL(PDF_WORKER_PATH))
+        return undefined;
+      return Promise.resolve({ ok: true });
+    }
     if (isSyncProgressEvent(raw)) return undefined;
     if (isProblemExportMessage(raw)) return handleProblemExportMessage(raw);
+    if (
+      raw &&
+      typeof raw === "object" &&
+      [
+        "INSPECT_ACTIVE_PROBLEM_PAGE",
+        "START_PROBLEM_EXPORT",
+        "EXTRACT_PROBLEM_MARKDOWN",
+        "OPEN_TIMELINE",
+        "OPEN_SETTINGS",
+      ].includes(String((raw as { type?: unknown }).type))
+    ) {
+      return {
+        schemaVersion: (raw as { schemaVersion?: unknown }).schemaVersion,
+        requestId: requestIdOf(raw),
+        ok: false,
+        error: {
+          code: "schema_mismatch",
+          message: "扩展已更新，请重新打开弹窗后重试。",
+        },
+      };
+    }
     const schemaVersion =
       raw && typeof raw === "object"
         ? (raw as { schemaVersion?: unknown }).schemaVersion
@@ -130,16 +186,29 @@ export default defineBackground(() => {
     }
     let token: string | undefined;
     port.onMessage.addListener((raw: unknown) => {
-      if (!isProblemExportPortRequest(raw)) return;
-      token = raw.token;
-      if (
-        raw.type === "PROBLEM_EXPORT_CONNECT" ||
-        raw.type === "PROBLEM_EXPORT_START"
-      ) {
-        void problemExport.deliver(port, raw.token, raw.job);
-      } else {
-        void problemExport.cancel(raw.token);
+      if (!isProblemExportPortRequest(raw)) {
+        const item = raw as {
+          token?: unknown;
+          requestId?: unknown;
+          schemaVersion?: unknown;
+        } | null;
+        if (item && typeof item.token === "string")
+          port.postMessage({
+            ...problemExportEnvelope(
+              typeof item.requestId === "string"
+                ? item.requestId
+                : "schema-mismatch",
+            ),
+            schemaVersion: item.schemaVersion === 1 ? 1 : 2,
+            type: "PROBLEM_EXPORT_ERROR",
+            token: item.token,
+            code: "schema_mismatch",
+            error: "扩展已更新，请关闭此页并重新发起导出。",
+          });
+        return;
       }
+      token = raw.token;
+      void problemExport.deliver(port, raw.token, raw.job);
     });
     port.onDisconnect.addListener(() => {
       if (token) void problemExport.cancel(token);
@@ -168,12 +237,17 @@ async function handleProblemExportMessage(
         const job = await problemExport.start(
           message.tabId,
           message.expectedUrl,
+          message.intent ?? "download",
         );
         return {
           ...problemExportEnvelope(message.requestId),
           ok: true,
           type: "EXPORT_STARTED",
-          job: { token: job.token, expiresAt: job.expiresAt },
+          job: {
+            token: job.token,
+            expiresAt: job.expiresAt,
+            ...(job.warnings?.length ? { warnings: job.warnings } : {}),
+          },
         };
       }
       case "EXTRACT_PROBLEM_MARKDOWN": {
@@ -286,6 +360,13 @@ async function handleMessage(
         );
         return dataResponse(message.requestId, "UPDATED", data);
       }
+      case "UPDATE_LUOGU_SOLUTION_CHANNEL": {
+        const data = await updateLuoguSolutionChannelPreference(
+          storage,
+          message.enabled,
+        );
+        return dataResponse(message.requestId, "UPDATED", data);
+      }
       case "DELETE_ACCOUNT": {
         const data = await accounts.remove(message.accountId);
         return dataResponse(message.requestId, "UPDATED", data);
@@ -293,6 +374,7 @@ async function handleMessage(
       case "CLEAR_DATA":
         accounts.cancelPending();
         await storage.clear();
+        await clearCrossOjHistory();
         return clearedResponse(message.requestId);
       case "CLEAR_ACCOUNTS": {
         const data = await accounts.clearAll();
@@ -304,6 +386,7 @@ async function handleMessage(
           ...current,
           submissions: [],
         }));
+        await clearCrossOjHistory();
         return dataResponse(message.requestId, "UPDATED", data);
       }
       case "DETECT_BROWSER_SESSION": {

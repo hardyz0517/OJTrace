@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { RotateCcw, Save } from "lucide-react";
 import { sources } from "../../src/sources/definitions";
 import {
@@ -84,7 +90,9 @@ function PaginationSourceRow({
   name,
   preferences,
   onUpdated,
+  onDirtyChange,
 }: {
+  onDirtyChange?: (source: SourceId, dirty: boolean) => void;
   source: SourceId;
   name: string;
   preferences: Preferences;
@@ -121,6 +129,9 @@ function PaginationSourceRow({
   const changed =
     candidate.intervalMs !== saved.intervalMs ||
     candidate.jitterMs !== saved.jitterMs;
+  useEffect(() => {
+    onDirtyChange?.(source, changed || busy);
+  }, [source, changed, busy, onDirtyChange]);
   const maxJitter = Number.isFinite(candidate.intervalMs)
     ? maxPaginationJitterMs(candidate.intervalMs)
     : PAGINATION_LIMITS.maxIntervalMs;
@@ -274,15 +285,27 @@ function PaginationSourceRow({
 export function PaginationSettings({
   preferences,
   onUpdated,
+  onDirtyChange,
 }: {
+  onDirtyChange?: (dirty: boolean) => void;
   preferences: Preferences;
   onUpdated: (data: PublicStoredData) => void | Promise<void>;
 }) {
+  const [drafts, setDrafts] = useState<Partial<Record<SourceId, boolean>>>({});
+  const reportDirty = useCallback((source: SourceId, dirty: boolean) => {
+    setDrafts((current) =>
+      current[source] === dirty ? current : { ...current, [source]: dirty },
+    );
+  }, []);
+  const hasDirty = Object.values(drafts).some(Boolean);
+  useEffect(() => {
+    onDirtyChange?.(hasDirty);
+  }, [hasDirty, onDirtyChange]);
   return (
     <section className="settings-section pagination-section">
-      <div className="section-heading">
-        <h2>采集</h2>
-      </div>
+      <header className="settings-module-heading">
+        <h1>采集与同步</h1>
+      </header>
       <p className="muted pagination-description">
         为每个 OJ 设置列表分页的基础间隔和随机浮动，基础间隔上限 600
         秒，浮动不可超过基础间隔。保存后从下次同步生效。
@@ -297,6 +320,7 @@ export function PaginationSettings({
             name={metadata.displayName}
             preferences={preferences}
             onUpdated={onUpdated}
+            onDirtyChange={reportDirty}
           />
         ))}
       </div>

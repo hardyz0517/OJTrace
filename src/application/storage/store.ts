@@ -1,3 +1,4 @@
+import { isCnoiRuleEntry, type StoredCnoiRules } from "../../domain/cnoi-rules";
 import {
   DEFAULT_PREFERENCES,
   STORAGE_SCHEMA_VERSION,
@@ -20,8 +21,7 @@ import {
   updateActivityScheduleCache,
   type ActivityScheduleRecord,
 } from "../../domain/activity-schedule";
-
-const STORAGE_KEY = "ojtrace:data";
+import { OJTRACE_STORAGE_KEY } from "./storage-keys";
 
 export interface StorageAreaLike {
   get(keys?: string | string[] | null): Promise<Record<string, unknown>>;
@@ -240,6 +240,10 @@ function validateStoredData(value: StoredData): StoredData {
     value.preferences.paginationBySource,
   );
   const preferences: StoredData["preferences"] = {
+    luoguSolutionChannelEnabled:
+      typeof value.preferences.luoguSolutionChannelEnabled === "boolean"
+        ? value.preferences.luoguSolutionChannelEnabled
+        : DEFAULT_PREFERENCES.luoguSolutionChannelEnabled,
     retentionPerAccount:
       Number.isSafeInteger(retentionPerAccount) && retentionPerAccount > 0
         ? retentionPerAccount
@@ -251,6 +255,39 @@ function validateStoredData(value: StoredData): StoredData {
     ...(syncAccountIds === undefined ? {} : { syncAccountIds }),
     ...(paginationBySource === undefined ? {} : { paginationBySource }),
   };
+  const rawRules: unknown = value.preferences.cnoiRules;
+  const bySource: StoredCnoiRules["bySource"] = {};
+  const problems: Partial<
+    Record<import("../../domain/types").SourceId, string>
+  > = {};
+  if (isRecord(value.preferences.cnoiRuleProblems))
+    for (const [source, message] of Object.entries(
+      value.preferences.cnoiRuleProblems,
+    ))
+      if (isSourceId(source) && typeof message === "string")
+        problems[source] = message;
+  if (isRecord(rawRules)) {
+    if (rawRules.formatVersion === 1 && isRecord(rawRules.bySource)) {
+      for (const [source, entry] of Object.entries(rawRules.bySource))
+        if (isSourceId(source)) {
+          if (isCnoiRuleEntry(entry)) bySource[source] = entry;
+          else
+            problems[source] =
+              "已隔离无效或不受支持的规则配置，当前使用默认规则；请检查后重新保存。";
+        }
+    } else
+      for (const source of [
+        "luogu",
+        "codeforces",
+        "atcoder",
+        "qoj",
+        "hydroj",
+      ] as const)
+        problems[source] = "规则存储版本无效，当前使用默认规则；请重新保存。";
+  }
+  if (Object.keys(bySource).length)
+    preferences.cnoiRules = { formatVersion: 1, bySource };
+  if (Object.keys(problems).length) preferences.cnoiRuleProblems = problems;
   if (isSyncRangePreference(value.preferences.syncRange)) {
     const { from, to, followNow, preset } = value.preferences.syncRange;
     preferences.syncRange = {
@@ -287,8 +324,8 @@ export function createStoragePort(area: StorageAreaLike): StoragePort {
   let writeQueue = Promise.resolve();
 
   async function load(): Promise<StoredData> {
-    const result = await area.get(STORAGE_KEY);
-    return migrate(result[STORAGE_KEY]);
+    const result = await area.get(OJTRACE_STORAGE_KEY);
+    return migrate(result[OJTRACE_STORAGE_KEY]);
   }
 
   async function write(next: StoredData): Promise<StoredData> {
@@ -300,7 +337,7 @@ export function createStoragePort(area: StorageAreaLike): StoragePort {
         .filter((item): item is AccountRecord => Boolean(item)),
     };
     try {
-      await area.set({ [STORAGE_KEY]: persisted });
+      await area.set({ [OJTRACE_STORAGE_KEY]: persisted });
     } catch (error) {
       if (
         Object.keys(persisted.instanceBranding).length === 0 &&
@@ -310,7 +347,7 @@ export function createStoragePort(area: StorageAreaLike): StoragePort {
       // Discardable caches must not prevent account/record persistence.
       persisted.instanceBranding = {};
       persisted.activitySchedules = {};
-      await area.set({ [STORAGE_KEY]: persisted });
+      await area.set({ [OJTRACE_STORAGE_KEY]: persisted });
     }
     return persisted;
   }

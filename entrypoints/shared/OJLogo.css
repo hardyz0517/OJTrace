@@ -1,3 +1,11 @@
+.oj-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  vertical-align: middle;
+}
+
 .oj-logo {
   display: inline-block;
   flex: 0 0 auto;

@@ -1,5 +1,25 @@
 .animated-select {
+  --select-menu-offset: -5px;
+  --select-open-duration: 180ms;
+  --select-close-duration: 120ms;
+  --select-motion-easing: cubic-bezier(0.22, 1, 0.36, 1);
   position: relative;
+}
+.animated-select-portal {
+  z-index: 100;
+  width: var(--radix-popover-trigger-width);
+  max-width: calc(100vw - 16px);
+  transform-origin: var(--radix-popover-content-transform-origin);
+}
+.animated-select.animated-select-portal .select-menu {
+  position: relative;
+  inset: auto;
+  max-height: min(320px, var(--radix-popover-content-available-height));
+  overflow-y: auto;
+}
+.animated-select-portal .select-option > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .animated-select .select-trigger {
   display: flex;
@@ -16,6 +36,10 @@
   font: inherit;
   font-size: 13px;
   cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease;
 }
 .animated-select--form .select-trigger > span:first-child {
   min-width: 0;
@@ -36,8 +60,8 @@
   border-bottom: 1.5px solid #748096;
   transform: translateY(-2px) rotate(45deg);
   transition:
-    transform 160ms ease,
-    border-color 160ms ease;
+    transform 180ms ease,
+    border-color 180ms ease;
 }
 .animated-select--form .select-trigger:hover .select-chevron,
 .animated-select--form .select-trigger.is-open .select-chevron {
@@ -59,15 +83,19 @@
   padding: 4px;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(-3px) scale(0.98);
+  transform: translateY(var(--select-menu-offset)) scale(0.98);
+  transform-origin: top center;
   transition:
-    opacity 140ms ease,
-    transform 140ms ease;
+    opacity 160ms ease,
+    transform var(--select-open-duration) var(--select-motion-easing),
+    visibility 0s 160ms;
 }
 .animated-select .select-menu.is-open {
   opacity: 1;
   pointer-events: auto;
   transform: none;
+  visibility: visible;
+  transition-delay: 0s;
 }
 .animated-select .select-menu[aria-hidden="true"] {
   visibility: hidden;
@@ -84,6 +112,16 @@
   font-size: 13px;
   text-align: left;
   cursor: pointer;
+  align-items: center;
+  border-radius: 6px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+.animated-select .select-option:hover,
+.animated-select .select-option.is-active {
+  transform: translateX(1px);
 }
 .animated-select--form .select-option:hover,
 .animated-select--form .select-option.is-active,
@@ -92,7 +130,7 @@
   color: #315b9f;
 }
 
-/* The timeline retains its compact dimensions and motion. */
+/* Variants share motion; the timeline retains its compact dimensions. */
 .animated-select--compact {
   display: inline-flex;
 }
@@ -105,10 +143,6 @@
   border-color: #e1e5eb;
   color: #4b5565;
   padding: 0 10px;
-  transition:
-    border-color 180ms ease,
-    background-color 180ms ease,
-    box-shadow 180ms ease;
 }
 .animated-select--compact .select-trigger:hover,
 .animated-select--compact .select-trigger.is-open {
@@ -122,9 +156,6 @@
   width: 7px;
   height: 7px;
   flex-basis: 7px;
-  transition:
-    transform 180ms ease,
-    border-color 180ms ease;
 }
 .animated-select--compact .select-trigger.is-open .select-chevron {
   border-color: #4f6f9f;
@@ -136,29 +167,16 @@
   box-shadow:
     0 12px 28px rgb(31 41 55 / 11%),
     0 2px 6px rgb(31 41 55 / 6%);
-  transform: translateY(-5px) scale(0.98);
-  transform-origin: top center;
-  transition:
-    opacity 160ms ease,
-    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.animated-select--compact .select-menu.is-open {
-  transform: translateY(0) scale(1);
 }
 .animated-select--compact .select-option {
   align-items: center;
   border-radius: 6px;
   padding: 8px 9px;
-  transition:
-    background-color 120ms ease,
-    color 120ms ease,
-    transform 120ms ease;
 }
 .animated-select--compact .select-option:hover,
 .animated-select--compact .select-option.is-active {
   background: #f1f5fb;
   color: #25344d;
-  transform: translateX(1px);
 }
 .animated-select--compact .select-option.is-selected {
   color: #315b9f;
@@ -169,8 +187,66 @@
   outline: 2px solid #b8c7e8;
   outline-offset: 1px;
 }
+
+/* A portalled menu mounts already open. Animate the Radix Content itself so
+   Presence can keep it mounted until its exit animation finishes. */
+.animated-select-portal[data-side="top"] {
+  --select-menu-offset: 5px;
+}
+.animated-select-portal[data-state="open"] {
+  animation-name: select-menu-enter;
+  animation-duration: var(--select-open-duration);
+  animation-timing-function: var(--select-motion-easing);
+}
+.animated-select-portal[data-state="closed"] {
+  pointer-events: none;
+  animation-name: select-menu-exit;
+  animation-duration: var(--select-close-duration);
+  animation-timing-function: ease-in;
+  animation-fill-mode: both;
+}
+.animated-select.animated-select-portal .select-menu,
+.animated-select.animated-select-portal .select-menu[aria-hidden="true"] {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  transition: none;
+}
+.animated-select-portal[data-state="closed"] .select-menu {
+  pointer-events: none;
+}
+@keyframes select-menu-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--select-menu-offset)) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes select-menu-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(var(--select-menu-offset)) scale(0.98);
+  }
+}
 @media (max-width: 420px) {
   .animated-select--compact .select-menu {
     min-width: max-content;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animated-select .select-trigger,
+  .animated-select .select-chevron,
+  .animated-select .select-menu,
+  .animated-select .select-option,
+  .animated-select-portal {
+    animation: none !important;
+    transition: none !important;
   }
 }

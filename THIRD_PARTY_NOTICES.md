@@ -1,6 +1,6 @@
 # Third-party notices
 
-OJTrace remains distributed under the MIT License. The following third-party materials are bundled for local PDF generation. No source code, layout template, CSS, or assets from the AGPL-licensed CNOI Statement Generator are copied into this project; its published PDF output is used only as a visual reference.
+OJTrace remains distributed under the MIT License. The following third-party materials are bundled for local statement editing and PDF generation. No source code, layout template, CSS, or assets from the AGPL-licensed CNOI Statement Generator are copied into this project; its published PDF output is used only as a visual reference.
 
 ## Typst WASM renderer
 
@@ -25,6 +25,22 @@ statement extractor. The complete license is bundled at
 no `marked` implementation files are copied into the extension source.
 
 Upstream: https://github.com/markedjs/marked
+
+## Markdown editor
+
+CodeMirror 6, its Lezer parsers/highlighter, and their utility dependencies are
+distributed under the MIT License. They provide the local Markdown editor,
+syntax-aware folding, line numbers, and editing history. The complete license
+texts and resolved package versions are bundled at
+[`public/licenses/codemirror-LICENSES.txt`](public/licenses/codemirror-LICENSES.txt).
+
+Upstream: https://code.haverbeke.berlin/codemirror and https://code.haverbeke.berlin/lezer
+
+The editor reads YAML front matter with `yaml` version 2.9.1, distributed under
+the ISC License. Its complete license is bundled at
+[`public/licenses/yaml-2.9.1-LICENSE.txt`](public/licenses/yaml-2.9.1-LICENSE.txt).
+
+Upstream: https://github.com/eemeli/yaml
 
 ## Fonts
 

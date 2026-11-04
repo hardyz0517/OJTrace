@@ -428,11 +428,8 @@ time {
   outline: 2px solid #b8c7e8;
   outline-offset: 2px;
 }
-.oj-name {
-  display: inline-flex;
-  align-items: center;
+.timeline-page-content .oj-name {
   gap: 5px;
-  min-width: 0;
 }
 .source .oj-name {
   gap: 4px;

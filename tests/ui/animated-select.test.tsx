@@ -54,6 +54,64 @@ afterEach(async () => {
 });
 
 describe("shared animated select", () => {
+  it.each([false, true])(
+    "returns focus from an option on Escape (portal: %s)",
+    async (portal) => {
+      await act(async () =>
+        root.render(
+          createElement(AnimatedSelect, {
+            label: "Choose",
+            value: "one",
+            options,
+            onChange,
+            portal,
+          }),
+        ),
+      );
+      await key("Enter");
+      const option = document.querySelector<HTMLButtonElement>(
+        '[role="listbox"][aria-label="Choose"] [role="option"]',
+      )!;
+      await act(async () => option.focus());
+      expect(document.activeElement).toBe(option);
+      await act(async () =>
+        option.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+        ),
+      );
+      expect(trigger().getAttribute("aria-expanded")).toBe("false");
+      expect(document.activeElement).toBe(trigger());
+      expect(onChange).not.toHaveBeenCalled();
+    },
+  );
+  it("keeps portalled options outside scrolling containers and preserves selection and focus", async () => {
+    await act(async () =>
+      root.render(
+        createElement(AnimatedSelect, {
+          label: "Choose",
+          value: "one",
+          options,
+          onChange,
+          portal: true,
+        }),
+      ),
+    );
+    await key("Enter");
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
+    const menu = document.body.querySelector<HTMLElement>(
+      '[role="listbox"][aria-label="Choose"]',
+    )!;
+    expect(menu.closest(".animated-select-portal")).not.toBeNull();
+    await act(async () =>
+      menu.dispatchEvent(new Event("pointerdown", { bubbles: true })),
+    );
+    expect(trigger().getAttribute("aria-expanded")).toBe("true");
+    await key("ArrowDown");
+    await key("Enter");
+    expect(onChange).toHaveBeenCalledWith("two");
+    expect(document.activeElement).toBe(trigger());
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+  });
   it("keeps closed options out of the tab order and commits a keyboard selection", async () => {
     const choices = Array.from(
       container.querySelectorAll<HTMLButtonElement>("[role=option]"),

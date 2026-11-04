@@ -1,3 +1,4 @@
+import type { StoredCnoiRules } from "./cnoi-rules";
 import type { ActivityScheduleRecord } from "./activity-schedule";
 import type { PaginationPolicy } from "./pagination-policy";
 
@@ -164,6 +165,11 @@ export interface SyncState {
 }
 
 export interface Preferences {
+  /** Show the Luogu solution-channel status tag on problem pages. */
+  luoguSolutionChannelEnabled: boolean;
+  cnoiRules?: StoredCnoiRules;
+  /** Isolated load diagnostics; cleared after this source is repaired or reset. */
+  cnoiRuleProblems?: Partial<Record<SourceId, string>>;
   retentionPerAccount: number;
   freshnessCooldownMs: number;
   /** Only user overrides; missing sources inherit their default pagination policy. */
@@ -213,6 +219,7 @@ export interface InstanceBrandingRecord {
 export const ACCOUNT_COLLECTION_DEADLINE_MS = 15 * 60 * 1_000;
 
 export const DEFAULT_PREFERENCES: Preferences = {
+  luoguSolutionChannelEnabled: true,
   retentionPerAccount: 2_000,
   freshnessCooldownMs: 2 * 60 * 1_000,
 };

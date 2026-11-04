@@ -127,6 +127,12 @@ export type RuntimeMessage =
     }
   | {
       schemaVersion: 2;
+      type: "UPDATE_LUOGU_SOLUTION_CHANNEL";
+      requestId: string;
+      enabled: boolean;
+    }
+  | {
+      schemaVersion: 2;
       type: "DELETE_ACCOUNT";
       requestId: string;
       accountId: string;
@@ -225,6 +231,7 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
       "UPDATE_SYNC_ACCOUNTS",
       "UPDATE_SYNC_RANGE",
       "UPDATE_PAGINATION_POLICY",
+      "UPDATE_LUOGU_SOLUTION_CHANNEL",
       "DELETE_ACCOUNT",
       "CLEAR_DATA",
       "CLEAR_ACCOUNTS",
@@ -256,6 +263,8 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
         (item.policy === null || isPaginationPolicy(item.policy))
       );
     }
+    if (item.type === "UPDATE_LUOGU_SOLUTION_CHANNEL")
+      return typeof item.enabled === "boolean";
     if (item.type === "SYNC_REQUEST") {
       const accountIds = (item as { accountIds?: unknown }).accountIds;
       const since = (item as { since?: unknown }).since;

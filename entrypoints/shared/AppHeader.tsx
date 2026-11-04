@@ -41,7 +41,18 @@ export function AppHeader({ active }: { active: "timeline" | "settings" }) {
     }
 
     const target = event.currentTarget.href;
-    if (target === window.location.href || navigationLocked.current) return;
+    // Clicking the active page must preserve its current workspace and drafts.
+    const current = new URL(window.location.href);
+    const next = new URL(target);
+    if (
+      current.origin === next.origin &&
+      current.pathname === next.pathname &&
+      current.search === next.search
+    ) {
+      event.preventDefault();
+      return;
+    }
+    if (navigationLocked.current) return;
     event.preventDefault();
     navigationLocked.current = true;
 
@@ -55,6 +66,7 @@ export function AppHeader({ active }: { active: "timeline" | "settings" }) {
 
     if (reducedMotion || !content) {
       window.location.assign(target);
+      navigationLocked.current = false;
       return;
     }
 
@@ -77,7 +89,13 @@ export function AppHeader({ active }: { active: "timeline" | "settings" }) {
     } catch {
       // Storage can be unavailable in restricted extension contexts.
     }
-    window.setTimeout(() => window.location.assign(target), PAGE_EXIT_DURATION);
+    window.setTimeout(() => {
+      window.location.assign(target);
+      // A cancelled beforeunload leaves the document alive and navigable.
+      navigationLocked.current = false;
+      content.classList.remove("page-content-exit");
+      indicator?.classList.remove("is-manual-moving");
+    }, PAGE_EXIT_DURATION);
   }
 
   return (

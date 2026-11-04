@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { sources, sourceDefinitions } from "../../src/sources/definitions";
 import type { BrowserSessionAccount } from "../../src/domain";
 import { AnimatedSelect } from "../shared/AnimatedSelect";
@@ -50,11 +51,24 @@ function sessionStatusText(
 
 export function AccountForm({
   onAuthorized,
+  onDirtyChange,
 }: {
   onAuthorized: (response: AuthorizedResponse) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const state = useAccountAuthorization(onAuthorized);
   const { form, mode, session, busy } = state;
+  const dirty =
+    busy ||
+    Boolean(
+      form.identifier ||
+      form.label ||
+      form.origin ||
+      Object.values(form.credentials).some(Boolean),
+    );
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [onDirtyChange, dirty]);
   const sourceName = sourceDefinitions[form.source].metadata.displayName;
   const canSubmit =
     !!mode &&

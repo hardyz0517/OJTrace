@@ -1,3 +1,4 @@
+import { isStoredCnoiRules } from "./cnoi-rules";
 import {
   isSourceId,
   type AccountRecord,
@@ -190,6 +191,16 @@ export function isInstanceBrandingRecord(
 export function isPreferences(value: unknown): value is Preferences {
   return (
     isRecord(value) &&
+    typeof value.luoguSolutionChannelEnabled === "boolean" &&
+    optional(value.cnoiRules, isStoredCnoiRules) &&
+    optional(
+      value.cnoiRuleProblems,
+      (v) =>
+        isRecord(v) &&
+        Object.entries(v).every(
+          ([k, m]) => isSourceId(k) && typeof m === "string",
+        ),
+    ) &&
     finite(value.retentionPerAccount) &&
     finite(value.freshnessCooldownMs) &&
     optional(value.syncAccountIds, strings) &&

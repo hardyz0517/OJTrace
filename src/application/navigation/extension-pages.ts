@@ -19,8 +19,15 @@ function pageUrl(path: string): string {
 
 export async function openOrFocusExtensionPage(path: string): Promise<void> {
   const url = pageUrl(path);
-  const tabs = await browser.tabs.query({ url });
-  const existing = tabs.find((tab) => typeof tab.id === "number");
+  const page = new URL(url);
+  page.hash = "";
+  const tabs = await browser.tabs.query({ url: `${page.href}*` });
+  const existing = tabs.find((tab) => {
+    if (typeof tab.id !== "number" || !tab.url) return false;
+    const candidate = new URL(tab.url);
+    candidate.hash = "";
+    return candidate.href === page.href;
+  });
   if (existing?.id !== undefined) {
     await browser.tabs.update(existing.id, { active: true });
     if (existing.windowId !== undefined) {

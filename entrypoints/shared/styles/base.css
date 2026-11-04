@@ -22,8 +22,7 @@ body {
 button {
   font: inherit;
 }
-.shell,
-.settings-page {
+.shell {
   width: min(1080px, calc(100% - 32px));
   margin: 28px auto 56px;
   overflow: hidden;

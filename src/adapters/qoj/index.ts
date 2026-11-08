@@ -142,7 +142,7 @@ function decodeQOJCookieUsername(raw: string): string | undefined {
   }
   value = value.trim();
   return value &&
-    // eslint-disable-next-line no-control-regex -- Decoded usernames must reject control characters.
+    // oxlint-disable-next-line no-control-regex -- Decoded usernames must reject control characters.
     !/[\u0000-\u001f\u007f]/.test(value) &&
     !/^guest$/i.test(value)
     ? value

@@ -3,7 +3,6 @@ import type { PartialReason, SourceId } from "../../domain";
 const messages: Record<string, string> = {
   "source.activityInvalid": "部分活动缺少有效 ID 或标题，已跳过。",
   "source.authRequired": "登录状态已失效，请重新登录或授权。",
-  "source.cookieMissing": "未读取到登录 Cookie，请确认已登录并授予站点权限。",
   "source.httpError": "站点拒绝了请求，或暂时无法访问。",
   "source.blocked": "站点暂时阻止了扩展请求。",
   "source.rateLimited": "请求过于频繁，请稍后重试。",
@@ -20,10 +19,8 @@ const messages: Record<string, string> = {
   "source.activityLimit": "该活动已采集部分记录，达到本次分页或记录上限。",
   "source.activityUnvisited": "本次预算已用完，该活动尚未探测。",
   "source.recordLimit": "普通记录已达到本次分页或记录上限。",
-  "source.outputLimit": "合并记录已达到本次总上限，仅保留最新提交。",
   "source.activityConflict": "同一记录关联多个活动，已保留首次识别的活动。",
   "source.paginationRepeated": "站点返回重复页，已停止分页并保留已采集记录。",
-  "source.activityIdentityUnavailable": "未能确认用户 UID，暂时无法采集活动。",
   "source.unknownError": "同步失败，请稍后重试。",
   "sync.invalidRange": "同步时间范围无效，请选择最近 35 天内的范围。",
   "sync.windowContractViolation": "站点返回了范围外记录，已降级为部分同步。",

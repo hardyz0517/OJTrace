@@ -666,7 +666,7 @@ Renderer 只接收通用 `ProblemDocument`，不能接收 `SourceId` 后再分�
 
 Chrome 扩展页面对 WebAssembly 有 CSP 要求，需要配置允许的 `wasm-unsafe-eval`。[Chrome 扩展 CSP 文档](https://developer.chrome.com/docs/extensions/reference/manifest/content-security-policy)
 
-当前实现采用 `@myriaddreamin/typst-all-in-one.ts` 0.7.0 和 `tex2typst` 0.6.2。Typst 懒加载到独立导出页，字体本地打包。HTML 打印预览已经移除；编译失败只在导出页显示诊断，不下载文件。真实 Typst WASM 编译 smoke test 已通过，但 Chrome/Edge 扩展 CSP 和实际下载尚未在真实安装环境验收。当前 43.78 MB 的解压构建中，Typst chunk 约 39.20 MB，这是发布评估中需要明确接受的体积和首次导出加载成本。
+当前实现采用 `@myriaddreamin/typst-all-in-one.ts` 0.7.0。Typst 懒加载到独立导出页，字体本地打包。HTML 打印预览已经移除；编译失败只在导出页显示诊断，不下载文件。真实 Typst WASM 编译 smoke test 已通过，但 Chrome/Edge 扩展 CSP 和实际下载尚未在真实安装环境验收。当前 43.78 MB 的解压构建中，Typst chunk 约 39.20 MB，这是发布评估中需要明确接受的体积和首次导出加载成本。
 
 ## 11. NOI 风格和许可证边界
 
@@ -886,12 +886,9 @@ docs/fixtures/problem/qoj-uoj.html
 docs/qa/problem-pdf-browser-matrix.md
 
 THIRD_PARTY_NOTICES.md
-public/licenses/tex2typst-0.6.2-LICENSE.txt
 public/licenses/typst-all-in-one-0.7.0-LICENSE.txt
 public/licenses/marked-18.1.0-LICENSE.txt
 public/problem-fonts/FiraMono-Regular.ttf
-public/problem-fonts/LibertinusSerif-Regular.otf
-public/problem-fonts/NewCM10-Regular.otf
 public/problem-fonts/NewCMMath-Regular.otf
 public/problem-fonts/NotoSerifCJKsc-Regular.otf
 public/problem-fonts/README.md

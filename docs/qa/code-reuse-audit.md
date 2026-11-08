@@ -52,7 +52,7 @@ AtCoder 是升序且包含游标边界的时间分页；Hydro 需要 ObjectId �
 - [浏览器 HTTP 客户端:11](../../src/platform/network/browser-http-client.ts#L11) 的 `FIXED_ORIGINS`。
 - [授权说明:7](../../entrypoints/settings/AccountAuthContent.tsx#L7) 与 Timeline 的首页映射，以及各 Adapter 的 URL 模块。
 
-[AccountForm](../../entrypoints/settings/AccountForm.tsx)、[授权 Hook](../../entrypoints/settings/useAccountAuthorization.ts)、[PaginationSettings](../../entrypoints/settings/PaginationSettings.tsx)、[设置入口](../../entrypoints/settings/main.tsx)、[SyncDiagnostics](../../entrypoints/shared/SyncDiagnostics.tsx) 和权限模块均通过完整 Adapter 注册表读取元数据。核对静态导入关系后，设置页与时间线均能到达五个 Adapter 实现；构建器最终保留多少代码尚未测量，不能直接将可达性当作实际 bundle 增量。
+[AccountForm](../../entrypoints/settings/AccountForm.tsx)、[授权 Hook](../../entrypoints/settings/useAccountAuthorization.ts)、[PaginationSettings](../../entrypoints/settings/PaginationSettings.tsx)、[设置入口](../../entrypoints/settings/main.tsx) 和权限模块均通过完整 Adapter 注册表读取元数据。核对静态导入关系后，设置页与时间线均能到达五个 Adapter 实现；构建器最终保留多少代码尚未测量，不能直接将可达性当作实际 bundle 增量。
 
 建议新增不执行网络请求的来源定义模块，以类型约束覆盖全部 `SourceId`，集中名称、默认首页、固定 origin、授权模式与凭证字段。Adapter 引用对应定义，UI 与权限层不再导入采集注册表。图标路径等展示信息可以保留在独立的 UI 配置中，名称仍读取同一份来源定义。
 

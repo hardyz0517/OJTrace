@@ -7,9 +7,8 @@ registry.
 | File | Upstream source | License |
 | --- | --- | --- |
 | `NotoSerifCJKsc-Regular.otf`, `NotoSerifCJKsc-Bold.otf` | [typst-dev-assets v0.13.1](https://github.com/typst/typst-dev-assets/tree/v0.13.1/files/fonts) | SIL Open Font License 1.1 |
-| `NewCMMath-Regular.otf`, `NewCMMath-Bold.otf`, `NewCM10-Regular.otf` | [typst-assets v0.13.1](https://github.com/typst/typst-assets/tree/v0.13.1/files/fonts) | GUST Font License / LPPL terms stated by upstream |
+| `NewCMMath-Regular.otf`, `NewCMMath-Bold.otf` | [typst-assets v0.13.1](https://github.com/typst/typst-assets/tree/v0.13.1/files/fonts) | GUST Font License / LPPL terms stated by upstream |
 | `FiraMono-Regular.ttf`, `FiraMono-Medium.ttf`, `FiraMono-Bold.ttf` | [Google Fonts Fira Mono](https://github.com/google/fonts/tree/main/ofl/firamono) | SIL Open Font License 1.1 |
-| `LibertinusSerif-Regular.otf`, `LibertinusSerif-Italic.otf`, `LibertinusSerif-Bold.otf`, `LibertinusSerif-BoldItalic.otf` | [typst-assets v0.13.1](https://github.com/typst/typst-assets/tree/v0.13.1/files/fonts) | SIL Open Font License 1.1 |
 | `lmroman10-regular.otf`, `lmroman10-bold.otf`, `lmroman10-italic.otf`, `lmroman10-bolditalic.otf`, `lmroman12-regular.otf`, `lmroman12-bold.otf`, `lmroman12-italic.otf`, `lmroman17-regular.otf` | [Latin Modern](https://www.gust.org.pl/projects/e-foundry/latin-modern) | GUST Font License |
 | `NewCMMath-Book.otf` | [typst-assets v0.13.1](https://github.com/typst/typst-assets/tree/v0.13.1/files/fonts) | GUST Font License / LPPL terms stated by upstream |
 | `SimSun.ttf`, `simhei.ttf` | Proprietary Songti / Heiti faces | Not open source; local rendering only |

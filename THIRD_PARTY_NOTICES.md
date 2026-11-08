@@ -8,14 +8,6 @@ OJTrace remains distributed under the MIT License. The following third-party mat
 
 Upstream: https://github.com/Myriad-Dreamin/typst.ts
 
-## TeX to Typst conversion
-
-`tex2typst` version 0.6.2 is distributed under Apache License 2.0 and is used
-only to convert common OJ math source into controlled Typst math. Its license is
-included in [`public/licenses/tex2typst-0.6.2-LICENSE.txt`](public/licenses/tex2typst-0.6.2-LICENSE.txt).
-
-Upstream: https://github.com/qwinsi/tex2typst
-
 ## Markdown parsing
 
 `marked` version 18.1.0 is distributed under the MIT License and is used to

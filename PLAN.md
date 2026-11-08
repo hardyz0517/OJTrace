@@ -102,8 +102,7 @@ OJTrace/
 ├── pnpm-lock.yaml                     # 仅由集成负责人维护
 ├── wxt.config.ts                     # 仅由集成负责人维护
 ├── tsconfig.json
-├── eslint.config.*
-├── prettier.config.*
+├── vitest.config.ts
 ├── entrypoints/                      # WXT 入口，页面壳和扩展生命周期
 │   ├── background.ts                 # MV3 service worker 入口
 │   ├── timeline/                     # 完整标签页入口

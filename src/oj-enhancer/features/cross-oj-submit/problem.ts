@@ -95,14 +95,6 @@ export function codeforcesSubmissionFromUrl(
   return { submissionId: match[1]! };
 }
 
-export function codeforcesSubmitUrl(problem: ProblemRef): string {
-  const params = new URLSearchParams({
-    contestId: problem.contestId,
-    problemIndex: problem.index,
-  });
-  return `https://codeforces.com/problemset/submit?${params.toString()}`;
-}
-
 export function problemIdsMatch(left: ProblemRef, right: ProblemRef): boolean {
   return (
     left.contestId === right.contestId &&

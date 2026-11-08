@@ -87,10 +87,10 @@ describe("Luogu solution submission channel badge", () => {
       "rgb(243, 156, 17)",
     );
     expect(badge?.querySelector("span")?.style.borderColor).toBe(
-      "rgb(217, 139, 5)",
+      "rgb(202, 137, 32)",
     );
     expect(badge?.hasAttribute("href")).toBe(false);
-    expect(badge?.style.cursor).toBe("");
+    expect(badge?.style.cursor).toBe("pointer");
     expect(badge?.getAttribute("role")).toBe("status");
     expect(
       document.querySelectorAll(`[${LUOGU_SOLUTION_CHANNEL_BADGE_ATTRIBUTE}]`),
@@ -125,6 +125,7 @@ describe("Luogu solution submission channel badge", () => {
     expect(badge?.dataset.ojtraceFallbackTag).toBe("true");
     expect(badge?.tagName).toBe("A");
     expect(badge?.hasAttribute("href")).toBe(false);
+    expect(badge?.style.cursor).toBe("pointer");
     expect(badge?.textContent?.trim()).toBe("题解通道开放");
     expect(badge?.querySelector("span")?.style.backgroundColor).toBe(
       "rgb(243, 156, 17)",

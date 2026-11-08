@@ -176,20 +176,13 @@ describe("Codeforces submission detail parsing", () => {
     ).toBeUndefined();
     expect(
       readLuoguCrossOjRecordRoute(
-        "https://www.luogu.com.cn/record/list?pid=CF1A#ojtrace-record=cf/2/397309600",
-      ),
-    ).toBeUndefined();
-    expect(
-      readLuoguCrossOjRecordRoute(
-        "https://www.luogu.com.cn/record/list?pid=AT_abc175_f#ojtrace-record=at/abc176/123456789",
-      ),
-    ).toBeUndefined();
-    // Previously generated links remain readable, but new links omit contestId.
-    expect(
-      readLuoguCrossOjRecordRoute(
         "https://www.luogu.com.cn/record/list?pid=CF1A#ojtrace-record=cf/1/397309600",
-      )?.submissionId,
-    ).toBe("397309600");
+      ),
+    ).toMatchObject({
+      oj: "codeforces",
+      contestId: "1",
+      submissionId: "397309600",
+    });
     expect(
       readLuoguCrossOjRecordRoute(
         "https://www.luogu.com.cn/record/list?pid=AT_abc175_f#ojtrace-record=at/abc175/123456789",
@@ -199,6 +192,16 @@ describe("Codeforces submission detail parsing", () => {
       contestId: "abc175",
       submissionId: "123456789",
     });
+    expect(
+      readLuoguCrossOjRecordRoute(
+        "https://www.luogu.com.cn/record/list?pid=CF1A#ojtrace-record=cf/2/397309600",
+      ),
+    ).toBeUndefined();
+    expect(
+      readLuoguCrossOjRecordRoute(
+        "https://www.luogu.com.cn/record/list?pid=AT_abc175_f#ojtrace-record=at/abc176/123456789",
+      ),
+    ).toBeUndefined();
     expect(
       buildLuoguCrossOjRecordUrl(
         "atcoder",

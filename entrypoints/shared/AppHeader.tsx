@@ -5,7 +5,15 @@ const PAGE_TRANSITION_KEY = "ojtrace-page-transition";
 const PAGE_EXIT_DURATION = 110;
 const GITHUB_REPOSITORY_URL = "https://github.com/hardyz0517/OJTrace";
 
-export function AppHeader({ active }: { active: "timeline" | "settings" }) {
+export function AppHeader({
+  active,
+}: {
+  active: "timeline" | "contest-schedule" | "settings";
+}) {
+  const contestScheduleUrl = new URL(
+    "contest-schedule.html",
+    browser.runtime.getURL("/timeline.html"),
+  ).href;
   const navigationLocked = useRef(false);
 
   useLayoutEffect(() => {
@@ -19,7 +27,7 @@ export function AppHeader({ active }: { active: "timeline" | "settings" }) {
     if (!shouldAnimate) return;
 
     const content = document.querySelector<HTMLElement>(
-      ".timeline-page-content, .settings-content",
+      ".timeline-page-content, .settings-content, .contest-page-content",
     );
     if (!content) return;
     content.classList.add("page-content-enter");
@@ -60,7 +68,7 @@ export function AppHeader({ active }: { active: "timeline" | "settings" }) {
       "(prefers-reduced-motion: reduce)",
     ).matches;
     const content = document.querySelector<HTMLElement>(
-      ".timeline-page-content, .settings-content",
+      ".timeline-page-content, .settings-content, .contest-page-content",
     );
     const indicator = document.querySelector<HTMLElement>(".app-nav-indicator");
 
@@ -112,6 +120,16 @@ export function AppHeader({ active }: { active: "timeline" | "settings" }) {
         >
           时间线
           {active === "timeline" && (
+            <span className="app-nav-indicator" aria-hidden="true" />
+          )}
+        </a>
+        <a
+          className={active === "contest-schedule" ? "is-active" : ""}
+          href={contestScheduleUrl}
+          onClick={navigate}
+        >
+          赛程
+          {active === "contest-schedule" && (
             <span className="app-nav-indicator" aria-hidden="true" />
           )}
         </a>

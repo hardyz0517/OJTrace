@@ -16,6 +16,11 @@ import type { SyncSourceResult } from "../sync/collect-account";
 import type { AccountSyncProgress } from "../../domain/sync-progress";
 import { isHydroDomainId } from "../../domain/hydro-scope";
 import { isCredentialEntry } from "../../domain/credentials";
+import type {
+  ContestCache,
+  ContestPlatform,
+  ContestRefreshResult,
+} from "../../features/contest-schedule/core/types";
 
 function isDomainScopeValid(source: unknown, domainId: unknown): boolean {
   return (
@@ -95,6 +100,20 @@ export function isSyncProgressEvent(
 
 export type RuntimeMessage =
   | { schemaVersion: 2; type: "GET_STATE"; requestId: string }
+  | { schemaVersion: 2; type: "CONTEST_GET_STATE"; requestId: string }
+  | {
+      schemaVersion: 2;
+      type: "CONTEST_REFRESH";
+      requestId: string;
+      platforms: ContestPlatform[];
+    }
+  | {
+      schemaVersion: 2;
+      type: "CONTEST_ENRICH_COUNTS";
+      requestId: string;
+      platforms: ContestPlatform[];
+      force?: boolean;
+    }
   | {
       schemaVersion: 2;
       type: "SYNC_REQUEST";
@@ -184,6 +203,14 @@ export type RuntimeResponse =
       schemaVersion: 2;
       requestId: string;
       ok: true;
+      type: "CONTEST_STATE";
+      caches: Partial<Record<ContestPlatform, ContestCache>>;
+      results?: ContestRefreshResult[];
+    }
+  | {
+      schemaVersion: 2;
+      requestId: string;
+      ok: true;
       type: "CLEARED";
     }
   | {
@@ -227,6 +254,9 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
     item.requestId.length > 0 &&
     [
       "GET_STATE",
+      "CONTEST_GET_STATE",
+      "CONTEST_REFRESH",
+      "CONTEST_ENRICH_COUNTS",
       "SYNC_REQUEST",
       "UPDATE_SYNC_ACCOUNTS",
       "UPDATE_SYNC_RANGE",
@@ -240,6 +270,21 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
       "AUTHORIZE_ACCOUNT",
     ].includes(item.type)
   ) {
+    if (
+      item.type === "CONTEST_REFRESH" ||
+      item.type === "CONTEST_ENRICH_COUNTS"
+    ) {
+      const platforms = (item as { platforms?: unknown }).platforms;
+      return (
+        Array.isArray(platforms) &&
+        platforms.every((platform) =>
+          ["luogu", "codeforces", "atcoder"].includes(String(platform)),
+        ) &&
+        (item.type !== "CONTEST_ENRICH_COUNTS" ||
+          item.force === undefined ||
+          typeof item.force === "boolean")
+      );
+    }
     if (item.type === "DELETE_ACCOUNT") {
       return (
         typeof item.accountId === "string" && item.accountId.trim().length > 0

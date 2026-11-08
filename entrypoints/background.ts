@@ -10,6 +10,7 @@ import {
   messageEnvelope,
   responseError,
   syncResultResponse,
+  contestStateResponse,
 } from "../src/application/messaging/responses";
 import { AccountCommandError } from "../src/application/accounts/account-errors";
 import { errorMessage } from "../src/application/messaging/error-messages";
@@ -65,6 +66,9 @@ import {
   isCrossOjSubmitMessage,
   registerCrossOjSubmitBackground,
 } from "../src/oj-enhancer/features/cross-oj-submit/background-bridge";
+import { createContestManager } from "../src/features/contest-schedule/core/contest-manager";
+import { createContestProviders } from "../src/features/contest-schedule/providers";
+import type { ContestPlatform } from "../src/features/contest-schedule/core/types";
 
 const storage = createStoragePort(browser.storage.local);
 const rateLimits = createRateLimitRegistry({
@@ -92,6 +96,12 @@ const accounts = createAccountService(storage, {
   collector,
   ensurePermission: ensureAuthorizationPermission,
 });
+const contestProviders = createContestProviders(http);
+const contestManager = createContestManager(
+  browser.storage.local,
+  contestProviders.contests,
+  contestProviders.problemCounts,
+);
 
 function requestIdOf(raw: unknown): string {
   if (!raw || typeof raw !== "object") return "unknown";
@@ -298,6 +308,49 @@ async function handleMessage(
     switch (message.type) {
       case "GET_STATE":
         return dataResponse(message.requestId, "STATE", await storage.load());
+      case "CONTEST_GET_STATE":
+        return contestStateResponse(
+          message.requestId,
+          await contestManager.load(),
+        );
+      case "CONTEST_ENRICH_COUNTS": {
+        const permitted: ContestPlatform[] = [];
+        if (
+          message.platforms.includes("codeforces") &&
+          (await hasSourcePermission("codeforces"))
+        )
+          permitted.push("codeforces");
+        if (
+          message.platforms.includes("atcoder") &&
+          (await browser.permissions.contains({
+            origins: ["https://kenkoooo.com/*"],
+          }))
+        )
+          permitted.push("atcoder");
+        const caches = await contestManager.enrichProblemCounts(
+          permitted,
+          Date.now(),
+          message.force,
+        );
+        return contestStateResponse(message.requestId, caches);
+      }
+      case "CONTEST_REFRESH": {
+        const requested = new Set(message.platforms);
+        const permitted: ContestPlatform[] = [];
+        for (const platform of ["luogu", "codeforces", "atcoder"] as const) {
+          if (
+            requested.has(platform) &&
+            (platform === "luogu" || (await hasSourcePermission(platform)))
+          )
+            permitted.push(platform);
+        }
+        const result = await contestManager.refresh(permitted);
+        return contestStateResponse(
+          message.requestId,
+          result.caches,
+          result.results,
+        );
+      }
       case "SYNC_REQUEST": {
         let sequence = 0;
         const result = await syncEnabledAccounts(
@@ -374,6 +427,7 @@ async function handleMessage(
       case "CLEAR_DATA":
         accounts.cancelPending();
         await storage.clear();
+        await contestManager.clear();
         await clearCrossOjHistory();
         return clearedResponse(message.requestId);
       case "CLEAR_ACCOUNTS": {

@@ -57,13 +57,13 @@ export function LocalDataSettings({
       <section className="settings-section">
         <header className="settings-module-heading">
           <h1>本地数据</h1>
-          <p>管理保存在此浏览器中的账号、提交记录与偏好设置。</p>
+          <p>管理保存在此浏览器中的账号、提交记录、赛程缓存与偏好设置。</p>
         </header>
         <div className="privacy-row">
           <div>
             <h3>清理浏览器数据</h3>
             <p className="muted">
-              提交历史和账号配置仅保存在当前浏览器。
+              提交历史、赛程缓存和账号配置仅保存在当前浏览器。
               <br />
               清除后无法恢复；清除全部还会重置采集策略与 CNOI 规则。
             </p>
@@ -119,7 +119,7 @@ export function LocalDataSettings({
                 ? "这将删除保存的账号配置及其提交记录。"
                 : confirmClear === "submissions"
                   ? "这将删除所有已同步的提交记录，账号配置会保留。"
-                  : "这将删除保存的账号、认证凭据、提交记录及全部偏好设置（包括 CNOI 规则）。"}
+                  : "这将删除保存的账号、认证凭据、提交记录、赛程缓存及全部偏好设置（包括 CNOI 规则）。"}
               <br />
               此操作无法撤销。
             </p>

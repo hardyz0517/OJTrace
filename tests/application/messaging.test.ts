@@ -256,6 +256,21 @@ describe("runtime message validation", () => {
     ).toBe(true);
   });
 
+  it("validates contest problem-count enrichment messages", () => {
+    const message = {
+      schemaVersion: 2,
+      type: "CONTEST_ENRICH_COUNTS",
+      requestId: "counts",
+      platforms: ["codeforces", "atcoder"],
+      force: true,
+    };
+    expect(isRuntimeMessage(message)).toBe(true);
+    expect(isRuntimeMessage({ ...message, force: "yes" })).toBe(false);
+    expect(isRuntimeMessage({ ...message, platforms: ["unknown"] })).toBe(
+      false,
+    );
+  });
+
   it("rejects manual authorization without credentials", () => {
     expect(
       isRuntimeMessage({

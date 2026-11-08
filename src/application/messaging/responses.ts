@@ -8,6 +8,10 @@ import { publicStoredData } from "../accounts/account-queries";
 import type { AccountService } from "../accounts/account-service";
 import type { SyncResult } from "../sync/sync-service";
 import type { RuntimeResponse } from "./messages";
+import type {
+  ContestCache,
+  ContestRefreshResult,
+} from "../../features/contest-schedule/core/types";
 
 export function messageEnvelope(requestId: string) {
   return { schemaVersion: MESSAGE_SCHEMA_VERSION, requestId };
@@ -74,6 +78,20 @@ export function browserSessionResponse(
 
 export function clearedResponse(requestId: string): RuntimeResponse {
   return { ...messageEnvelope(requestId), ok: true, type: "CLEARED" };
+}
+
+export function contestStateResponse(
+  requestId: string,
+  caches: Partial<Record<"luogu" | "codeforces" | "atcoder", ContestCache>>,
+  results?: ContestRefreshResult[],
+): RuntimeResponse {
+  return {
+    ...messageEnvelope(requestId),
+    ok: true,
+    type: "CONTEST_STATE",
+    caches,
+    ...(results === undefined ? {} : { results }),
+  };
 }
 
 export function responseError(

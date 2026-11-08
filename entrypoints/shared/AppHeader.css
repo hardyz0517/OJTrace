@@ -30,7 +30,7 @@
 }
 .app-nav {
   display: grid;
-  grid-template-columns: 68px 52px 36px;
+  grid-template-columns: 68px 52px 52px 36px;
   gap: 4px;
 }
 .app-nav a {

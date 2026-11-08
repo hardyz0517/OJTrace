@@ -18,6 +18,7 @@ import {
 } from "../../domain/data-guards";
 import type { PublicStoredData } from "../accounts/account-queries";
 import type { RuntimeMessage, RuntimeResponse } from "./messages";
+import { sanitizeContestCache } from "../../features/contest-schedule/storage/contest-cache";
 
 /** Validate the public DTO without repairing or replacing invalid storage. */
 export function isPublicStoredData(value: unknown): value is PublicStoredData {
@@ -85,6 +86,19 @@ export function isRuntimeResponse(value: unknown): value is RuntimeResponse {
     case "STATE":
     case "UPDATED":
       return isPublicStoredData(value.data);
+    case "CONTEST_STATE": {
+      if (!isRecord(value.caches)) return false;
+      return Object.entries(value.caches).every(([platform, cache]) =>
+        ["luogu", "codeforces", "atcoder"].includes(platform)
+          ? Boolean(
+              sanitizeContestCache(
+                cache,
+                platform as "luogu" | "codeforces" | "atcoder",
+              ),
+            )
+          : false,
+      );
+    }
     case "CLEARED":
       return true;
     case "AUTHORIZED":
@@ -116,6 +130,9 @@ export function isRuntimeResponse(value: unknown): value is RuntimeResponse {
 
 const responseTypeByCommand = {
   GET_STATE: "STATE",
+  CONTEST_GET_STATE: "CONTEST_STATE",
+  CONTEST_REFRESH: "CONTEST_STATE",
+  CONTEST_ENRICH_COUNTS: "CONTEST_STATE",
   SYNC_REQUEST: "SYNC_RESULT",
   UPDATE_SYNC_ACCOUNTS: "UPDATED",
   UPDATE_SYNC_RANGE: "UPDATED",

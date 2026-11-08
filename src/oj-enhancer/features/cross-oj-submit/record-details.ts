@@ -10,8 +10,7 @@ import {
   codeforcesSubmissionFromUrl,
   parseCodeforcesProblemUrl,
 } from "./problem";
-import { atcoderSubmissionFromUrl, parseLuoguAtCoderProblem } from "./atcoder";
-import { parseLuoguCodeforcesProblem } from "./problem";
+import { atcoderSubmissionFromUrl } from "./atcoder";
 
 const MAX_TESTS = 200;
 const MAX_SOURCE_CHARS = 120_000;
@@ -597,6 +596,17 @@ export interface LuoguCrossOjRecordRoute {
   problemId: string;
 }
 
+function contestIdFromLuoguProblemId(
+  oj: LuoguCrossOjRecordRoute["oj"],
+  problemId: string,
+): string | undefined {
+  if (oj === "codeforces")
+    return /^CF(\d{1,10})[A-Z]\d*$/i.exec(problemId)?.[1];
+  return /^AT_([a-z0-9-]{1,64})_[a-z0-9_-]+$/i
+    .exec(problemId)?.[1]
+    ?.toLowerCase();
+}
+
 export function safeLuoguReturnUrl(
   raw: string | undefined,
 ): string | undefined {
@@ -638,14 +648,8 @@ export function buildLuoguCrossOjRecordUrl(
           ? `AT_${problemId}`
           : undefined;
   if (!normalizedProblemId) return undefined;
-  const problem =
-    oj === "codeforces"
-      ? parseLuoguCodeforcesProblem(normalizedProblemId)
-      : parseLuoguAtCoderProblem(normalizedProblemId);
-  if (
-    !problem ||
-    problem.contestId.toLowerCase() !== contestId.toLowerCase()
-  )
+  const pidContestId = contestIdFromLuoguProblemId(oj, normalizedProblemId);
+  if (!pidContestId || pidContestId.toLowerCase() !== contestId.toLowerCase())
     return undefined;
   try {
     const url = new URL(baseUrl);
@@ -680,12 +684,8 @@ export function readLuoguCrossOjRecordRoute(
     const oj = hash[1] === "cf" ? "codeforces" : "atcoder";
     const legacyContestId = hash[2];
     const submissionId = hash[3]!;
-    const problem =
-      oj === "codeforces"
-        ? parseLuoguCodeforcesProblem(problemId)
-        : parseLuoguAtCoderProblem(problemId);
-    if (!problem) return undefined;
-    const contestId = problem.contestId;
+    const contestId = contestIdFromLuoguProblemId(oj, problemId);
+    if (!contestId) return undefined;
     if (
       (oj === "codeforces" && !/^\d{1,10}$/.test(contestId)) ||
       (oj === "atcoder" && !/^[a-z0-9-]{1,64}$/i.test(contestId)) ||

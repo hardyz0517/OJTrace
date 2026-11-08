@@ -191,6 +191,23 @@ describe("Codeforces submission detail parsing", () => {
       )?.submissionId,
     ).toBe("397309600");
     expect(
+      readLuoguCrossOjRecordRoute(
+        "https://www.luogu.com.cn/record/list?pid=AT_abc175_f#ojtrace-record=at/abc175/123456789",
+      ),
+    ).toMatchObject({
+      oj: "atcoder",
+      contestId: "abc175",
+      submissionId: "123456789",
+    });
+    expect(
+      buildLuoguCrossOjRecordUrl(
+        "atcoder",
+        "abc175",
+        "123456789",
+        "abc175_some_task",
+      ),
+    ).toContain("#ojtrace-record=at/123456789");
+    expect(
       buildLuoguCrossOjRecordUrl("codeforces", "../1", "12", "1/A"),
     ).toBeUndefined();
     expect(safeLuoguReturnUrl("https://evil.example/")).toBeUndefined();

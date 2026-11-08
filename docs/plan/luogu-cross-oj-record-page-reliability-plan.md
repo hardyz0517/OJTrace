@@ -76,6 +76,7 @@ recordKey = `${oj}:${contestId}:${submissionId}`
 约束：
 
 - hash 内只放经过严格校验的 OJ 标识和提交 ID；比赛 ID 从列表页的 `pid` 解析，不放代码、Cookie、token 或详情原文。
+- 已生成的旧格式 hash 仅为兼容书签继续读取，并且其比赛 ID 必须与 `pid` 解析结果一致；新链接一律省略该冗余段。
 - 记录列表原有 query 参数必须保留；扩展不得覆盖用户筛选条件。
 - 详情链接、浏览器后退和刷新都必须回到真实的 `/record/list` 路由。
 - 直接打开不带 `ojtrace-record` 的列表 URL 时，只显示原生列表和可用的外部记录增强。

@@ -150,11 +150,18 @@ function findTagEnd(html: string, start: number): number {
     const char = html[i];
     if (quote) {
       if (char === quote) quote = "";
-    } else if (char === '"' || char === "'") {
-      quote = char;
-    } else if (char === ">") {
-      return i;
+      continue;
     }
+    if (char === '"' || char === "'") {
+      const previous = html[i - 1];
+      // Attribute values start after "=". Bare apostrophes inside AtCoder
+      // titles such as title='view Hardy's submissions' must not swallow
+      // the rest of the tag or later table rows.
+      if (char === "'" && previous !== "=") continue;
+      quote = char;
+      continue;
+    }
+    if (char === ">") return i;
   }
   return -1;
 }

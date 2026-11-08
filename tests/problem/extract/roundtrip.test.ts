@@ -14,6 +14,15 @@ import { markdownBlocksToTypst } from "../../../src/problem/render/markdown-to-t
 const BASE_URL = "https://example.org/problem/1";
 
 describe("statement extraction round trips", () => {
+  it("does not treat apostrophes inside AtCoder attribute values as tag delimiters", () => {
+    const root = parseHtmlDocument(
+      `<span title='view Hardy_Zheng's submissions'></span><a href="/contests/abc175/submissions/80592532">Detail</a>`,
+    );
+    expect(serializeNode(root)).toContain(
+      'href="/contests/abc175/submissions/80592532"',
+    );
+  });
+
   it("escapes decoded text during the intermediate HTML serialization", () => {
     const original = `<p>Text &lt;tag&gt; &amp; entity: &quot;x&quot;</p><p>&lt;img src=x onerror=alert(1)&gt;</p>`;
     const root = parseHtmlDocument(original);

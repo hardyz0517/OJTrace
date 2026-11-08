@@ -876,6 +876,7 @@ export function App() {
           <div className="filter-controls">
             <AnimatedSelect
               variant="compact"
+              portal
               label="OJ 筛选"
               value={source}
               onChange={setSource}
@@ -899,6 +900,7 @@ export function App() {
             />
             <AnimatedSelect
               variant="compact"
+              portal
               label="状态筛选"
               value={verdict}
               onChange={setVerdict}
@@ -906,6 +908,7 @@ export function App() {
             />
             <AnimatedSelect
               variant="compact"
+              portal
               label="提交筛选"
               value={submissionFilter}
               onChange={setSubmissionFilter}

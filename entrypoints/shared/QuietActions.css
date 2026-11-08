@@ -1,0 +1,82 @@
+.quiet-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #657083;
+  padding: 7px 9px;
+  font-size: 13px;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 100ms ease;
+}
+.quiet-action:hover {
+  border-color: #e5e8ee;
+  background: #f8fafc;
+  color: #344054;
+}
+.quiet-action:active {
+  transform: translateY(1px);
+}
+.quiet-action:focus-visible {
+  outline: 2px solid #b8c7e8;
+  outline-offset: 1px;
+}
+.quiet-action:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+.sync-button {
+  height: 34px;
+  flex-shrink: 0;
+  padding: 0 10px;
+  white-space: nowrap;
+  border-color: #e1e5eb;
+  background: #f1f5fb;
+  color: #344d74;
+  font-weight: 550;
+}
+.sync-button:hover {
+  border-color: #bdc8da;
+  background: #fbfcfd;
+  color: #344054;
+}
+.sync-button:active {
+  background: #f5f7fa;
+}
+.sync-button:disabled {
+  cursor: not-allowed;
+}
+.sync-button[aria-busy="true"] {
+  cursor: wait;
+}
+.action-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  color: #7b8798;
+  font-size: 16px;
+  line-height: 1;
+}
+.sync-spinner {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: sync-spin 900ms linear infinite;
+}
+@keyframes sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

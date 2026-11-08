@@ -108,6 +108,26 @@ afterEach(async () => {
 });
 
 describe("Timeline sync integration", () => {
+  it.each(["OJ 筛选", "状态筛选", "提交筛选"])(
+    "%s opens through the shared animated portal",
+    async (label) => {
+      await act(async () => root.render(createElement(App)));
+
+      const trigger = container.querySelector<HTMLButtonElement>(
+        `button[aria-label="${label}"]`,
+      )!;
+      await act(async () => trigger.click());
+
+      const menu = document.body.querySelector<HTMLElement>(
+        `.animated-select-portal[data-state="open"] [role="listbox"][aria-label="${label}"]`,
+      );
+      expect(trigger.getAttribute("aria-expanded")).toBe("true");
+      expect(trigger.classList.contains("is-open")).toBe(true);
+      expect(menu).not.toBeNull();
+      expect(menu?.closest(".animated-select-portal")).not.toBeNull();
+    },
+  );
+
   it("uses ordinary sync for selected Hydro accounts without an activity recheck button", async () => {
     stateData = publicStoredData({
       ...defaultStoredData(),

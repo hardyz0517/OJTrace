@@ -241,11 +241,11 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  /* Keep the chevron rotation as the open/closed state cue. */
   .animated-select .select-trigger,
-  .animated-select .select-chevron,
-  .animated-select .select-menu,
   .animated-select .select-option,
-  .animated-select-portal {
+  .animated-select-portal .select-trigger,
+  .animated-select-portal .select-option {
     animation: none !important;
     transition: none !important;
   }

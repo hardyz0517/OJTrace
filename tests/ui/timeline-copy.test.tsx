@@ -134,7 +134,7 @@ async function click(element: HTMLElement) {
 async function select(label: string, option: string) {
   const trigger = button(label);
   await click(trigger);
-  await click(button(option, trigger.parentElement!));
+  await click(button(option));
 }
 
 function toast() {

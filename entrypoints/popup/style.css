@@ -173,44 +173,6 @@ button {
   font-size: 12px;
 }
 
-.cross-oj-history {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-subtle, #e2e8f0);
-}
-
-.cross-oj-history h2 {
-  margin: 0 0 8px;
-  color: var(--text-secondary, #475569);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.cross-oj-history ul {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.cross-oj-history li {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  font-size: 12px;
-}
-
-.cross-oj-history a {
-  overflow: hidden;
-  color: var(--text-primary, #1e293b);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cross-oj-history span {
-  color: var(--text-muted, #64748b);
-}
 .cross-oj-enable:disabled {
   opacity: 0.55;
   cursor: wait;

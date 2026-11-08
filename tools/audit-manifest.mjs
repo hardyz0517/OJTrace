@@ -15,6 +15,7 @@ const unexpected = forbidden.filter(
 const expectedHosts = [
   "https://codeforces.com/*",
   "https://atcoder.jp/*",
+  "https://challenges.cloudflare.com/*",
   "https://kenkoooo.com/*",
   "https://*/*",
   "http://*/*",
@@ -45,6 +46,20 @@ if (
     `Unexpected optional host permissions: ${[...optionalHosts].join(", ")}`,
   );
 }
+const cloudflareChallengeScript = (manifest.content_scripts ?? []).find(
+  (item) =>
+    (item.matches ?? []).includes(
+      "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/*",
+    ) &&
+    item.world === "MAIN" &&
+    item.all_frames === true &&
+    item.run_at === "document_start",
+);
+if (!cloudflareChallengeScript) {
+  throw new Error(
+    "Cloudflare challenge patch must run in MAIN world at document_start in matching frames",
+  );
+}
 const luoguSolutionScript = (manifest.content_scripts ?? []).find(
   (item) =>
     (item.matches ?? []).includes("https://www.luogu.com.cn/problem/*") &&
@@ -53,11 +68,41 @@ const luoguSolutionScript = (manifest.content_scripts ?? []).find(
 if (!luoguSolutionScript) {
   throw new Error("Luogu solution-channel script must target problem pages");
 }
+const luoguCrossOjScript = (manifest.content_scripts ?? []).find(
+  (item) =>
+    (item.matches ?? []).includes("https://www.luogu.com.cn/*") &&
+    (item.js ?? []).some((file) => file.includes("luogu-cross-oj.js")) &&
+    item.run_at === "document_start",
+);
+if (!luoguCrossOjScript) {
+  throw new Error(
+    "Luogu cross-OJ script must run at document_start on luogu.com.cn",
+  );
+}
+const luoguCrossOjMainScript = (manifest.content_scripts ?? []).find(
+  (item) =>
+    (item.matches ?? []).includes("https://www.luogu.com.cn/*") &&
+    (item.js ?? []).some((file) => file.includes("luogu-cross-oj-main.js")) &&
+    item.world === "MAIN" &&
+    item.run_at === "document_start",
+);
+if (!luoguCrossOjMainScript) {
+  throw new Error(
+    "Luogu MAIN-world record route script must run at document_start",
+  );
+}
 const luoguRuntimeScript = new URL(
   "../.output/chrome-mv3/content-scripts/luogu-cross-oj.js",
   import.meta.url,
 );
 if (!(await readFile(luoguRuntimeScript)).byteLength) {
   throw new Error("Luogu runtime content script was not emitted");
+}
+const luoguMainRuntimeScript = new URL(
+  "../.output/chrome-mv3/content-scripts/luogu-cross-oj-main.js",
+  import.meta.url,
+);
+if (!(await readFile(luoguMainRuntimeScript)).byteLength) {
+  throw new Error("Luogu MAIN-world record route script was not emitted");
 }
 console.log("Manifest permission audit passed.");

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // @vitest-environment-options {"url":"https://atcoder.jp/contests/abc175/submit"}
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fillAtCoderFormInPage,
   inspectAtCoderFormInPage,
@@ -58,9 +58,9 @@ describe("AtCoder native form adapter", () => {
     });
   });
 
-  it("selects the requested task, language and full source without submitting", () => {
+  it("selects the requested task, language and full source without submitting", async () => {
     const { editor } = formFixture();
-    const result = fillAtCoderFormInPage({
+    const result = await fillAtCoderFormInPage({
       problem,
       code: "#include <bits/stdc++.h>\nint main() {}\n",
       languageValue: "6000",
@@ -77,7 +77,7 @@ describe("AtCoder native form adapter", () => {
     ).toBe("6000");
   });
 
-  it("preserves any code already present in the target editor", () => {
+  it("preserves any code already present in the target editor", async () => {
     const { editor } = formFixture("user code");
     expect(inspectAtCoderFormInPage({ problem })).toMatchObject({
       codePresent: true,
@@ -86,7 +86,7 @@ describe("AtCoder native form adapter", () => {
       document.querySelector<HTMLSelectElement>("#select-task")!.value,
     ).toBe("abc175_a");
     expect(
-      fillAtCoderFormInPage({
+      await fillAtCoderFormInPage({
         problem,
         code: "replacement",
         languageValue: "6000",
@@ -98,16 +98,65 @@ describe("AtCoder native form adapter", () => {
     ).toBe("abc175_a");
   });
 
-  it("uses the visible plain text editor and preserves an inactive ACE draft", () => {
+  it("uses the visible plain text editor and preserves an inactive ACE draft", async () => {
     const { editor } = formFixture("inactive draft");
     const source =
       document.querySelector<HTMLTextAreaElement>("#plain-textarea")!;
     source.style.display = "block";
     const code = "line 1\n\n  line 3\n";
     expect(
-      fillAtCoderFormInPage({ problem, code, languageValue: "6000" }),
+      await fillAtCoderFormInPage({ problem, code, languageValue: "6000" }),
     ).toMatchObject({ status: "filled" });
     expect(source.value).toBe(code);
     expect(editor.value).toBe("inactive draft");
+  });
+
+  it("clicks AtCoder's native submit control after filling", async () => {
+    const { editor } = formFixture();
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.textContent = "Submit";
+    document.querySelector("form")!.append(submit);
+    const submitted = vi.fn((event: Event) => event.preventDefault());
+    document.querySelector("form")!.addEventListener("submit", submitted);
+    await expect(
+      fillAtCoderFormInPage({
+        problem,
+        code: "int main() {}",
+        languageValue: "6000",
+        submit: true,
+      }),
+    ).resolves.toMatchObject({ status: "submit-triggered" });
+    expect(editor.value).toBe("int main() {}");
+    expect(submitted).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for AtCoder's native Turnstile token before clicking Submit", async () => {
+    formFixture();
+    const form = document.querySelector("form")!;
+    const widget = document.createElement("div");
+    widget.className = "cf-turnstile";
+    form.append(widget);
+    const token = document.createElement("input");
+    token.name = "cf-turnstile-response";
+    token.value = "native-turnstile-token-value";
+    form.append(token);
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.textContent = "Submit";
+    form.append(submit);
+    const submitted = vi.fn((event: Event) => event.preventDefault());
+    form.addEventListener("submit", submitted);
+
+    await expect(
+      fillAtCoderFormInPage({
+        problem,
+        code: "int main() {}",
+        languageValue: "6000",
+        submit: true,
+      }),
+    ).resolves.toMatchObject({ status: "submit-triggered" });
+    expect(submitted).toHaveBeenCalledOnce();
+    expect(token.value).toBe("native-turnstile-token-value");
   });
 });

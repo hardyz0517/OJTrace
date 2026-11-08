@@ -14,50 +14,95 @@ import {
   codeforcesEvaluationFromPage,
   pollAndReportEvaluation,
 } from "../src/oj-enhancer/features/cross-oj-submit/evaluation";
+import {
+  buildLuoguCrossOjRecordUrl,
+  ensureCodeforcesTestDetailsExpanded,
+  parseCodeforcesSubmissionDetail,
+  safeLuoguReturnUrl,
+} from "../src/oj-enhancer/features/cross-oj-submit/record-details";
+import {
+  hideCrossOjSubmitMask,
+  showCrossOjSubmitMask,
+} from "../src/oj-enhancer/features/cross-oj-submit/submit-mask";
 
 const BANNER_ID = "ojtrace-cross-oj-submit-banner";
-const WORKFLOW_OVERLAY_ID = "ojtrace-cross-oj-workflow";
+const CODEFORCES_FLOW_SESSION_KEY = "ojtrace:codeforces:cross-oj-flow";
+const CODEFORCES_FLOW_TTL_MS = 10 * 60_000;
+let codeforcesCrossOjFlow = false;
 
-function clearWorkflowOverlay(): void {
-  document.getElementById(WORKFLOW_OVERLAY_ID)?.remove();
+function saveCrossOjFlowMarker(): boolean {
+  const route = parseCodeforcesSubmitUrl(location.href);
+  if (
+    route?.kind === "submit" &&
+    new URL(location.href).searchParams.get("ojtrace") === "1"
+  ) {
+    try {
+      sessionStorage.setItem(
+        CODEFORCES_FLOW_SESSION_KEY,
+        JSON.stringify({ startedAt: Date.now() }),
+      );
+    } catch {
+      // The explicit URL marker still identifies this first document.
+    }
+    return true;
+  }
+  try {
+    const value: unknown = JSON.parse(
+      sessionStorage.getItem(CODEFORCES_FLOW_SESSION_KEY) ?? "null",
+    );
+    if (
+      value &&
+      typeof value === "object" &&
+      typeof (value as { startedAt?: unknown }).startedAt === "number"
+    ) {
+      const startedAt = (value as { startedAt: number }).startedAt;
+      if (
+        startedAt <= Date.now() + 30_000 &&
+        Date.now() - startedAt < CODEFORCES_FLOW_TTL_MS
+      )
+        return true;
+    }
+    sessionStorage.removeItem(CODEFORCES_FLOW_SESSION_KEY);
+  } catch {
+    // Session storage may be disabled; use the current URL marker only.
+  }
+  return false;
 }
 
-function showWorkflowOverlay(): void {
-  if (document.getElementById(WORKFLOW_OVERLAY_ID)) return;
-  const overlay = document.createElement("section");
-  overlay.id = WORKFLOW_OVERLAY_ID;
-  overlay.setAttribute("role", "status");
-  Object.assign(overlay.style, {
-    position: "fixed",
-    zIndex: "2147483646",
-    inset: "0",
-    display: "grid",
-    placeItems: "center",
-    padding: "16px",
-    background: "#f4f7fb",
-    font: "14px/1.5 system-ui, sans-serif",
+function clearCrossOjFlowMarker(): void {
+  try {
+    sessionStorage.removeItem(CODEFORCES_FLOW_SESSION_KEY);
+  } catch {
+    // Ignore unavailable session storage.
+  }
+}
+
+function hasCrossOjFlowMarker(): boolean {
+  try {
+    const value: unknown = JSON.parse(
+      sessionStorage.getItem(CODEFORCES_FLOW_SESSION_KEY) ?? "null",
+    );
+    const startedAt =
+      value && typeof value === "object"
+        ? (value as { startedAt?: unknown }).startedAt
+        : undefined;
+    return (
+      typeof startedAt === "number" &&
+      startedAt <= Date.now() + 30_000 &&
+      Date.now() - startedAt < CODEFORCES_FLOW_TTL_MS
+    );
+  } catch {
+    return false;
+  }
+}
+
+function waitForDocumentReady(): Promise<void> {
+  if (document.readyState !== "loading") return Promise.resolve();
+  return new Promise((resolve) => {
+    document.addEventListener("DOMContentLoaded", () => resolve(), {
+      once: true,
+    });
   });
-  const card = document.createElement("div");
-  Object.assign(card.style, {
-    width: "min(480px, calc(100vw - 32px))",
-    padding: "28px",
-    border: "1px solid #dbe3ed",
-    borderRadius: "14px",
-    background: "#fff",
-    color: "#1c2430",
-    textAlign: "center",
-    boxShadow: "0 16px 48px #12223a1a",
-  });
-  const title = document.createElement("strong");
-  title.textContent = "OJTrace 跨 OJ 提交";
-  title.style.fontSize = "18px";
-  const message = document.createElement("p");
-  message.textContent =
-    "正在 Codeforces 原生提交页中校验代码、语言和题号；如出现安全验证，完成后会自动继续。";
-  message.style.margin = "10px 0 18px";
-  card.append(title, message);
-  overlay.append(card);
-  document.documentElement.append(overlay);
 }
 
 function requestId(): string {
@@ -92,8 +137,12 @@ function profileLabel(): string {
     : "请确认当前 Codeforces 账号";
 }
 
-function showBanner(message: string, keepWorkflowOverlay = false): void {
-  if (!keepWorkflowOverlay) clearWorkflowOverlay();
+function showBanner(message: string): void {
+  hideCrossOjSubmitMask();
+  if (codeforcesCrossOjFlow) {
+    clearCrossOjFlowMarker();
+    codeforcesCrossOjFlow = false;
+  }
   document.getElementById(BANNER_ID)?.remove();
   const banner = document.createElement("section");
   banner.id = BANNER_ID;
@@ -127,6 +176,11 @@ function showBanner(message: string, keepWorkflowOverlay = false): void {
   document.documentElement.append(banner);
 }
 
+function showFlowStatus(message: string): void {
+  if (codeforcesCrossOjFlow) showCrossOjSubmitMask("codeforces", message);
+  else showBanner(message);
+}
+
 function problemLinkInPage(): ReturnType<typeof parseCodeforcesProblemUrl> {
   const problems = new Map<
     string,
@@ -149,43 +203,82 @@ function evaluationLabel(status: CrossOjEvaluationStatus): string {
   return "评测仍在进行；OJTrace 会在一分钟内有限检查页面状态";
 }
 
-function safeLuoguReturnUrl(raw: string | undefined): string | undefined {
-  if (!raw) return undefined;
-  try {
-    const url = new URL(raw);
-    if (
-      url.origin !== "https://www.luogu.com.cn" ||
-      url.username ||
-      url.password
-    )
-      return undefined;
-    return url.href;
-  } catch {
-    return undefined;
-  }
-}
-
-function syncEvaluation(submissionId: string, returnUrl?: string): void {
+async function syncEvaluation(
+  submissionId: string,
+  returnUrl?: string,
+): Promise<void> {
   const detailUrl = location.href;
-  void pollAndReportEvaluation({
-    isCurrentPage: () => location.href === detailUrl,
+  const recordPageKey = `${location.origin}${location.pathname}${location.search}`;
+  const isRecordPage = (): boolean =>
+    `${location.origin}${location.pathname}${location.search}` ===
+    recordPageKey;
+  const finalStatus = await pollAndReportEvaluation({
+    isCurrentPage: isRecordPage,
     readStatus: codeforcesEvaluationFromPage,
     report: async (evaluationStatus) => {
       const response = await send({
         type: "UPDATE_CROSS_OJ_EVALUATION",
         submissionId,
-        detailUrl,
+        detailUrl: location.href,
         evaluationStatus,
       });
       return response?.ok === true && response.code === "evaluation-updated";
     },
-    onReported: (status) => showBanner(evaluationLabel(status)),
+    onReported: (status) => showFlowStatus(evaluationLabel(status)),
+    maxPolls: 3,
+    intervalMs: 500,
   });
   const safeReturnUrl = safeLuoguReturnUrl(returnUrl);
-  if (safeReturnUrl)
-    window.setTimeout(() => {
-      if (location.href === detailUrl) location.assign(safeReturnUrl);
-    }, 2_000);
+  if (!isRecordPage()) return;
+
+  // Codeforces loads its test protocol on demand. Open the read-only details
+  // panel only after the verdict settles so the snapshot contains real cases.
+  if (finalStatus === "accepted" || finalStatus === "rejected")
+    await ensureCodeforcesTestDetailsExpanded(document);
+  const detail = parseCodeforcesSubmissionDetail(document, detailUrl);
+  let detailSaved = false;
+  if (detail) {
+    if (finalStatus && finalStatus !== "unknown")
+      detail.evaluationStatus = finalStatus;
+    const saved = await send({ type: "SAVE_CROSS_OJ_DETAIL", detail });
+    detailSaved = saved?.ok === true && saved.code === "detail-saved";
+  }
+
+  if (safeReturnUrl) {
+    const problem =
+      detail?.problemId.split("/", 2)[0] ?? problemLinkInPage()?.contestId;
+    const problemId =
+      detail?.problemId ??
+      (problemLinkInPage()
+        ? `${problemLinkInPage()!.contestId}/${problemLinkInPage()!.index}`
+        : undefined);
+    const recordUrl = problem
+      ? problemId
+        ? buildLuoguCrossOjRecordUrl(
+            "codeforces",
+            problem,
+            submissionId,
+            problemId,
+            safeReturnUrl,
+          )
+        : undefined
+      : undefined;
+    if (recordUrl && isRecordPage()) {
+      if (!detailSaved) showFlowStatus("记录已识别，正在打开洛谷原生记录详情…");
+      clearCrossOjFlowMarker();
+      location.assign(recordUrl);
+      return;
+    }
+  }
+  if (codeforcesCrossOjFlow) {
+    const message = finalStatus
+      ? evaluationLabel(finalStatus)
+      : "提交已识别，暂时无法读取评测状态。";
+    clearCrossOjFlowMarker();
+    codeforcesCrossOjFlow = false;
+    hideCrossOjSubmitMask();
+    showBanner(message);
+  }
 }
 
 async function inspectResult(): Promise<boolean> {
@@ -206,7 +299,7 @@ async function inspectResult(): Promise<boolean> {
         },
       });
       if (resumed?.ok && resumed.code === "completed") {
-        showBanner(
+        showFlowStatus(
           `提交 #${submission.submissionId} 已识别，正在读取评测状态。`,
         );
         syncEvaluation(submission.submissionId, resumed.returnUrl);
@@ -229,11 +322,18 @@ async function inspectResult(): Promise<boolean> {
       event: { kind: "result-unmatched" },
     });
     if (response?.ok && response.code === "result-unknown") {
-      showBanner(
+      showFlowStatus(
         `已观察到 Codeforces 提交 #${submission.submissionId}，但无法可靠确认题号归属。OJTrace 不会自动重试。`,
       );
       const returnUrl = safeLuoguReturnUrl(response.returnUrl);
-      if (returnUrl) window.setTimeout(() => location.assign(returnUrl), 3_000);
+      if (returnUrl) {
+        clearCrossOjFlowMarker();
+        window.setTimeout(() => location.assign(returnUrl), 3_000);
+      } else {
+        showBanner(
+          `已观察到 Codeforces 提交 #${submission.submissionId}，但无法可靠确认题号归属。请检查提交记录；OJTrace 不会自动重试。`,
+        );
+      }
       return true;
     }
     return false;
@@ -249,7 +349,7 @@ async function inspectResult(): Promise<boolean> {
     },
   });
   if (!response?.ok || response.code !== "completed") return false;
-  showBanner(
+  showFlowStatus(
     response.message ??
       `提交 #${submission.submissionId} 已识别，正在读取评测状态。`,
   );
@@ -286,12 +386,17 @@ function watchSubmissionResult(): void {
         event: { kind: "result-unmatched" },
       });
       if (response?.ok && response.code === "result-unknown") {
-        showBanner(
+        showFlowStatus(
           "Codeforces 已进入提交记录页，但 OJTrace 无法唯一识别本次记录。请核对 CF 记录；状态未知，OJTrace 不会自动重试。",
         );
         const returnUrl = safeLuoguReturnUrl(response.returnUrl);
-        if (returnUrl)
+        if (returnUrl) {
+          clearCrossOjFlowMarker();
           window.setTimeout(() => location.assign(returnUrl), 3_000);
+        } else
+          showBanner(
+            "Codeforces 已进入提交记录页，但 OJTrace 无法唯一识别本次记录。请核对提交记录；OJTrace 不会自动重试。",
+          );
       }
       return;
     }
@@ -301,12 +406,17 @@ function watchSubmissionResult(): void {
         event: { kind: "result-unmatched" },
       });
       if (response?.ok && response.code === "result-unknown") {
-        showBanner(
+        showFlowStatus(
           "Codeforces 没有在 15 秒内显示可确认的提交结果。状态未知，请先检查 CF 提交记录；OJTrace 不会自动重试。",
         );
         const returnUrl = safeLuoguReturnUrl(response.returnUrl);
-        if (returnUrl)
+        if (returnUrl) {
+          clearCrossOjFlowMarker();
           window.setTimeout(() => location.assign(returnUrl), 3_000);
+        } else
+          showBanner(
+            "Codeforces 没有在 15 秒内显示可确认的提交结果。状态未知，请先检查 CF 提交记录；OJTrace 不会自动重试。",
+          );
       }
       return;
     }
@@ -321,7 +431,6 @@ async function claim(readinessAttempt = 0): Promise<void> {
   const response = await send({ type: "CLAIM_CROSS_OJ_TASK" });
   claiming = false;
   if (!response) {
-    clearWorkflowOverlay();
     showBanner(
       "扩展后台没有确认提交状态。请检查 Codeforces 页面后再决定是否重试。",
     );
@@ -329,23 +438,20 @@ async function claim(readinessAttempt = 0): Promise<void> {
   }
   switch (response.code) {
     case "submission-triggered":
-      showBanner(
+      showFlowStatus(
         `${profileLabel()}。已触发 Codeforces 原生表单，正在等待 CF 确认；请稍候，不要重复提交。`,
-        true,
       );
       watchSubmissionResult();
       return;
     case "submission-attempted":
-      showBanner(
+      showFlowStatus(
         `${profileLabel()}。已点击 Codeforces 原生提交控件，正在确认 CF 是否接收；请稍候，不要重复提交。`,
-        true,
       );
       watchSubmissionResult();
       return;
     case "submission-in-progress":
-      showBanner(
+      showFlowStatus(
         "已发起 Codeforces 提交，正在等待提交结果；请勿重复操作。",
-        true,
       );
       watchSubmissionResult();
       return;
@@ -405,7 +511,7 @@ async function claim(readinessAttempt = 0): Promise<void> {
       );
       return;
     case "security-check":
-      showBanner(
+      showFlowStatus(
         "请按 Codeforces 页面提示完成安全验证，再返回提交页。OJTrace 不会绕过验证。",
       );
       return;
@@ -437,6 +543,9 @@ async function claim(readinessAttempt = 0): Promise<void> {
     case "unsupported-page":
     case "language-mismatch":
     case "invalid-transition":
+      hideCrossOjSubmitMask();
+      clearCrossOjFlowMarker();
+      codeforcesCrossOjFlow = false;
       return;
     case "target-page-changed":
       showBanner("目标题目或页面已变化。请从洛谷重新发起。");
@@ -470,6 +579,19 @@ function installSubmitObserver(): void {
 }
 
 async function main(): Promise<void> {
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted || !codeforcesCrossOjFlow) return;
+    if (hasCrossOjFlowMarker()) return;
+    codeforcesCrossOjFlow = false;
+    hideCrossOjSubmitMask();
+  });
+  codeforcesCrossOjFlow = saveCrossOjFlowMarker();
+  if (codeforcesCrossOjFlow)
+    showCrossOjSubmitMask(
+      "codeforces",
+      "正在载入 Codeforces 原生提交与安全验证界面…",
+    );
+  await waitForDocumentReady();
   if (await inspectResult()) return;
   if (isSubmissionListPage()) {
     const response = await send({
@@ -477,20 +599,22 @@ async function main(): Promise<void> {
       event: { kind: "result-unmatched" },
     });
     if (response?.ok && response.code === "result-unknown") {
-      showBanner(
+      showFlowStatus(
         "Codeforces 已进入提交记录页，但没有可唯一确认的详情页。请检查提交记录；状态未知，OJTrace 不会自动重试。",
       );
       const returnUrl = safeLuoguReturnUrl(response.returnUrl);
-      if (returnUrl) window.setTimeout(() => location.assign(returnUrl), 3_000);
+      if (returnUrl) {
+        clearCrossOjFlowMarker();
+        window.setTimeout(() => location.assign(returnUrl), 3_000);
+      } else {
+        showBanner(
+          "Codeforces 已进入提交记录页，但没有可唯一确认的详情页。请检查提交记录；状态未知，OJTrace 不会自动重试。",
+        );
+      }
     }
     return;
   }
   const route = parseCodeforcesSubmitUrl(location.href);
-  if (
-    route?.kind === "submit" &&
-    new URL(location.href).searchParams.get("ojtrace") === "1"
-  )
-    showWorkflowOverlay();
   if (route?.kind === "submit") installSubmitObserver();
   if (route?.kind === "submit" || route?.kind === "login" || isChallengePage())
     await claim();
@@ -498,6 +622,6 @@ async function main(): Promise<void> {
 
 export default defineContentScript({
   matches: ["https://codeforces.com/*"],
-  runAt: "document_idle",
+  runAt: "document_start",
   main,
 });

@@ -13,13 +13,14 @@ import {
   parseAtCoderSubmitUrl,
   parseLuoguAtCoderProblem,
 } from "./atcoder";
-import { matchAtCoderLanguage } from "./atcoder-language";
+import { findAtCoderCpp23Language } from "./atcoder-language";
 import { sameLuoguPageDocumentUrl } from "./luogu-problem";
 import type {
   CrossOjEvaluationStatus,
   CrossOjSubmissionRecord,
   CrossOjFillResult,
   CrossOjFormInspection,
+  CrossOjLanguageOption,
   CrossOjProblemRef,
   CrossOjSubmitTask,
   EditorSnapshot,
@@ -83,6 +84,7 @@ export interface ClaimOutcome {
   taskState?: CrossOjSubmitTask["state"];
   result?: CrossOjSubmitTask["result"];
   returnUrl?: string;
+  problem?: CrossOjProblemRef;
 }
 
 function taskKey(tabId: number): string {
@@ -91,6 +93,7 @@ function taskKey(tabId: number): string {
 
 type SubmitRoute =
   | { kind: "submit"; contestId?: string; index?: string }
+  | { kind: "submission-list"; contestId: string }
   | { kind: "login" }
   | { kind: "other" }
   | undefined;
@@ -101,9 +104,10 @@ function parseTargetSubmitRoute(
 ): SubmitRoute {
   if (task.problem.oj === "codeforces") return parseCodeforcesSubmitUrl(url);
   const route = parseAtCoderSubmitUrl(url);
-  return route?.kind === "submit"
-    ? { kind: "submit", contestId: route.contestId }
-    : route;
+  if (route?.kind === "submit")
+    return { kind: "submit", contestId: route.contestId };
+  if (route?.kind === "submission-list") return route;
+  return route;
 }
 
 function parseTargetSubmission(
@@ -137,6 +141,18 @@ function isCodeforcesSubmissionListRoute(
   }
 }
 
+function isAtCoderSubmissionListRoute(
+  task: CrossOjSubmitTask,
+  rawUrl: string,
+): boolean {
+  if (task.problem.oj !== "atcoder") return false;
+  const route = parseAtCoderSubmitUrl(rawUrl);
+  return (
+    route?.kind === "submission-list" &&
+    route.contestId === task.problem.contestId
+  );
+}
+
 function safeLuoguProblemId(rawUrl: string): string | undefined {
   try {
     const url = new URL(rawUrl);
@@ -162,6 +178,14 @@ function safeLuoguProblemId(rawUrl: string): string | undefined {
   }
 }
 
+function atcoderCrossOjSubmitUrl(
+  problem: Extract<CrossOjProblemRef, { oj: "atcoder" }>,
+): string {
+  const url = new URL(atcoderSubmitUrl(problem));
+  url.searchParams.set("ojtrace", "1");
+  return url.href;
+}
+
 function validEditorSnapshot(editor: EditorSnapshot): boolean {
   return (
     editor.code.trim().length > 0 &&
@@ -177,8 +201,10 @@ function isChallengeUrl(rawUrl: string): boolean {
   try {
     const url = new URL(rawUrl);
     return (
-      (url.hostname === "codeforces.com" || url.hostname === "atcoder.jp") &&
-      /challenge|cdn-cgi|captcha/i.test(`${url.pathname} ${url.search}`)
+      ((url.hostname === "codeforces.com" || url.hostname === "atcoder.jp") &&
+        /challenge|cdn-cgi|captcha/i.test(`${url.pathname} ${url.search}`)) ||
+      (url.hostname === "challenges.cloudflare.com" &&
+        url.pathname.startsWith("/cdn-cgi/challenge-platform/"))
     );
   } catch {
     return false;
@@ -226,7 +252,10 @@ export class CrossOjSubmitService {
     if (!validEditorSnapshot(input.editor))
       throw new Error("代码或语言信息无效，请重新读取编辑器。");
 
-    const reuseSourceTab = input.problem.oj === "codeforces";
+    // Use one native target tab for both OJs. This preserves the source tab's
+    // logged-in browser session and lets the target page own its first-party
+    // security challenge without creating an extra helper tab.
+    const reuseSourceTab = true;
     const target = reuseSourceTab
       ? { id: input.sourceTabId }
       : await this.options.tabs.create({ url: "about:blank", active: true });
@@ -236,7 +265,7 @@ export class CrossOjSubmitService {
     const targetUrl =
       input.problem.oj === "codeforces"
         ? `https://codeforces.com/problemset/submit?${new URLSearchParams({ contestId: input.problem.contestId, problemIndex: input.problem.index, ojtrace: "1" })}`
-        : atcoderSubmitUrl(input.problem);
+        : atcoderCrossOjSubmitUrl(input.problem);
     const task: CrossOjSubmitTask = {
       sourceTabId: input.sourceTabId,
       sourceUrl,
@@ -265,7 +294,7 @@ export class CrossOjSubmitService {
     }
     return {
       targetTabId: target.id,
-      targetUrl: reuseSourceTab ? targetUrl : undefined,
+      targetUrl,
     };
   }
 
@@ -307,8 +336,8 @@ export class CrossOjSubmitService {
           ok: true,
           code: "submission-in-progress",
           taskState: task.state,
-          returnUrl:
-            task.problem.oj === "codeforces" ? task.sourceUrl : undefined,
+          returnUrl: task.sourceUrl,
+          problem: task.problem,
         };
       if (task.state !== "pending")
         return {
@@ -353,42 +382,45 @@ export class CrossOjSubmitService {
       }
       if (inspection.codePresent) return { ok: false, code: "existing-code" };
 
-      const language = targetLanguageValue
-        ? inspection.languageOptions.find(
-            (option) => option.value === targetLanguageValue,
-          )
-        : undefined;
-      const match =
-        task.problem.oj === "codeforces"
-          ? matchCodeforcesLanguage(
-              task.editor?.luoguLanguage ?? "",
-              inspection.languageOptions,
+      let selectedLanguage: CrossOjLanguageOption | undefined;
+      if (task.problem.oj === "atcoder") {
+        selectedLanguage = findAtCoderCpp23Language(inspection.languageOptions);
+        if (!selectedLanguage)
+          return { ok: false, code: "unsupported-language" };
+      } else {
+        const language = targetLanguageValue
+          ? inspection.languageOptions.find(
+              (option) => option.value === targetLanguageValue,
             )
-          : matchAtCoderLanguage(
-              task.editor?.luoguLanguage ?? "",
-              inspection.languageOptions,
-            );
-      if (
-        match.kind === "unsupported" ||
-        (match.kind === "matched" &&
-          targetLanguageValue !== undefined &&
-          targetLanguageValue !== match.option.value)
-      )
-        return { ok: false, code: "unsupported-language" };
-      if (
-        targetLanguageValue &&
-        (match.kind !== "ambiguous" ||
-          !match.options.some((option) => option.value === targetLanguageValue))
-      )
-        return { ok: false, code: "language-mismatch" };
-      const selectedLanguage =
-        language ?? (match.kind === "matched" ? match.option : undefined);
-      if (!selectedLanguage) {
-        return {
-          ok: false,
-          code: "language-selection-required",
-          languageOptions: match.kind === "ambiguous" ? match.options : [],
-        };
+          : undefined;
+        const match = matchCodeforcesLanguage(
+          task.editor?.luoguLanguage ?? "",
+          inspection.languageOptions,
+        );
+        if (
+          match.kind === "unsupported" ||
+          (match.kind === "matched" &&
+            targetLanguageValue !== undefined &&
+            targetLanguageValue !== match.option.value)
+        )
+          return { ok: false, code: "unsupported-language" };
+        if (
+          targetLanguageValue &&
+          (match.kind !== "ambiguous" ||
+            !match.options.some(
+              (option) => option.value === targetLanguageValue,
+            ))
+        )
+          return { ok: false, code: "language-mismatch" };
+        selectedLanguage =
+          language ?? (match.kind === "matched" ? match.option : undefined);
+        if (!selectedLanguage) {
+          return {
+            ok: false,
+            code: "language-selection-required",
+            languageOptions: match.kind === "ambiguous" ? match.options : [],
+          };
+        }
       }
       if (!task.editor) {
         await this.remove(task);
@@ -399,7 +431,7 @@ export class CrossOjSubmitService {
       // the response fails, the task will never be automatically replayed.
       const claimed: CrossOjSubmitTask = {
         ...task,
-        state: task.problem.oj === "codeforces" ? "submitting" : "claimed",
+        state: "submitting",
       };
       await this.options.storage.set(taskKey(tabId), claimed);
       let fill: CrossOjFillResult;
@@ -410,17 +442,13 @@ export class CrossOjSubmitService {
           inspection.documentId,
         );
       } catch {
-        if (task.problem.oj === "codeforces") {
-          const uncertain: CrossOjSubmitTask = {
-            ...claimed,
-            state: "submitting",
-          };
-          delete uncertain.editor;
-          await this.options.storage.set(taskKey(tabId), uncertain);
-          return { ok: false, code: "submission-uncertain" };
-        }
-        await this.fail(claimed, "internal-error");
-        return { ok: false, code: "fill-failed" };
+        const uncertain: CrossOjSubmitTask = {
+          ...claimed,
+          state: "submitting",
+        };
+        delete uncertain.editor;
+        await this.options.storage.set(taskKey(tabId), uncertain);
+        return { ok: false, code: "submission-uncertain" };
       }
       if (fill.status === "existing-code") {
         // The page may have changed after inspection; preserve user data.
@@ -431,10 +459,6 @@ export class CrossOjSubmitService {
         fill.status === "submit-triggered" ||
         fill.status === "submit-attempted"
       ) {
-        if (task.problem.oj !== "codeforces") {
-          await this.fail(claimed, "internal-error");
-          return { ok: false, code: "fill-failed" };
-        }
         const observing: CrossOjSubmitTask = {
           ...claimed,
           state: "observing-result",
@@ -449,14 +473,11 @@ export class CrossOjSubmitService {
               ? "submission-triggered"
               : "submission-attempted",
           taskState: observing.state,
-          returnUrl:
-            task.problem.oj === "codeforces" ? task.sourceUrl : undefined,
+          returnUrl: task.sourceUrl,
+          problem: task.problem,
         };
       }
-      if (
-        fill.status === "submit-uncertain" &&
-        task.problem.oj === "codeforces"
-      ) {
+      if (fill.status === "submit-uncertain") {
         const uncertain: CrossOjSubmitTask = { ...claimed };
         delete uncertain.editor;
         await this.options.storage.set(taskKey(tabId), uncertain);
@@ -571,7 +592,9 @@ export class CrossOjSubmitService {
         // URL. Never guess the newest row or replay the submission.
         const statusListAfterSubmit =
           (task.state === "submitting" || task.state === "observing-result") &&
-          isCodeforcesSubmissionListRoute(task, current.href);
+          (task.problem.oj === "codeforces"
+            ? isCodeforcesSubmissionListRoute(task, current.href)
+            : isAtCoderSubmissionListRoute(task, current.href));
         if (task.state !== "observing-result" && !statusListAfterSubmit)
           return { ok: false, code: "invalid-transition" };
         const updated: CrossOjSubmitTask = {
@@ -589,8 +612,7 @@ export class CrossOjSubmitService {
           ok: true,
           code: "result-unknown",
           taskState: updated.state,
-          returnUrl:
-            task.problem.oj === "codeforces" ? task.sourceUrl : undefined,
+          returnUrl: task.sourceUrl,
         };
       }
       if (task.state !== "observing-result")
@@ -679,8 +701,7 @@ export class CrossOjSubmitService {
         code: "completed",
         taskState: updated.state,
         result: updated.result,
-        returnUrl:
-          task.problem.oj === "codeforces" ? task.sourceUrl : undefined,
+        returnUrl: task.sourceUrl,
         message,
       };
     });
@@ -768,21 +789,23 @@ export class CrossOjSubmitService {
         await this.remove(task);
         return;
       }
-      if (parsed.origin !== task.targetOrigin) {
+      const challenge = isChallengeUrl(url);
+      if (parsed.origin !== task.targetOrigin && !challenge) {
         await this.remove(task);
         return;
       }
       const isSubmit = parseTargetSubmitRoute(task, url)?.kind === "submit";
       const isSubmissionDetail = !!parseTargetSubmission(task, url);
-      const isSubmissionList = isCodeforcesSubmissionListRoute(task, url);
+      const isSubmissionList =
+        task.problem.oj === "codeforces"
+          ? isCodeforcesSubmissionListRoute(task, url)
+          : isAtCoderSubmissionListRoute(task, url);
       const isLogin =
         task.problem.oj === "codeforces"
           ? /^\/enter(?:\/|$)/.test(parsed.pathname)
           : /^\/login(?:\/|$)/.test(parsed.pathname);
-      const isChallenge = isChallengeUrl(url);
       if (task.state === "pending") {
-        if (isSubmit || isLogin || isChallenge || parsed.pathname === "/")
-          return;
+        if (isSubmit || isLogin || challenge || parsed.pathname === "/") return;
         await this.remove(task);
         return;
       }
@@ -790,7 +813,7 @@ export class CrossOjSubmitService {
       // event was observed. Otherwise an unrelated same-tab detail page could
       // keep stale code/task state alive or be mistaken for this task's result.
       if (task.state === "observing-result" || task.state === "submitting") {
-        if (isSubmissionDetail || isSubmissionList) return;
+        if (isSubmissionDetail || isSubmissionList || challenge) return;
         await this.remove(task);
         return;
       }

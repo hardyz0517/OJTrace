@@ -1,10 +1,10 @@
-import type { CrossOjSubmissionRecord } from "./model";
-import { readCrossOjHistory } from "./history";
-
 // Chrome's scripting API accepts extension-root-relative paths. WXT's
 // generated PublicPath currently requires a leading slash for this field.
 const LUOGU_SCRIPT_EXECUTION_PATH =
   "content-scripts/luogu-cross-oj.js" as unknown as `/content-scripts/luogu-cross-oj.js`;
+const LUOGU_MAIN_SCRIPT_EXECUTION_PATH =
+  "content-scripts/luogu-cross-oj-main.js" as unknown as `/content-scripts/luogu-cross-oj.js`;
+const CLOUDFLARE_CHALLENGE_PERMISSION = "https://challenges.cloudflare.com/*";
 
 export class CrossOjClientError extends Error {
   constructor(
@@ -21,12 +21,42 @@ export async function requestCrossOjPermissions(
   target: "codeforces" | "atcoder",
 ): Promise<boolean> {
   try {
-    return await browser.permissions.request({
-      origins: [
-        target === "codeforces"
-          ? "https://codeforces.com/*"
-          : "https://atcoder.jp/*",
-      ],
+    const targetPermission =
+      target === "codeforces"
+        ? ["https://codeforces.com/*"]
+        : ["https://atcoder.jp/*"];
+    return await browser.permissions.request({ origins: targetPermission });
+  } catch {
+    return false;
+  }
+}
+
+export async function requestCloudflareChallengePermission(): Promise<boolean> {
+  try {
+    await browser.permissions.request({
+      origins: [CLOUDFLARE_CHALLENGE_PERMISSION],
+    });
+    return await hasCloudflareChallengePermission();
+  } catch {
+    return false;
+  }
+}
+
+export async function removeCloudflareChallengePermission(): Promise<boolean> {
+  try {
+    await browser.permissions.remove({
+      origins: [CLOUDFLARE_CHALLENGE_PERMISSION],
+    });
+    return !(await hasCloudflareChallengePermission());
+  } catch {
+    return false;
+  }
+}
+
+export async function hasCloudflareChallengePermission(): Promise<boolean> {
+  try {
+    return await browser.permissions.contains({
+      origins: [CLOUDFLARE_CHALLENGE_PERMISSION],
     });
   } catch {
     return false;
@@ -38,12 +68,10 @@ export async function hasCrossOjPermissions(
 ): Promise<boolean> {
   try {
     return await browser.permissions.contains({
-      origins: [
-        "https://www.luogu.com.cn/*",
+      origins:
         target === "codeforces"
-          ? "https://codeforces.com/*"
-          : "https://atcoder.jp/*",
-      ],
+          ? ["https://www.luogu.com.cn/*", "https://codeforces.com/*"]
+          : ["https://www.luogu.com.cn/*", "https://atcoder.jp/*"],
     });
   } catch {
     return false;
@@ -55,11 +83,12 @@ export async function enableLuoguPageIntegration(input: {
   url: string;
   target: "codeforces" | "atcoder";
 }): Promise<void> {
-  const permissionRequest = requestCrossOjPermissions(input.target);
-  if (!(await permissionRequest))
+  if (!(await requestCrossOjPermissions(input.target)))
     throw new CrossOjClientError(
       "permission-denied",
-      "需要授予洛谷和目标 OJ 的站点权限，才能在洛谷页面显示按钮。",
+      input.target === "atcoder"
+        ? "需要授予洛谷和 AtCoder 的站点权限，才能在洛谷页面使用此功能。"
+        : "需要授予洛谷和 Codeforces 的站点权限，才能在洛谷页面使用此功能。",
     );
   const tab = await browser.tabs.get(input.tabId);
   if (
@@ -67,19 +96,14 @@ export async function enableLuoguPageIntegration(input: {
     new URL(input.url).origin !== "https://www.luogu.com.cn"
   )
     throw new CrossOjClientError("tab-changed", "洛谷页面已变化，请重试。");
-  const id = "ojtrace-luogu-cross-oj";
-  const existing = await browser.scripting.getRegisteredContentScripts();
-  if (!existing.some((script) => script.id === id)) {
-    await browser.scripting.registerContentScripts([
-      {
-        id,
-        matches: ["https://www.luogu.com.cn/*"],
-        js: ["content-scripts/luogu-cross-oj.js"],
-        runAt: "document_idle",
-        persistAcrossSessions: true,
-      },
-    ]);
-  }
+  // Manifest-declared content scripts already run on every Luogu page. This
+  // injection only bootstraps a tab opened before install or extension reload;
+  // the scripts' own instance guards make it a no-op otherwise.
+  await browser.scripting.executeScript({
+    target: { tabId: input.tabId },
+    files: [LUOGU_MAIN_SCRIPT_EXECUTION_PATH],
+    world: "MAIN",
+  });
   await browser.scripting.executeScript({
     target: { tabId: input.tabId },
     files: [LUOGU_SCRIPT_EXECUTION_PATH],
@@ -95,26 +119,4 @@ export async function currentActiveTab(): Promise<{
   if (typeof tab?.id !== "number" || !tab.url)
     throw new CrossOjClientError("no-active-tab", "当前没有可用的活动标签页。");
   return { tabId: tab.id, url: tab.url };
-}
-
-export async function loadCrossOjHistory(): Promise<CrossOjSubmissionRecord[]> {
-  try {
-    const requestId = crypto.randomUUID();
-    const response: unknown = await browser.runtime.sendMessage({
-      schemaVersion: 1,
-      requestId,
-      type: "GET_CROSS_OJ_HISTORY",
-    });
-    if (
-      !response ||
-      typeof response !== "object" ||
-      (response as { requestId?: unknown }).requestId !== requestId ||
-      (response as { schemaVersion?: unknown }).schemaVersion !== 1 ||
-      (response as { ok?: unknown }).ok !== true
-    )
-      return [];
-    return readCrossOjHistory((response as { history?: unknown }).history);
-  } catch {
-    return [];
-  }
 }

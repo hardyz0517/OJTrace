@@ -4,6 +4,7 @@ import { PaginationSettings } from "./PaginationSettings";
 import { LocalDataSettings } from "./LocalDataSettings";
 import { CnoiRulesSettings } from "./cnoi/CnoiRulesSettings";
 import { LuoguSolutionChannelSettings } from "./LuoguSolutionChannelSettings";
+import { CrossOjSettings } from "./CrossOjSettings";
 import { SettingsShell } from "./SettingsShell";
 import { useSettingsData } from "./useSettingsData";
 import {
@@ -90,6 +91,7 @@ export function SettingsApp() {
               ) : (
                 <p className="muted">正在读取页面增强设置…</p>
               ))}
+            {id === "cross-oj" && <CrossOjSettings />}
             {id === "data" && <LocalDataSettings onUpdated={load} />}
           </div>
         ))}

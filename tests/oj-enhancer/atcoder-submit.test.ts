@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   atCoderProblemIdsMatch,
+  atcoderSubmissionTimestamp,
+  isAtCoderSubmissionIdCorrelated,
   atcoderSubmissionFromUrl,
   atcoderSubmitUrl,
+  isAtCoderSubmissionTimeCorrelated,
   isLuoguAtCoderProblemId,
   parseAtCoderProblemUrl,
   parseAtCoderSubmitUrl,
   parseLuoguAtCoderProblem,
 } from "../../src/oj-enhancer/features/cross-oj-submit/atcoder";
-import { matchAtCoderLanguage } from "../../src/oj-enhancer/features/cross-oj-submit/atcoder-language";
+import { findAtCoderCpp23Language } from "../../src/oj-enhancer/features/cross-oj-submit/atcoder-language";
 
 describe("AtCoder cross-OJ routes", () => {
   it("parses Luogu IDs and task links without guessing", () => {
@@ -67,6 +70,11 @@ describe("AtCoder cross-OJ routes", () => {
       parseAtCoderSubmitUrl("https://atcoder.jp/contests/abc001/submit"),
     ).toEqual({ kind: "submit", contestId: "abc001" });
     expect(
+      parseAtCoderSubmitUrl(
+        "https://atcoder.jp/contests/abc001/submissions/me",
+      ),
+    ).toEqual({ kind: "submission-list", contestId: "abc001" });
+    expect(
       atcoderSubmissionFromUrl(
         "https://atcoder.jp/contests/abc001/submissions/12345678",
       ),
@@ -75,22 +83,63 @@ describe("AtCoder cross-OJ routes", () => {
 });
 
 describe("AtCoder language matching", () => {
-  it("matches the current option labels and refuses ambiguous choices", () => {
+  it("always picks an available C++23 option regardless of the Luogu language", () => {
     expect(
-      matchAtCoderLanguage("C++20", [
+      findAtCoderCpp23Language([
+        { value: "6017", label: "C++23 (GCC 15.2.0)" },
         { value: "6000", label: "C++20 (GCC 12.2.0)" },
       ]),
-    ).toMatchObject({ kind: "matched", option: { value: "6000" } });
+    ).toEqual({ value: "6017", label: "C++23 (GCC 15.2.0)" });
+    expect(findAtCoderCpp23Language([])).toBeUndefined();
+  });
+});
+
+describe("AtCoder submission result correlation", () => {
+  it("rejects an older same-problem submission from a previous attempt", () => {
+    const startedAt = 1_000_000;
     expect(
-      matchAtCoderLanguage("Python 3.11", [
-        { value: "6082", label: "Python (CPython 3.13.7)" },
-        { value: "6083", label: "Python (PyPy 3.11-v7.3.20)" },
-      ]),
-    ).toMatchObject({ kind: "ambiguous" });
+      isAtCoderSubmissionTimeCorrelated({
+        submittedAt: startedAt + 1_000,
+        startedAt,
+        now: startedAt + 2_000,
+      }),
+    ).toBe(true);
     expect(
-      matchAtCoderLanguage("Pascal", [
-        { value: "1", label: "C++23 (GCC 15.2.0)" },
-      ]),
-    ).toEqual({ kind: "unsupported" });
+      isAtCoderSubmissionTimeCorrelated({
+        submittedAt: startedAt - 60_000,
+        startedAt,
+        now: startedAt + 2_000,
+      }),
+    ).toBe(false);
+  });
+
+  it("reads official AtCoder row timestamps in epoch, datetime, or text form", () => {
+    expect(atcoderSubmissionTimestamp({ unixSeconds: "1730700000" })).toBe(
+      1_730_700_000_000,
+    );
+    expect(
+      atcoderSubmissionTimestamp({ datetime: "2026-11-04T10:00:00+09:00" }),
+    ).toBe(Date.parse("2026-11-04T10:00:00+09:00"));
+    expect(atcoderSubmissionTimestamp({ text: "not a timestamp" })).toBe(
+      undefined,
+    );
+  });
+
+  it("uses the highest known submission ID as a fallback when rows have no time", () => {
+    expect(
+      isAtCoderSubmissionIdCorrelated({
+        submissionId: "101",
+        baselineSubmissionId: "100",
+      }),
+    ).toBe(true);
+    expect(
+      isAtCoderSubmissionIdCorrelated({
+        submissionId: "100",
+        baselineSubmissionId: "100",
+      }),
+    ).toBe(false);
+    expect(isAtCoderSubmissionIdCorrelated({ submissionId: "101" })).toBe(
+      false,
+    );
   });
 });

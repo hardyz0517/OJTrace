@@ -62,6 +62,7 @@ export function parseAtCoderSubmitUrl(
   rawUrl: string,
 ):
   | { kind: "submit"; contestId?: string }
+  | { kind: "submission-list"; contestId: string }
   | { kind: "login" }
   | { kind: "other" }
   | undefined {
@@ -75,9 +76,13 @@ export function parseAtCoderSubmitUrl(
   if (url.pathname === "/login" || url.pathname.startsWith("/login/"))
     return { kind: "login" };
   const match = /^\/contests\/([a-z0-9-]+)\/submit\/?$/i.exec(url.pathname);
-  return match
-    ? { kind: "submit", contestId: match[1]!.toLowerCase() }
-    : { kind: "other" };
+  if (match) return { kind: "submit", contestId: match[1]!.toLowerCase() };
+  const list = /^\/contests\/([a-z0-9-]+)\/submissions\/me\/?$/i.exec(
+    url.pathname,
+  );
+  if (list)
+    return { kind: "submission-list", contestId: list[1]!.toLowerCase() };
+  return { kind: "other" };
 }
 
 export function atcoderSubmissionFromUrl(
@@ -96,6 +101,47 @@ export function atcoderSubmissionFromUrl(
   return match
     ? { contestId: match[1]!.toLowerCase(), submissionId: match[2]! }
     : undefined;
+}
+
+export function atcoderSubmissionTimestamp(args: {
+  datetime?: string | null;
+  unixSeconds?: string | null;
+  text?: string | null;
+}): number | undefined {
+  const seconds = Number(args.unixSeconds);
+  if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+  const timestamp = Date.parse(args.datetime || args.text || "");
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+export function isAtCoderSubmissionTimeCorrelated(args: {
+  submittedAt: number;
+  startedAt: number;
+  now?: number;
+}): boolean {
+  const now = args.now ?? Date.now();
+  if (
+    !Number.isFinite(args.submittedAt) ||
+    !Number.isFinite(args.startedAt) ||
+    !Number.isFinite(now) ||
+    args.startedAt > now + 30_000 ||
+    now - args.startedAt > 10 * 60_000
+  )
+    return false;
+  return (
+    args.submittedAt >= args.startedAt - 15_000 &&
+    args.submittedAt <= now + 30_000
+  );
+}
+
+export function isAtCoderSubmissionIdCorrelated(args: {
+  submissionId: string;
+  baselineSubmissionId?: string;
+}): boolean {
+  if (!/^\d+$/.test(args.submissionId)) return false;
+  if (args.baselineSubmissionId === undefined) return false;
+  if (!/^\d+$/.test(args.baselineSubmissionId)) return false;
+  return BigInt(args.submissionId) > BigInt(args.baselineSubmissionId);
 }
 
 export function atcoderSubmitUrl(problem: AtCoderProblemRef): string {

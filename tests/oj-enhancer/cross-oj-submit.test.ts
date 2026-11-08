@@ -120,14 +120,17 @@ function setupService(now = () => 1_000) {
       const tab = tabs.get(tabId);
       if (!tab) throw new Error("tab not found");
       const task = entries.get(`${CROSS_OJ_TASK_PREFIX}${tabId}`);
-      if (
-        tab.url.startsWith("https://www.luogu.com.cn/") &&
-        task?.problem.oj === "codeforces"
-      )
+      if (tab.url.startsWith("https://www.luogu.com.cn/") && task) {
+        if (task.problem.oj === "codeforces")
+          return {
+            ...tab,
+            url: `https://codeforces.com/problemset/submit?${new URLSearchParams({ contestId: task.problem.contestId, problemIndex: task.problem.index })}`,
+          };
         return {
           ...tab,
-          url: `https://codeforces.com/problemset/submit?${new URLSearchParams({ contestId: task.problem.contestId, problemIndex: task.problem.index })}`,
+          url: `https://atcoder.jp/contests/${task.problem.contestId}/submit`,
         };
+      }
       return tab;
     }),
     create: vi.fn(async ({ url }: { url: string }) => {
@@ -340,7 +343,7 @@ describe("cross OJ task lifecycle", () => {
     });
     adapter.inspect.mockResolvedValue({
       status: "ready",
-      languageOptions: [{ value: "6000", label: "C++20 (GCC 12.2.0)" }],
+      languageOptions: [{ value: "6017", label: "C++23 (GCC 15.2.0)" }],
       codePresent: false,
       problemMatches: true,
     });
@@ -355,18 +358,31 @@ describe("cross OJ task lifecycle", () => {
       },
       editor: {
         code: "int main() {}",
-        luoguLanguage: "C++20",
+        luoguLanguage: "Python 3.13",
         editorKind: "monaco",
         capturedAt: 1,
       },
     });
-    expect(tabs.get(target.targetTabId)?.url).toBe(
-      "https://atcoder.jp/contests/abc175/submit",
+    expect(target.targetTabId).toBe(7);
+    expect(target.targetUrl).toBe(
+      "https://atcoder.jp/contests/abc175/submit?ojtrace=1",
     );
+    adapter.fill.mockResolvedValue({
+      status: "submit-triggered",
+      languageLabel: "C++23 (GCC 15.2.0)",
+    });
     expect(await service.claim(target.targetTabId)).toMatchObject({
       ok: true,
-      code: "filled",
+      code: "submission-triggered",
+      taskState: "observing-result",
     });
+    expect(adapter.fill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        problem: expect.objectContaining({ oj: "atcoder" }),
+      }),
+      "6017",
+      undefined,
+    );
 
     const submitUrl = "https://atcoder.jp/contests/abc175/submit";
     const detailUrl = "https://atcoder.jp/contests/abc175/submissions/987654";
@@ -414,6 +430,89 @@ describe("cross OJ task lifecycle", () => {
     expect(await service.getHistory()).toEqual([]);
   });
 
+  it("preserves an AtCoder task through a Cloudflare challenge redirect", async () => {
+    const { service, tabs, adapter, entries } = setupService();
+    tabs.set(7, {
+      id: 7,
+      url: "https://www.luogu.com.cn/problem/AT_abc175_f",
+    });
+    adapter.inspect.mockResolvedValue({
+      status: "ready",
+      languageOptions: [{ value: "6017", label: "C++23 (GCC 15.2.0)" }],
+      codePresent: false,
+      problemMatches: true,
+    });
+    const target = await service.create({
+      sourceTabId: 7,
+      sourceUrl: "https://www.luogu.com.cn/problem/AT_abc175_f",
+      problem: {
+        oj: "atcoder",
+        contestId: "abc175",
+        taskId: "abc175_f",
+        source: "luogu-pid",
+      },
+      editor: {
+        code: "int main() {}",
+        luoguLanguage: "C++11",
+        editorKind: "monaco",
+        capturedAt: 1,
+      },
+    });
+    adapter.fill.mockResolvedValue({
+      status: "submit-triggered",
+      languageLabel: "C++20",
+    });
+    await service.claim(target.targetTabId);
+    tabs.set(target.targetTabId, {
+      id: target.targetTabId,
+      url: "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/turnstile",
+    });
+    await service.onTabUrlUpdated(
+      target.targetTabId,
+      tabs.get(target.targetTabId)!.url,
+    );
+    expect(
+      entries.get(`${CROSS_OJ_TASK_PREFIX}${target.targetTabId}`),
+    ).toMatchObject({
+      state: "observing-result",
+      problem: { oj: "atcoder", taskId: "abc175_f" },
+    });
+  });
+
+  it("requires the current AtCoder form to offer C++23", async () => {
+    const { service, tabs, adapter } = setupService();
+    const input = {
+      sourceTabId: 7,
+      sourceUrl: "https://www.luogu.com.cn/problem/AT_abc175_f",
+      problem: {
+        oj: "atcoder" as const,
+        contestId: "abc175",
+        taskId: "abc175_f",
+        source: "luogu-pid" as const,
+      },
+      editor: {
+        code: "int main() {}",
+        luoguLanguage: "C++11",
+        editorKind: "monaco",
+        capturedAt: 1,
+      },
+    };
+    tabs.set(7, { id: 7, url: input.sourceUrl });
+    adapter.inspect.mockResolvedValue({
+      status: "ready",
+      languageOptions: [{ value: "6000", label: "C++20 (GCC)" }],
+      codePresent: false,
+      problemMatches: true,
+    });
+    const target = await service.create(input);
+
+    expect(await service.claim(target.targetTabId)).toMatchObject({
+      ok: false,
+      code: "unsupported-language",
+    });
+    expect(adapter.fill).not.toHaveBeenCalled();
+  });
+
   it("creates the submit route from the verified original AtCoder task link", async () => {
     const { service, tabs } = setupService();
     const pageUrl = "https://www.luogu.com.cn/problem/AT1202Contest_h";
@@ -438,8 +537,9 @@ describe("cross OJ task lifecycle", () => {
       },
     });
 
-    expect(tabs.get(target.targetTabId)?.url).toBe(
-      "https://atcoder.jp/contests/degwer2023/submit",
+    expect(target.targetTabId).toBe(7);
+    expect(target.targetUrl).toBe(
+      "https://atcoder.jp/contests/degwer2023/submit?ojtrace=1",
     );
   });
 

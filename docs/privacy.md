@@ -2,8 +2,9 @@
 
 - OJTrace 没有服务端，不向开发者服务器上传账号标识、提交记录、Cookie、密码或 token。获取记录时会向对应 OJ 或 AtCoder Problems 公共 API 发送账号查询；登录凭证仅用于对应 OJ 的认证。
 - 提交记录、账号配置、同步状态、站点品牌和筛选偏好只写入浏览器 `chrome.storage.local`。用户明确填写的手动 Cookie 和 HydroOJ 密码会作为本地凭证保存；`GET_STATE` 等公开查询不会返回凭证。
-- 跨 OJ 提交代码只在 `chrome.storage.session` 短暂暂存。用户点击洛谷的“提交到 Codeforces”后，扩展通过 Codeforces 页面原生编辑器和表单发起一次提交；代码会按该提交发送给 Codeforces，不会上传到 OJTrace 服务器，也不会写入 `storage.local`、URL 或本地提交历史。AtCoder 目前只预填代码，最终提交由用户在 AtCoder 页面完成。跨 OJ 提交历史最多保留 50 条本地元数据（站点、题号、Submission ID、官方详情链接和已识别的评测状态），不包含代码；清除提交记录或清除全部也会清理这份历史。
+- 跨 OJ 提交代码只在 `chrome.storage.session` 短暂暂存。用户在洛谷点击“提交到 Codeforces”或“提交到 AtCoder”后，扩展会在目标 OJ 当前登录态的原生表单中写入代码并由站点表单发起一次提交；代码按该提交发送给目标 OJ，不会上传到 OJTrace 服务器、永久写入 `storage.local` 或放入 URL。AtCoder 提交前，扩展会在当前 AtCoder 登录会话中向 AtCoder 本站只读请求提交 ID 基线，用于区分本次提交与旧记录。遇到 Cloudflare/Turnstile 时，扩展等待并使用站点页面自己的验证流程，不生成或伪造验证令牌。为显示洛谷风格详情页，扩展会在 `chrome.storage.session` 缓存最近 4 条 Codeforces 详情快照，可能包含源码和判题协议中的测试输入/输出；单条快照的文本总量上限为 180,000 字符，浏览器会话结束后清除，清除提交记录时也一并清除。详情在当前洛谷页面壳中由本地快照渲染，不再下载其他洛谷记录作为模板或重新执行整页脚本。跨 OJ 提交历史最多保留 50 条本地元数据（站点、题号、Submission ID、官方详情链接和已识别的评测状态），不包含源码或测试数据。
 - Codeforces 的公开用户名模式使用公开 API，不需要登录态；浏览器会话或手动 Cookie 模式通过站点首页识别账号。浏览器登录检测会只读检查相关 Cookie 的作用域、SameSite 和分区元数据，失败诊断显示 Cookie 数量、作用域及通行 Cookie 是否存在，不包含 Cookie 值。手动配置的 Cookie 保存在本地，请求期间临时注入对应站点，完成后恢复或删除。
+- 打开洛谷中可映射到 Codeforces 的题目时，扩展会用本地已启用的 Codeforces 用户名请求 Codeforces 官方 `contest.status` API，显示该账号是否有通过或未通过的提交；每次打开题目都会重新查询，不保存查询结果，也不发送 Cookie 或其他凭证。没有记录时显示“暂无”，查询不可用时会单独显示并附上原因。
 - AtCoder 浏览器登录态只从当前 AtCoder 页面读取账号标识；提交记录通过只读的 AtCoder Problems 公共 API 获取，不会向该服务发送 AtCoder Cookie。手动模式只在用户主动提供 `REVEL_SESSION` 时，临时写入 AtCoder 官方域名的同名 Cookie 以识别账号，请求完成后立即恢复原值或删除，不发送到第三方服务。
 - Luogu 浏览器会话模式使用已有登录态，不持久化浏览器 Cookie；手动模式仅保存用户主动输入的 `__client_id`/`_uid`，请求期间临时注入并恢复。扩展不向第三方发送这些凭证。
 - QOJ 仅在用户明确授权后读取 qoj.ac 的认证 Cookie（兼容旧版 `UOJSESSIONID`/`UOJSESSID`、记住登录 Cookie 和新版 `__Host-UOJSESSID`），并在首个后台请求前临时复用同域已有的 `cf_clearance`/`__cf_bm` Cookie；请求后恢复原 Cookie，值不会保存或上传。手动 Cookie 模式会把用户主动输入的配置保存在本地 `chrome.storage.local`，请求期间临时注入并在完成后恢复原 Cookie。匿名登录页会被识别为授权失效，不会当作空记录；检测诊断只显示 Cookie 名称和失败阶段。
@@ -20,7 +21,7 @@
 - `offscreen`：直接导出时创建不可见的本地执行环境，在独立 Worker 中使用扩展自带的字体、WASM 和模板生成 PDF，结束或失败后关闭。
 - `downloads`：下载本地生成的题面 PDF，并确认下载完成后释放临时文件；不上传题面内容。
 - `cookies`：读取 QOJ 来源限定的认证与通行 Cookie、Codeforces 登录检测所需的 Cookie 元数据，并在手动配置或会话兼容路径中临时注入对应站点的 Cookie。请求完成后恢复原值或删除临时值；同一 origin 的请求串行处理，避免临时 Cookie 相互干扰。
-- host permissions：QOJ 的 `https://qoj.ac/*` 是固定权限；Codeforces、洛谷、AtCoder 和 AtCoder Problems（`https://kenkoooo.com/*`）通过可选权限按需申请。
+- host permissions：QOJ 的 `https://qoj.ac/*` 是固定权限；Codeforces、洛谷、AtCoder、AtCoder Problems（`https://kenkoooo.com/*`）和 Cloudflare 验证页（`https://challenges.cloudflare.com/*`）通过可选权限按需申请。Cloudflare 权限可在“设置 → 跨 OJ 提交”中启用或撤销，仅用于验证页的请求等待优化。
 
 HydroOJ 按用户填写并通过校验的精确 origin 授权和访问，不同实例不共享凭证。为允许 Chrome 运行时申请自部署实例权限，manifest 声明了可选的 `https://*/*` 和 `http://*/*`；运行时请求具体实例的权限，不请求整个通配模式。
 

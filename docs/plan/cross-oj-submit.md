@@ -1,6 +1,6 @@
 # OJTrace 跨 OJ 提交实施计划
 
-> 状态：P1 Codeforces 自动原生提交及 P2 AtCoder 预填已实现并通过自动化验证；洛谷登录态编辑器、Codeforces 登录态编辑器和自动提交、AtCoder 登录态表单仍待 Chrome/Edge 真实浏览器验收。Codeforces Gym/Group 暂不纳入支持范围，等取得登录态页面证据再评估。
+> 状态：P1 Codeforces 与 P2 AtCoder 均已实现目标站原生表单自动提交和有界结果关联，并通过自动化验证；洛谷登录态编辑器、Codeforces 登录态编辑器和自动提交、AtCoder 登录态最终提交仍待真实提交验收。AtCoder 页面结构已在浏览器核对，尚未触发真实提交。Codeforces Gym/Group 暂不纳入支持范围，等取得登录态页面证据再评估。
 > 本文对应“洛谷 → 原 OJ 提交”功能，第一阶段优先支持 Codeforces，第二阶段支持 AtCoder。
 > 本计划建立在 2026-11-03 的源码审计、参考项目阅读和匿名页面测试之上；登录态浏览器验证完成前，不把目标站页面选择器、语言 ID 或提交响应当作稳定接口。
 
@@ -11,7 +11,7 @@
 - P1 只实现洛谷 → Codeforces；不提前创建 AtCoder 入口或通用 OJ Enhancer 生命周期/注册框架。
 - 先以少量完整模块实现并验证边界；只有文件确实变大或第二个 Adapter 出现重复职责时再拆分，不按每个 DOM 查询都单独建文件。
 - 可选站点权限由扩展自己的 popup 在用户点击时申请；popup 仅负责首次授权和启用页面脚本，实际提交入口位于洛谷原生“提交评测”按钮右侧，不刷新含有未保存代码的页面。
-- 一次性任务不通过 URL 传递 ID。Codeforces 复用发起操作的洛谷标签页并在当前标签完成到 CF 原生提交页的跳转；AtCoder 仍创建独立目标标签页。任务绑定到浏览器提供的 tabId 与精确 origin。
+- 一次性任务不通过 URL 传递 ID。Codeforces 和 AtCoder 都复用发起操作的洛谷标签页，在目标 OJ 原生提交页完成表单提交。任务绑定到浏览器提供的 tabId 与精确 origin。
 - `storage.session` 读改写不是原子事务。领取任务必须经过 Background 内的串行队列，并在返回代码前持久化一次性提交状态，防止并发重复提交。
 - 用户点击洛谷的“提交到 Codeforces”即授权本次一次性提交；提交使用当前浏览器的 Codeforces 登录态。目标结果页会显示识别到的账号和 Submission ID。
 - 不将无法唯一关联的结果伪装成失败；返回未知状态并停止自动动作。
@@ -26,7 +26,7 @@
 4. 在目标页唯一识别编辑器 API，填入代码和目标语言、回读校验，等待原生 Cloudflare 验证完成后点击唯一的 Codeforces Submit 控件发起一次提交。
 5. 解析能够明确归属于本次操作的 Submission ID 和详情链接。
 6. 将成功、失败、登录失效、安全验证、结果未知、等待评测等状态反馈给用户；结果不确定时不重试。
-7. AtCoder 入口只负责打开并预填，最终提交仍由用户在 AtCoder 页面完成。
+7. AtCoder 选择页面当前提供的 C++23 option（与洛谷语言无关），在 OJTrace 全屏提交面板覆盖下写入原生表单并点击原生 Submit；Cloudflare 验证控件显示在该面板中，仍由 AtCoder 页面处理，完成后按题目和提交信息关联本次提交并返回原洛谷题目页。
 
 本功能不做以下事情：
 
@@ -45,7 +45,7 @@ P1 的“完整链路”定义为：洛谷识别 → 读取代码和语言 → �
 ### 2.1 已通过源码验证的事实
 
 - WXT 版本为 `0.21.4`，当前使用 MV3 Background，入口为 [`entrypoints/background.ts`](../../entrypoints/background.ts)。
-- Codeforces、AtCoder 页面脚本仍是固定站点 Content Script；洛谷脚本由 WXT 打包为 runtime content script，在用户授予洛谷和目标站权限后动态注册，并注入已打开的题目页。
+- Codeforces、AtCoder 与洛谷页面脚本都由 manifest 静态注入；popup 只申请目标站的 optional host permission，后台仅对安装或扩展重载前已打开的洛谷标签页补注入一次。
 - Background 已有消息 schema、requestId、sender 校验、runtime port 和错误响应模式，可作为新功能的通信基础。
 - [`src/application/problem-export/export-state.ts`](../../src/application/problem-export/export-state.ts) 已实现短期任务、TTL、`storage.session` 优先、一次性读取后删除的类似能力，可借鉴其生命周期设计。
 - [`src/problem/adapters/luogu.ts`](../../src/problem/adapters/luogu.ts) 能解析洛谷题目 URL 和 pid，但属于题面导出边界，不包含编辑器读取和提交行为。
@@ -161,9 +161,9 @@ type CrossOjSubmitTask = {
 };
 ```
 
-上面的代码块记录 P1 首版的 Codeforces 合同。P2 后的实际类型将问题引用和 `targetOrigin` 扩展为 Codeforces/AtCoder 联合类型；两个目标站的表单与语言合同仍独立。Background 先创建空白目标标签页，拿到真实 tabId 后再持久化完整任务并导航；创建或写入失败时关闭该标签页并清理任务，因此持久化任务的 `targetTabId` 必须存在。任务以 Background 内部的目标 tabId 为 session key，不再增加无消费者的随机任务 ID。目标 Content Script 通过可信的 `sender.tab.id` 领取，不能自行声明标签页或 origin。
+上面的代码块记录 P1 首版的 Codeforces 合同。P2 后的实际类型将问题引用和 `targetOrigin` 扩展为 Codeforces/AtCoder 联合类型；两个目标站的表单与语言合同仍独立。Background 持久化任务后返回目标 URL，由洛谷页面在当前标签页导航到目标 OJ；任务以 Background 内部的目标 tabId 为 session key，不再增加无消费者的随机任务 ID。目标 Content Script 通过可信的 `sender.tab.id` 领取，不能自行声明标签页或 origin。
 
-代码只短暂保存在 `storage.session`：目标站页面先验证 origin、允许的提交路由、目标题号、登录状态和安全验证，再请求领取；Background 在串行队列中把任务从 `pending` 改为 `submitting` 并成功写回后才返回一次代码。Codeforces 提交后立即清除可选的 `editor` 字段并观察本次结果；AtCoder 预填后清除代码并改为 `awaiting-user-submit`。任务过期、目标标签页关闭、离开目标 origin 或失败时清理代码和任务。任何目标站都不自动重试；结果不确定时提示用户先核对提交记录。
+代码只短暂保存在 `storage.session`：目标站页面先验证 origin、允许的提交路由、目标题号、登录状态和安全验证，再请求领取；Background 在串行队列中把任务从 `pending` 改为 `submitting` 并成功写回后才返回一次代码。Codeforces 与 AtCoder 都在回读目标编辑器和表单字段后点击原生 Submit，并清除代码后观察本次结果。AtCoder 会在原生提交前读取同题提交列表中的最高 Submission ID；跳转到提交列表后优先要求 ID 大于该基线，若页面提供时间则同时要求时间晚于本次任务开始时间，避免把同题旧记录认成新提交。任务过期、目标标签页关闭、离开目标 origin 或失败时清理代码和任务。任何目标站都不自动重试；结果不确定时提示用户先核对提交记录。AtCoder 目标 URL 只附带 `ojtrace=1` 这个流程标记，不携带任务 ID、代码或账号信息；AtCoder Content Script 在 `document_start` 先挂全屏遮罩，再等待表单/编辑器就绪，普通直接访问 AtCoder 不挂载该遮罩。
 
 ### 3.3 状态机
 
@@ -214,9 +214,9 @@ P1 只解析 Codeforces 来源，按以下优先级解析：
 
 `background-bridge.ts` 采用 Background + `storage.session`，并用短期 `alarms` 在 service worker 休眠期间保证到期清理；完整任务不放进 URL。它由现有 `entrypoints/background.ts` 注册到 runtime message handler；不另建第二个 Background 入口：
 
-1. Background 收到 `CREATE_CROSS_OJ_TASK`，先校验来源 tab 和 `EditorSnapshot`；Codeforces 复用来源 tab，AtCoder 创建新的空白目标标签页。
+1. Background 收到 `CREATE_CROSS_OJ_TASK`，先校验来源 tab 和 `EditorSnapshot`；Codeforces 与 AtCoder 都复用来源 tab，保持当前浏览器登录态和一次连续的页面体验。
 2. 得到真实 `targetTabId` 后，以该 ID 为 session key 将任务只写入 `storage.session`，TTL 建议 10 分钟；同时创建对应的 `alarms` 清理事件，不写入 `storage.local`。写入或 alarm 创建失败时关闭刚创建的标签页。
-3. Background 将任务绑定到该 tabId 和精确目标 origin；Codeforces 路由交由洛谷页面在收到有效响应后导航，AtCoder 由 Background 导航。目标 tabId 和任务内容不放进 URL，也不向目标页面发送任务标识。
+3. Background 将任务绑定到该 tabId 和精确目标 origin；洛谷页面在收到有效响应后导航到带 `ojtrace=1` 流程标记的目标提交路由。目标 tabId 和任务内容不放进 URL，也不向目标页面发送任务标识。
 4. 目标 Content Script 只发送不带任务标识的 `CLAIM_CROSS_OJ_TASK`；Background 用 `sender.tab.id` 查找唯一绑定任务，并从浏览器提供的当前 URL 取得 origin，不信任页面自报的 tabId 或 origin。登录和已识别验证路径不领取任务；同一 tab 回到允许的 CF 提交路由且检查通过后再领取。
 5. Background 通过按 `targetTabId` 建立的 keyed serial queue 串行执行“查找 → 校验 → 标记 `claimed` → 写回”。只有写回成功后才返回一次任务内容；竞争请求或已领取任务失败。
 6. 离开 Codeforces origin、进入不在允许列表中的路径、重复领取或任务过期时返回结构化错误并清理任务；已识别的登录/验证跳转保留 `pending` 任务。Codeforces 页面唯一定位编辑器并回读代码后，Content Script 等待原生验证完成，再点击唯一的 Submit 控件最多提交一次；Background 清除代码并观察结果。
@@ -236,7 +236,7 @@ P1 不自行构造 Codeforces POST，也不读取或复制 CSRF；通过当前�
 
 ### 4.5 AtCoder Adapter（P2）
 
-AtCoder 适配使用同一任务生命周期和消息合同，但独立实现题号/路由、登录/验证识别、任务选择、ACE/纯文本编辑器读写、当前语言 option 匹配和结果识别。不能共享 Codeforces 页面选择器或硬编码语言 ID。两个站点都经过登录态验收后，再判断是否需要抽取公共 adapter interface。
+AtCoder 适配使用同一任务生命周期和消息合同，但独立实现题号/路由、登录/验证识别、任务选择、ACE/纯文本编辑器读写和结果识别。AtCoder 目标语言固定选择页面当前提供的 C++23 option，不根据洛谷语言映射，也不硬编码语言 ID；页面没有 C++23 时安全停止。不能共享 Codeforces 页面选择器。两个站点都经过登录态验收后，再判断是否需要抽取公共 adapter interface。
 
 ## 5. Background 消息协议
 
@@ -263,9 +263,9 @@ CANCEL_CROSS_OJ_TASK
 P1/P2 在洛谷原生提交按钮旁提供页面入口；popup 不承担提交启动流程：
 
 - popup 根据当前洛谷 tab URL 中可验证的题号显示一次性“授权并启用页面入口”设置；用户点击时只请求 Luogu 与当前目标 OJ 的 optional host permission。
-- popup runtime 注册 `content-scripts/luogu-cross-oj.js`，并向当前 tab 注入脚本，无需刷新可能含未保存代码的页面；后续页面由动态注册自动加载。
+- 洛谷 content script 由 manifest 的静态 `matches` 注入；popup 只负责申请目标 OJ 的 optional host permission。授权后，页内权限门会重试并自动显示入口，无需刷新页面。后台启动时只对安装或扩展重载前已打开的洛谷标签页补注入一次，不存在第二份动态注册。
 - 页面入口沿用洛谷原生按钮样式，紧邻插入在“提交评测”右侧，保持独立 `type="button"`，不拦截或触发洛谷原生提交。
-- `提交到 Codeforces` 按钮点击本身就是本次提交授权；不弹出额外确认、不要求用户再到 Codeforces 点一次 Submit。`填入 AtCoder` 仅打开并预填，AtCoder 最终提交仍由用户完成。
+- `提交到 Codeforces` 和 `提交到 AtCoder` 按钮点击本身就是本次提交授权；不弹出额外确认、不要求用户在目标站再次点 Submit。AtCoder 的 Cloudflare/Turnstile 验证若出现，由用户在 AtCoder 原生页面完成，扩展随后点击原生 Submit。
 
 洛谷入口开始处理后应显示即时状态：
 
@@ -275,14 +275,14 @@ P1/P2 在洛谷原生提交按钮旁提供页面入口；popup 不承担提交�
 - 目标账号由 Codeforces 结果页的提示显示；洛谷页面不猜测账号。
 - 语言无法唯一匹配、目标页已有草稿、编辑器或表单不能确认时，明确停止且不重试。
 
-Codeforces 页上的提示应说明提交已发起、不要重复操作，并显示 Submission ID 与评测结果。AtCoder 的提示保留“代码已填入，请检查后在 AtCoder 提交”。
+Codeforces 与 AtCoder 页上的提示应说明提交已发起、不要重复操作，并显示 Submission ID 与评测结果。AtCoder 的安全验证控件在 OJTrace 遮罩中央展示；验证后由扩展点击 AtCoder 原生 Submit，不要求用户再切换页面或手动提交。
 
 ## 7. 权限与安全改动
 
 ### P1 权限
 
 - 使用已有 Luogu、Codeforces、AtCoder optional host permission；popup 在用户点击时只申请 Luogu 与当前目标 OJ 权限。
-- 权限申请必须从 popup 用户手势触发；成功后 runtime 注册洛谷脚本并注入当前 tab。Content Script 不调用 `permissions.request`。
+- 权限申请必须从 popup 用户手势触发；成功后由静态注册的洛谷 content script 在权限门重试中自动生效。Content Script 不调用 `permissions.request`。
 - 不新增 `webRequest`、`<all_urls>`、远程脚本、外部服务器或新的 Cookie 读取能力。
 - `scripting`、`tabs`、`storage.session` 使用现有扩展能力；`alarms` 仅用于 TTL 清理。如果浏览器不提供 `storage.session` 或 `alarms`，任务创建失败并提示重试，不回退到 `storage.local`。
 
@@ -304,9 +304,9 @@ Codeforces 页上的提示应说明提交已发起、不要重复操作，并显
 - [x] 在洛谷 CF 题页确认公开来源字段和原题链接；SPA 路由仍需登录态或开发构建验证。AtCoder 公共表单结构在 P2 单独实测。
 - [x] 从公开 Luogu bundle 确认 Vue 提交状态与自定义语言选择器源码；登录态实例定位和读取验收仍待完成。
 - [ ] 确认 Codeforces 登录后的 contest/problemset 页面结构、语言选项和 Cloudflare 状态。
-- [x] 源码确认 popup 在用户点击时按当前目标站申请 optional host permission，再动态注册洛谷脚本。
+- [x] 源码确认 popup 在用户点击时按当前目标站申请 optional host permission；洛谷脚本由静态 `matches` 注入，不再动态注册。
 - [x] 确认在当前 Luogu tab 注入页面脚本，不刷新含有未保存代码的页面。
-- [x] 检查 WXT 构建产物包含洛谷脚本但 manifest 不固定授权 Luogu host；实际 runtime registration 待浏览器验收。
+- [x] 检查 WXT 构建产物包含洛谷脚本，manifest 静态声明 `matches`；实际浏览器验收待完成。
 - [ ] 记录 Codeforces 表单、挑战页、登录状态和提交后 URL/ID 的代码证据；真实 Submission ID 验证由用户在正常提交时手动完成，自动化不触发真实提交。
 - [x] 将公开页实测选择器、页面版本和失败样例写入 `docs/qa/cross-oj-submit-browser-matrix.md`；登录态细节仍待补。
 - [x] 冻结 P1 最小 `ProblemRef`、`EditorSnapshot`、任务状态和错误码合同。
@@ -321,7 +321,7 @@ Codeforces 页上的提示应说明提交已发起、不要重复操作，并显
 - [x] 新增 Codeforces 路由、登录页/验证页识别和表单读取。
 - [x] 新增独立语言映射表和 option 匹配器。
 - [x] 新增 Background task lifecycle、session storage 和 TTL alarm；不向目标页面暴露任务标识。
-- [x] 新增洛谷原生提交按钮右侧入口和状态提示；Codeforces 点击即授权一次原生提交，AtCoder 入口仅预填；popup 仅负责首次授权和启用页面脚本。
+- [x] 新增洛谷原生提交按钮右侧入口和状态提示；Codeforces 与 AtCoder 点击即授权一次原生表单提交；popup 仅负责首次授权和启用页面脚本。
 - [x] Codeforces 复用当前标签；兼容 CodeMirror/Ace live editor，回读并同步实际提交字段，再点击原生 Submit 控件；检测到 Turnstile 时等待用户完成验证，不覆盖已有代码。
 - [x] 只在观察到本任务目标页的原生表单提交后读取结果；不能由导航链明确关联 Submission ID 时报告未知。
 - [x] 为题号/语言纯函数、Codeforces 表单编辑器、任务状态迁移、并发 claim 和结果关联增加针对性测试。
@@ -329,18 +329,18 @@ Codeforces 页上的提示应说明提交已发起、不要重复操作，并显
 
 **退出条件：** 自动化覆盖“识别、单击授权、创建任务、CodeMirror 读写、原生表单提交动作、结果关联与不确定状态不重试”。登录态 Codeforces 常规 contest/problemset 的真实浏览器链路尚未验收；自动化测试不访问真实提交端点，登录态提交结果仍需受控真实浏览器验证，因此不宣称端到端验收完成。
 
-### P2：洛谷 → AtCoder（代码实现与自动化验证完成；登录态浏览器验收待完成）
+### P2：洛谷 → AtCoder（代码实现与自动化验证完成；登录态真实提交验收待完成）
 
 - [x] 新增 AtCoder 路由和 `contestId/taskId` 校验。
 - [x] 新增 AtCoder 登录、验证和提交页识别。
 - [x] 新增 ACE 与纯文本编辑器读取/写入桥接，并校验写入后的完整代码。
-- [x] 新增独立语言选项映射、歧义时由用户选择和目标任务选择；未知语言停止，不静默替换。
-- [x] 新增 AtCoder 提交 ID 识别、详情关联和未知结果降级。
+- [x] AtCoder 固定选择当前页面的 C++23 option；不读取洛谷语言版本，不硬编码 option value；缺少 C++23 时安全停止。
+- [x] 新增 AtCoder 提交 ID 识别、提交时间关联和未知结果降级。
 - [x] 支持洛谷题号不编码 contest ID 的 AtCoder 题目：必须以洛谷结构化数据中的原题 URL 解析，并由 Background 对照当前页面再次验证。
-- [x] 增加 AtCoder 页面夹具、任务链路自动化测试和公开浏览器核对记录。
-- [ ] 用已登录浏览器验收洛谷代码读取、Codeforces 自动原生提交与评测关联，以及 AtCoder 表单预填。
+- [x] 增加 AtCoder 页面夹具、任务链路自动化测试和浏览器页面结构核对记录。
+- [ ] 用已登录浏览器验收 AtCoder 原生表单提交和本次提交结果关联；不通过自动化触发真实提交。
 
-**退出条件：** AtCoder 使用同一任务生命周期与安全合同，站点页面选择器、语言匹配和结果识别独立于 Codeforces。自动化合同已覆盖；登录态真实页面验收仍是发布门禁。
+**退出条件：** AtCoder 使用同一任务生命周期与安全合同，站点页面选择器、语言匹配和结果识别独立于 Codeforces。自动化合同和登录态页面结构已核对；真实提交链路仍是发布门禁。
 
 ### P3：结果同步和扩大覆盖
 
@@ -434,7 +434,7 @@ pnpm format:check
 3. [x] 在洛谷原生提交按钮右侧插入明确的 Codeforces 提交入口，并实现点击即授权与编辑器读取。
 4. [x] 实现 Codeforces 页面识别、CodeMirror 写入回读、一次性原生提交及未知结果降级。
 5. [x] 运行自动测试、类型、lint、格式、构建、权限和架构审计。
-6. [ ] 用已登录浏览器验收洛谷编辑器读取、Codeforces 自动原生提交与评测关联；AtCoder 只验收表单预填。
+6. [ ] 用已登录浏览器验收洛谷编辑器读取、Codeforces 自动原生提交与评测关联，以及 AtCoder 页面结构和原生提交链路。
 7. [x] 按计划实现 P2 AtCoder 独立适配器。
 8. [x] P3 有界页面状态读取、本地去重历史与恢复语义。
-9. [ ] 用登录态 Chrome/Edge 完成 P1/P2 浏览器门禁；P1 由用户明确授权后在测试账号和题目上验证一次提交，P2 不自动触发 AtCoder 最终提交。
+9. [ ] 用登录态 Chrome/Edge 完成 P1/P2 浏览器门禁；仅在用户测试账号和测试题上明确授权后验证真实提交。

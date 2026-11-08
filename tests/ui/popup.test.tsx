@@ -32,7 +32,6 @@ const crossOjMocks = vi.hoisted(() => {
     currentActiveTab: vi.fn(),
     enableLuoguPageIntegration: vi.fn(),
     hasCrossOjPermissions: vi.fn(),
-    loadCrossOjHistory: vi.fn(),
     MockCrossOjClientError,
   };
 });
@@ -52,7 +51,6 @@ vi.mock("../../src/oj-enhancer/features/cross-oj-submit/client", () => ({
 }));
 
 import { App } from "../../entrypoints/popup/main";
-import { loadCrossOjHistory } from "../../src/oj-enhancer/features/cross-oj-submit/client";
 
 const {
   inspectActiveProblemPage,
@@ -62,7 +60,6 @@ const {
   openSettings,
   MockProblemExportClientError,
 } = problemExportMocks;
-const { loadCrossOjHistory: loadCrossOjHistoryMock } = crossOjMocks;
 
 const tab = {
   tabId: 42,
@@ -123,7 +120,6 @@ beforeEach(() => {
   crossOjMocks.currentActiveTab.mockResolvedValue(tab);
   crossOjMocks.enableLuoguPageIntegration.mockResolvedValue(undefined);
   crossOjMocks.hasCrossOjPermissions.mockResolvedValue(false);
-  loadCrossOjHistoryMock.mockResolvedValue([]);
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -190,7 +186,7 @@ describe("OJTrace popup", () => {
     });
   });
 
-  it("hides setup after both optional host permissions are granted", async () => {
+  it("hides setup after the cross-OJ host permissions are granted", async () => {
     const luoguTab = {
       tabId: 42,
       url: "https://www.luogu.com.cn/problem/CF1A",
@@ -203,26 +199,24 @@ describe("OJTrace popup", () => {
     expect(container.textContent).not.toContain("提交到 Codeforces");
   });
 
-  it("shows saved cross-OJ submission history", async () => {
-    loadCrossOjHistoryMock.mockResolvedValue([
-      {
-        oj: "atcoder",
-        submissionId: "987654",
-        problemId: "abc175_f",
-        detailUrl: "https://atcoder.jp/contests/abc175/submissions/987654",
-        observedAt: 100,
-        evaluationStatus: "judging",
-        statusUpdatedAt: 100,
-      },
-    ]);
+  it("keeps Cloudflare challenge wait optimization out of the popup", async () => {
+    const luoguTab = {
+      tabId: 42,
+      url: "https://www.luogu.com.cn/problem/CF1A",
+    };
+    crossOjMocks.currentActiveTab.mockResolvedValue(luoguTab);
+    crossOjMocks.hasCrossOjPermissions.mockResolvedValue(true);
     await renderPopup();
-    expect(container.textContent).toContain("abc175_f");
-    expect(container.textContent).toContain("#987654");
-    expect(container.textContent).toContain("评测中");
-    expect(
-      container.querySelector(".cross-oj-history a")?.getAttribute("href"),
-    ).toBe("https://atcoder.jp/contests/abc175/submissions/987654");
-    expect(loadCrossOjHistory).toHaveBeenCalledOnce();
+    await act(async () => Promise.resolve());
+
+    expect(container.textContent).not.toContain("启用验证等待优化");
+    expect(container.textContent).not.toContain("Cloudflare 验证");
+  });
+
+  it("keeps cross-OJ submission history out of the popup", async () => {
+    await renderPopup();
+    expect(container.querySelector(".cross-oj-history")).toBeNull();
+    expect(container.textContent).not.toContain("跨 OJ 提交历史");
   });
 
   it("keeps successful-download structure warnings visible without closing the popup", async () => {

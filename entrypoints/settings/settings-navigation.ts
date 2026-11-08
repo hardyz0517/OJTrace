@@ -5,6 +5,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Users,
+  Workflow,
 } from "lucide-react";
 
 export const settingsGroups = [
@@ -20,6 +21,7 @@ export const settingsGroups = [
     items: [
       { id: "cnoi", label: "CNOI 转换规则", icon: SlidersHorizontal },
       { id: "luogu", label: "洛谷页面增强", icon: Sparkles },
+      { id: "cross-oj", label: "跨 OJ 提交", icon: Workflow },
     ],
   },
   {

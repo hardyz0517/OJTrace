@@ -24,6 +24,8 @@ export default defineConfig({
     optional_host_permissions: [
       "https://codeforces.com/*",
       "https://atcoder.jp/*",
+      // XHR timeout adjustment is confined to Cloudflare's challenge iframe.
+      "https://challenges.cloudflare.com/*",
       "https://kenkoooo.com/*",
       // Chrome only permits permissions.request() for patterns declared here.
       // HydroOJ still validates and uses the exact user-entered origin at

@@ -185,12 +185,12 @@ export function insertLuoguCrossOjEntry(
   entry.id = LUOGU_CROSS_OJ_ENTRY_ID;
   entry.type = "button";
   entry.textContent =
-    problem.oj === "codeforces" ? "提交到 Codeforces" : "填入 AtCoder";
+    problem.oj === "codeforces" ? "提交到 Codeforces" : "提交到 AtCoder";
   entry.setAttribute(
     "aria-label",
     problem.oj === "codeforces"
       ? "将洛谷代码直接提交到 Codeforces"
-      : "将洛谷代码填入 AtCoder 提交页",
+      : "将洛谷代码直接提交到 AtCoder",
   );
   entry.className = native.className;
   // Luogu's button theme is Vue-scoped. Its selectors include generated

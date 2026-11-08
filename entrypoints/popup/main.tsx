@@ -18,14 +18,12 @@ import {
   currentActiveTab,
   enableLuoguPageIntegration,
   hasCrossOjPermissions,
-  loadCrossOjHistory,
 } from "../../src/oj-enhancer/features/cross-oj-submit/client";
 import { parseLuoguCodeforcesProblem } from "../../src/oj-enhancer/features/cross-oj-submit/problem";
 import {
   isLuoguAtCoderProblemId,
   parseLuoguAtCoderProblem,
 } from "../../src/oj-enhancer/features/cross-oj-submit/atcoder";
-import type { CrossOjSubmissionRecord } from "../../src/oj-enhancer/features/cross-oj-submit/model";
 import "./style.css";
 
 type ViewState =
@@ -169,9 +167,6 @@ export function App() {
   const [copyError, setCopyError] = useState<string | null>(null);
   const [pageEntryState, setPageEntryState] = useState<PageEntryState>("idle");
   const [pageEntryError, setPageEntryError] = useState<string | null>(null);
-  const [crossOjHistory, setCrossOjHistory] = useState<
-    CrossOjSubmissionRecord[]
-  >([]);
   const sequence = useRef(0);
   const copiedTimer = useRef<number | null>(null);
 
@@ -180,10 +175,6 @@ export function App() {
       if (copiedTimer.current !== null)
         window.clearTimeout(copiedTimer.current);
     };
-  }, []);
-
-  useEffect(() => {
-    void loadCrossOjHistory().then(setCrossOjHistory);
   }, []);
 
   useEffect(() => {
@@ -271,7 +262,8 @@ export function App() {
     }
     let active = true;
     void hasCrossOjPermissions(current.target).then((granted) => {
-      if (active) setPageEntryState(granted ? "enabled" : "idle");
+      if (!active) return;
+      setPageEntryState(granted ? "enabled" : "idle");
     });
     return () => {
       active = false;
@@ -490,30 +482,6 @@ export function App() {
                 {pageEntryError}
               </p>
             ) : null}
-          </section>
-        ) : null}
-        {crossOjHistory.length > 0 ? (
-          <section className="cross-oj-history" aria-label="跨 OJ 提交历史">
-            <h2>跨 OJ 提交历史</h2>
-            <ul>
-              {crossOjHistory.slice(0, 4).map((record) => (
-                <li key={`${record.oj}:${record.submissionId}`}>
-                  <a href={record.detailUrl} target="_blank" rel="noreferrer">
-                    {record.oj === "codeforces" ? "Codeforces" : "AtCoder"} ·{" "}
-                    {record.problemId} · #{record.submissionId}
-                  </a>
-                  <span>
-                    {record.evaluationStatus === "accepted"
-                      ? "Accepted"
-                      : record.evaluationStatus === "rejected"
-                        ? "已完成（查看详情）"
-                        : record.evaluationStatus === "judging"
-                          ? "评测中"
-                          : "评测状态未知（查看详情）"}
-                  </span>
-                </li>
-              ))}
-            </ul>
           </section>
         ) : null}
       </section>

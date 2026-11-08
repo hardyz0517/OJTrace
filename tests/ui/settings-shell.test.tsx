@@ -165,6 +165,11 @@ beforeEach(() => {
     }
   });
   vi.stubGlobal("browser", {
+    permissions: {
+      contains: vi.fn(async () => false),
+      request: vi.fn(async () => true),
+      remove: vi.fn(async () => true),
+    },
     runtime: {
       sendMessage: send,
       getURL: (path: string) => new URL(path, location.origin).href,
@@ -190,6 +195,16 @@ afterEach(async () => {
 });
 
 describe("unified settings", () => {
+  it("places the Cloudflare wait optimization in the cross-OJ settings section", async () => {
+    history.replaceState(null, "", "/settings.html#cross-oj");
+    await mount();
+    expect(panel().getAttribute("aria-label")).toBe("跨 OJ 提交");
+    expect(panel().textContent).toContain("Cloudflare 验证等待优化");
+    expect(
+      host.querySelector('.settings-nav-item[href="#cross-oj"]')?.textContent,
+    ).toContain("跨 OJ 提交");
+  });
+
   it("selects independent modules from the URL, supports history and restores the section on refresh", async () => {
     history.replaceState(null, "", "/settings.html#collection");
     await mount();

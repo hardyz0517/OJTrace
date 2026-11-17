@@ -1,0 +1,15 @@
+{
+  "__fixture_note": "Observed 2026-11-17 from the anonymous official contest.status API for contest 1. Account identity removed, relevant fields retained. The user-provided official detail screenshot for this submission shows 8 KB while this API reports 0 bytes.",
+  "status": "OK",
+  "result": [
+    {
+      "id": 397475296,
+      "creationTimeSeconds": 1793883552,
+      "problem": { "contestId": 1, "index": "A" },
+      "programmingLanguage": "C++17 (GCC 7-32)",
+      "verdict": "OK",
+      "timeConsumedMillis": 46,
+      "memoryConsumedBytes": 0
+    }
+  ]
+}

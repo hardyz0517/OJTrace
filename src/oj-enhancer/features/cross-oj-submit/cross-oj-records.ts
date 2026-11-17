@@ -140,9 +140,10 @@ function codeforcesRecordFromApi(
     Number.isSafeInteger(value.memoryConsumedBytes)
       ? { memoryBytes: value.memoryConsumedBytes }
       : {}),
-    ...(typeof value.programmingBytes === "number" &&
-    Number.isSafeInteger(value.programmingBytes)
-      ? { codeLength: value.programmingBytes }
+    ...(typeof value.passedTestCount === "number" &&
+    Number.isSafeInteger(value.passedTestCount) &&
+    value.passedTestCount >= 0
+      ? { passedTestCount: value.passedTestCount }
       : {}),
   };
 }

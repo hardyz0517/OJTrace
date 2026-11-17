@@ -78,6 +78,7 @@ export interface CrossOjRecordListItem extends CrossOjSubmissionRecord {
   score?: number;
   timeMs?: number;
   memoryBytes?: number;
+  passedTestCount?: number;
   codeLength?: number;
 }
 

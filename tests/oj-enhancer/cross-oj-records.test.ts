@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { queryCrossOjRecords } from "../../src/oj-enhancer/features/cross-oj-submit/cross-oj-records";
 import type {
@@ -53,6 +54,30 @@ function atCoderSubmissionPage(
 }
 
 describe("cross-OJ submission record queries", () => {
+  it("preserves the official API's zero-memory response without inventing a code length", async () => {
+    const payload: unknown = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../docs/fixtures/codeforces/zero-memory.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    const result = await queryCrossOjRecords({
+      handles: ["redacted"],
+      problem: codeforcesProblem,
+      requestPage: async () => payload,
+    });
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0]).toMatchObject({
+      submissionId: "397475296",
+      timeMs: 46,
+      memoryBytes: 0,
+    });
+    expect(result.records[0]).not.toHaveProperty("codeLength");
+  });
+
   it("reads matching Codeforces records for every enabled account", async () => {
     const requestPage = vi.fn(async (url: string) => {
       const handle = new URL(url).searchParams.get("handle");
@@ -71,6 +96,7 @@ describe("cross-OJ submission record queries", () => {
             programmingLanguage: "GNU C++17",
             timeConsumedMillis: 31,
             memoryConsumedBytes: 86_016,
+            passedTestCount: handle === "alpha" ? 7 : 3,
           },
           {
             id: 33,
@@ -100,6 +126,7 @@ describe("cross-OJ submission record queries", () => {
       problemName: "Theatre Square",
       timeMs: 31,
       memoryBytes: 86_016,
+      passedTestCount: 3,
     });
   });
 

@@ -14,12 +14,7 @@ import {
   codeforcesEvaluationFromPage,
   pollAndReportEvaluation,
 } from "../src/oj-enhancer/features/cross-oj-submit/evaluation";
-import {
-  buildLuoguCrossOjRecordUrl,
-  ensureCodeforcesTestDetailsExpanded,
-  parseCodeforcesSubmissionDetail,
-  safeLuoguReturnUrl,
-} from "../src/oj-enhancer/features/cross-oj-submit/record-details";
+import { safeLuoguReturnUrl } from "../src/oj-enhancer/features/cross-oj-submit/record-links";
 import {
   hideCrossOjSubmitMask,
   showCrossOjSubmitMask,
@@ -137,7 +132,10 @@ function profileLabel(): string {
     : "请确认当前 Codeforces 账号";
 }
 
-function showBanner(message: string): void {
+function showBanner(
+  message: string,
+  action?: { label: string; href: string },
+): void {
   hideCrossOjSubmitMask();
   if (codeforcesCrossOjFlow) {
     clearCrossOjFlowMarker();
@@ -167,6 +165,14 @@ function showBanner(message: string): void {
   const text = document.createElement("div");
   text.textContent = message;
   banner.append(account, text);
+  if (action) {
+    const link = document.createElement("a");
+    link.href = action.href;
+    link.textContent = action.label;
+    link.style.marginLeft = "8px";
+    link.style.color = "#1769aa";
+    banner.append(link);
+  }
   const close = document.createElement("button");
   close.type = "button";
   close.textContent = "关闭提示";
@@ -205,80 +211,29 @@ function evaluationLabel(status: CrossOjEvaluationStatus): string {
 
 async function syncEvaluation(
   submissionId: string,
-  returnUrl?: string,
+  showStatus = false,
 ): Promise<void> {
   const detailUrl = location.href;
-  const recordPageKey = `${location.origin}${location.pathname}${location.search}`;
-  const isRecordPage = (): boolean =>
-    `${location.origin}${location.pathname}${location.search}` ===
-    recordPageKey;
-  const finalStatus = await pollAndReportEvaluation({
-    isCurrentPage: isRecordPage,
+  if (showStatus)
+    showBanner(
+      `提交 #${submissionId} 已识别，可在当前 Codeforces 页面查看详情。`,
+    );
+  await pollAndReportEvaluation({
+    isCurrentPage: () => location.href === detailUrl,
     readStatus: codeforcesEvaluationFromPage,
     report: async (evaluationStatus) => {
       const response = await send({
         type: "UPDATE_CROSS_OJ_EVALUATION",
         submissionId,
-        detailUrl: location.href,
+        detailUrl,
         evaluationStatus,
       });
       return response?.ok === true && response.code === "evaluation-updated";
     },
-    onReported: (status) => showFlowStatus(evaluationLabel(status)),
-    maxPolls: 3,
-    intervalMs: 500,
+    onReported: (status) => {
+      if (showStatus) showBanner(evaluationLabel(status));
+    },
   });
-  const safeReturnUrl = safeLuoguReturnUrl(returnUrl);
-  if (!isRecordPage()) return;
-
-  // Codeforces loads its test protocol on demand. Open the read-only details
-  // panel only after the verdict settles so the snapshot contains real cases.
-  if (finalStatus === "accepted" || finalStatus === "rejected")
-    await ensureCodeforcesTestDetailsExpanded(document);
-  const detail = parseCodeforcesSubmissionDetail(document, detailUrl);
-  let detailSaved = false;
-  if (detail) {
-    if (finalStatus && finalStatus !== "unknown")
-      detail.evaluationStatus = finalStatus;
-    const saved = await send({ type: "SAVE_CROSS_OJ_DETAIL", detail });
-    detailSaved = saved?.ok === true && saved.code === "detail-saved";
-  }
-
-  if (safeReturnUrl) {
-    const problem =
-      detail?.problemId.split("/", 2)[0] ?? problemLinkInPage()?.contestId;
-    const problemId =
-      detail?.problemId ??
-      (problemLinkInPage()
-        ? `${problemLinkInPage()!.contestId}/${problemLinkInPage()!.index}`
-        : undefined);
-    const recordUrl = problem
-      ? problemId
-        ? buildLuoguCrossOjRecordUrl(
-            "codeforces",
-            problem,
-            submissionId,
-            problemId,
-            safeReturnUrl,
-          )
-        : undefined
-      : undefined;
-    if (recordUrl && isRecordPage()) {
-      if (!detailSaved) showFlowStatus("记录已识别，正在打开洛谷原生记录详情…");
-      clearCrossOjFlowMarker();
-      location.assign(recordUrl);
-      return;
-    }
-  }
-  if (codeforcesCrossOjFlow) {
-    const message = finalStatus
-      ? evaluationLabel(finalStatus)
-      : "提交已识别，暂时无法读取评测状态。";
-    clearCrossOjFlowMarker();
-    codeforcesCrossOjFlow = false;
-    hideCrossOjSubmitMask();
-    showBanner(message);
-  }
 }
 
 async function inspectResult(): Promise<boolean> {
@@ -296,15 +251,39 @@ async function inspectResult(): Promise<boolean> {
           detailUrl: location.href,
           contestId: problem.contestId,
           index: problem.index,
+          submitReferrer: sanitizedResultReferrer(),
         },
       });
       if (resumed?.ok && resumed.code === "completed") {
         showFlowStatus(
           `提交 #${submission.submissionId} 已识别，正在读取评测状态。`,
         );
-        syncEvaluation(submission.submissionId, resumed.returnUrl);
+        syncEvaluation(submission.submissionId, true);
         return true;
       }
+      if (codeforcesCrossOjFlow) {
+        showBanner(
+          `发现 Codeforces 提交 #${submission.submissionId}，但无法确认它属于本次洛谷操作。请核对当前 CF 记录。`,
+        );
+        return true;
+      }
+    }
+    if (codeforcesCrossOjFlow) {
+      const response = await send({
+        type: "UPDATE_CROSS_OJ_TASK",
+        event: { kind: "result-unmatched" },
+      });
+      const destination =
+        response?.ok && response.code === "result-unknown"
+          ? safeLuoguReturnUrl(response.returnUrl)
+          : undefined;
+      showBanner(
+        `Codeforces 提交 #${submission.submissionId} 的题目信息无法读取，自动关联已停止。请核对 CF 记录。`,
+        destination
+          ? { label: "手动返回洛谷题目页", href: destination }
+          : undefined,
+      );
+      return true;
     }
     // A restored detail page can finish an already observed result task or
     // update an existing history entry; it cannot create a new association.
@@ -321,22 +300,20 @@ async function inspectResult(): Promise<boolean> {
       type: "UPDATE_CROSS_OJ_TASK",
       event: { kind: "result-unmatched" },
     });
-    if (response?.ok && response.code === "result-unknown") {
-      showFlowStatus(
-        `已观察到 Codeforces 提交 #${submission.submissionId}，但无法可靠确认题号归属。OJTrace 不会自动重试。`,
-      );
-      const returnUrl = safeLuoguReturnUrl(response.returnUrl);
-      if (returnUrl) {
-        clearCrossOjFlowMarker();
-        window.setTimeout(() => location.assign(returnUrl), 3_000);
-      } else {
-        showBanner(
-          `已观察到 Codeforces 提交 #${submission.submissionId}，但无法可靠确认题号归属。请检查提交记录；OJTrace 不会自动重试。`,
-        );
-      }
-      return true;
-    }
-    return false;
+    if (!codeforcesCrossOjFlow) return false;
+    const destination =
+      response?.ok && response.code === "result-unknown"
+        ? safeLuoguReturnUrl(response.returnUrl)
+        : undefined;
+    showBanner(
+      response?.ok && response.code === "result-unknown"
+        ? `已观察到 Codeforces 提交 #${submission.submissionId}，但无法可靠确认题号归属。请核对 CF 记录。`
+        : `OJTrace 无法确认 Codeforces 提交 #${submission.submissionId} 的题目归属。请核对 CF 记录。`,
+      destination
+        ? { label: "手动返回洛谷题目页", href: destination }
+        : undefined,
+    );
+    return true;
   }
   const response = await send({
     type: "UPDATE_CROSS_OJ_TASK",
@@ -346,14 +323,21 @@ async function inspectResult(): Promise<boolean> {
       detailUrl: location.href,
       contestId: problem.contestId,
       index: problem.index,
+      submitReferrer: sanitizedResultReferrer(),
     },
   });
-  if (!response?.ok || response.code !== "completed") return false;
+  if (!response?.ok || response.code !== "completed") {
+    if (!codeforcesCrossOjFlow) return false;
+    showBanner(
+      `发现 Codeforces 提交 #${submission.submissionId}，但后台无法确认关联。请核对当前 CF 记录。`,
+    );
+    return true;
+  }
   showFlowStatus(
     response.message ??
       `提交 #${submission.submissionId} 已识别，正在读取评测状态。`,
   );
-  syncEvaluation(submission.submissionId, response.returnUrl);
+  syncEvaluation(submission.submissionId, true);
   return true;
 }
 
@@ -370,6 +354,36 @@ function isSubmissionListPage(): boolean {
   );
 }
 
+function sanitizedResultReferrer(): string | undefined {
+  if (!document.referrer) return undefined;
+  try {
+    const referrer = new URL(document.referrer);
+    if (
+      referrer.origin !== location.origin ||
+      referrer.username ||
+      referrer.password
+    )
+      return undefined;
+
+    const route = parseCodeforcesSubmitUrl(referrer.href);
+    if (route?.kind === "submit") {
+      const safe = new URL(`${referrer.origin}${referrer.pathname}`);
+      if (route.contestId && referrer.pathname === "/problemset/submit")
+        safe.searchParams.set("contestId", route.contestId);
+      if (route.index) safe.searchParams.set("problemIndex", route.index);
+      return safe.href;
+    }
+    if (
+      referrer.pathname === "/problemset/status" ||
+      /^\/contest\/\d+\/(?:status|my)\/?$/.test(referrer.pathname)
+    )
+      return `${referrer.origin}${referrer.pathname}`;
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 let claiming = false;
 let submissionObserved = false;
 let submissionWatchStarted = false;
@@ -378,53 +392,66 @@ function watchSubmissionResult(): void {
   if (submissionWatchStarted) return;
   submissionWatchStarted = true;
   const startedAt = Date.now();
+  const finishUnknown = async (message: string): Promise<void> => {
+    const response = await send({
+      type: "UPDATE_CROSS_OJ_TASK",
+      event: { kind: "result-unmatched" },
+    });
+    const resultUnknown =
+      response?.ok === true && response.code === "result-unknown";
+    const returnUrl = resultUnknown
+      ? safeLuoguReturnUrl(response.returnUrl)
+      : undefined;
+    showBanner(
+      resultUnknown
+        ? message
+        : `${message} OJTrace 无法完成自动关联，请核对当前 CF 提交记录。`,
+      returnUrl ? { label: "手动返回洛谷题目页", href: returnUrl } : undefined,
+    );
+  };
   const check = async (): Promise<void> => {
     if (await inspectResult()) return;
     if (isSubmissionListPage()) {
-      const response = await send({
-        type: "UPDATE_CROSS_OJ_TASK",
-        event: { kind: "result-unmatched" },
-      });
-      if (response?.ok && response.code === "result-unknown") {
-        showFlowStatus(
-          "Codeforces 已进入提交记录页，但 OJTrace 无法唯一识别本次记录。请核对 CF 记录；状态未知，OJTrace 不会自动重试。",
-        );
-        const returnUrl = safeLuoguReturnUrl(response.returnUrl);
-        if (returnUrl) {
-          clearCrossOjFlowMarker();
-          window.setTimeout(() => location.assign(returnUrl), 3_000);
-        } else
-          showBanner(
-            "Codeforces 已进入提交记录页，但 OJTrace 无法唯一识别本次记录。请核对提交记录；OJTrace 不会自动重试。",
-          );
+      const lookup = await send({ type: "RESOLVE_CODEFORCES_SUBMISSION" });
+      if (
+        lookup?.code === "submission-candidate-matched" &&
+        lookup.submissionDetailUrl &&
+        isSubmissionListPage()
+      ) {
+        location.assign(lookup.submissionDetailUrl);
+        return;
       }
+      if (lookup?.code === "submission-candidate-ambiguous") {
+        await finishUnknown(
+          "Codeforces 出现多条可能的本次提交，OJTrace 没有猜测记录。请在当前提交列表核对。",
+        );
+        return;
+      }
+      if (lookup?.code === "submission-candidate-unavailable") {
+        await finishUnknown(
+          "OJTrace 无法建立 Codeforces 提交前基线，无法安全确认这条新记录。请在当前提交列表核对。",
+        );
+        return;
+      }
+      if (Date.now() - startedAt >= 30_000) {
+        await finishUnknown(
+          "Codeforces 已收到提交，但 OJTrace 未能唯一确认对应记录。请在当前提交列表核对。",
+        );
+        return;
+      }
+      window.setTimeout(() => void check(), 2_500);
       return;
     }
-    if (Date.now() - startedAt >= 15_000) {
-      const response = await send({
-        type: "UPDATE_CROSS_OJ_TASK",
-        event: { kind: "result-unmatched" },
-      });
-      if (response?.ok && response.code === "result-unknown") {
-        showFlowStatus(
-          "Codeforces 没有在 15 秒内显示可确认的提交结果。状态未知，请先检查 CF 提交记录；OJTrace 不会自动重试。",
-        );
-        const returnUrl = safeLuoguReturnUrl(response.returnUrl);
-        if (returnUrl) {
-          clearCrossOjFlowMarker();
-          window.setTimeout(() => location.assign(returnUrl), 3_000);
-        } else
-          showBanner(
-            "Codeforces 没有在 15 秒内显示可确认的提交结果。状态未知，请先检查 CF 提交记录；OJTrace 不会自动重试。",
-          );
-      }
+    if (Date.now() - startedAt >= 30_000) {
+      await finishUnknown(
+        "Codeforces 未在限定时间内显示可确认的提交详情。请检查 CF 提交记录。",
+      );
       return;
     }
     window.setTimeout(() => void check(), 500);
   };
   window.setTimeout(() => void check(), 500);
 }
-
 async function claim(readinessAttempt = 0): Promise<void> {
   if (claiming) return;
   claiming = true;
@@ -594,24 +621,7 @@ async function main(): Promise<void> {
   await waitForDocumentReady();
   if (await inspectResult()) return;
   if (isSubmissionListPage()) {
-    const response = await send({
-      type: "UPDATE_CROSS_OJ_TASK",
-      event: { kind: "result-unmatched" },
-    });
-    if (response?.ok && response.code === "result-unknown") {
-      showFlowStatus(
-        "Codeforces 已进入提交记录页，但没有可唯一确认的详情页。请检查提交记录；状态未知，OJTrace 不会自动重试。",
-      );
-      const returnUrl = safeLuoguReturnUrl(response.returnUrl);
-      if (returnUrl) {
-        clearCrossOjFlowMarker();
-        window.setTimeout(() => location.assign(returnUrl), 3_000);
-      } else {
-        showBanner(
-          "Codeforces 已进入提交记录页，但没有可唯一确认的详情页。请检查提交记录；状态未知，OJTrace 不会自动重试。",
-        );
-      }
-    }
+    if (codeforcesCrossOjFlow) watchSubmissionResult();
     return;
   }
   const route = parseCodeforcesSubmitUrl(location.href);

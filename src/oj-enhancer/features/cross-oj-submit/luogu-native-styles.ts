@@ -65,10 +65,6 @@ export function allLuoguComponentStylesheets(): HTMLLinkElement[] {
   });
 }
 
-export function applyScope(target: Element, scopes: readonly string[]): void {
-  for (const attribute of scopes) target.setAttribute(attribute, "");
-}
-
 export function currentStylesheetSelectors(): string[] {
   return Array.from(document.styleSheets).flatMap(cssRulesOf);
 }
@@ -116,49 +112,4 @@ export async function loadAnonymousStylesheetSelectors(
       document.head.append(link);
     }
   });
-}
-
-export function installLuoguStylesheets(
-  urls: readonly string[],
-): HTMLLinkElement[] {
-  const installed: HTMLLinkElement[] = [];
-  const existing = new Set(
-    [
-      ...document.querySelectorAll<HTMLLinkElement>(
-        'link[rel="stylesheet"][href]',
-      ),
-    ].map((link) => link.href),
-  );
-  for (const href of urls) {
-    if (existing.has(href)) continue;
-    try {
-      const url = new URL(href);
-      if (
-        url.protocol !== "https:" ||
-        url.hostname !== "fecdn.luogu.com.cn" ||
-        !url.pathname.startsWith("/columba/") ||
-        !url.pathname.endsWith(".css")
-      )
-        continue;
-    } catch {
-      continue;
-    }
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = href;
-    document.head.append(link);
-    existing.add(href);
-    installed.push(link);
-  }
-  return installed;
-}
-
-export async function luoguComponentSelectors(): Promise<string[]> {
-  const loaded = currentStylesheetSelectors();
-  const urls = [
-    ...new Set(allLuoguComponentStylesheets().map((link) => link.href)),
-  ];
-  if (!urls.length) return loaded;
-  const extra = await loadAnonymousStylesheetSelectors(urls);
-  return [...loaded, ...extra];
 }

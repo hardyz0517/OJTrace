@@ -16,30 +16,18 @@ import {
   updateLuoguCrossOjStatus,
 } from "../src/oj-enhancer/features/cross-oj-submit/luogu-page-entry";
 import { mountLuoguCrossOjRecordList } from "../src/oj-enhancer/features/cross-oj-submit/record-list";
-import { readLuoguCrossOjRecordRoute } from "../src/oj-enhancer/features/cross-oj-submit/record-details";
-import {
-  maintainLuoguCrossOjRecordPage,
-  renderLuoguCrossOjRecordPage,
-  unmountLuoguCrossOjRecordPage,
-} from "../src/oj-enhancer/features/cross-oj-submit/luogu-record-page";
-import {
-  currentLuoguDocumentUrl,
-  currentLuoguNavigationUrl,
-  installLuoguCrossOjRecordClickGuard,
-  luoguCrossOjRecordRouteKey,
-  shouldRefreshLuoguCrossOjRecordPage,
-  watchLuoguLocationChanges,
-} from "../src/oj-enhancer/features/cross-oj-submit/luogu-record-route";
-import {
-  LUOGU_CROSS_OJ_CONTROLLER_ATTRIBUTE,
-  LUOGU_CROSS_OJ_CONTROLLER_TAKEOVER_EVENT,
-} from "../src/oj-enhancer/features/cross-oj-submit/luogu-record-route-shared";
 import {
   LuoguProblemHistoryStatusController,
   observeLuoguProblemHistoryChanges,
   renderLuoguProblemHistoryStatus,
 } from "../src/oj-enhancer/features/cross-oj-submit/luogu-problem-history";
 
+import { legacyLuoguRecordDetailUrl } from "../src/oj-enhancer/features/cross-oj-submit/record-links";
+import { watchLuoguLocationChanges } from "../src/oj-enhancer/features/cross-oj-submit/luogu-location";
+
+const LUOGU_CROSS_OJ_CONTROLLER_ATTRIBUTE = "data-ojtrace-luogu-controller";
+const LUOGU_CROSS_OJ_CONTROLLER_TAKEOVER_EVENT =
+  "ojtrace:luogu-controller-takeover";
 const pageAccessGate = createLuoguPageAccessGate();
 const problemHistoryController = new LuoguProblemHistoryStatusController(
   (status) => renderLuoguProblemHistoryStatus(status),
@@ -251,11 +239,10 @@ function checkPageAccess(
   );
 }
 
-function disposeActiveRecordView(unmount = true): void {
+function disposeActiveRecordView(): void {
   activeRecordViewDispose?.();
   activeRecordViewDispose = undefined;
   activeRecordViewKey = "";
-  if (unmount) unmountLuoguCrossOjRecordPage();
 }
 
 function mountRecordView(key: string, mount: () => () => void): void {
@@ -265,164 +252,16 @@ function mountRecordView(key: string, mount: () => () => void): void {
   activeRecordViewDispose = mount();
 }
 
-function showRecordDetailError(error: unknown): void {
-  document.querySelector("[data-ojtrace-record-detail-error]")?.remove();
-  const content =
-    document.querySelector<HTMLElement>("[data-ojtrace-luogu-record-page]") ??
-    document.querySelector<HTMLElement>(".main-container") ??
-    document.body;
-  const notice = document.createElement("div");
-  notice.className = "l-card";
-  notice.setAttribute("data-ojtrace-record-detail-error", "");
-  notice.textContent =
-    error instanceof Error
-      ? error.message
-      : "洛谷原生记录详情暂时无法加载，请稍后刷新。";
-  content.prepend(notice);
-}
-
-function mountNativeCrossOjRecordPage(
-  route: NonNullable<ReturnType<typeof readLuoguCrossOjRecordRoute>>,
-  isControllerCurrent: () => boolean,
-): () => void {
-  const expectedUrl = currentLuoguNavigationUrl();
-  const routeKey = luoguCrossOjRecordRouteKey(route);
-  let active = true;
-  let rendering = false;
-  let pendingPaint = false;
-  let observer: MutationObserver | undefined;
-  let paintFrame: number | undefined;
-
-  const paint = (): void => {
-    if (!active || !isControllerCurrent()) return;
-    if (rendering) {
-      pendingPaint = true;
-      return;
-    }
-    if (currentLuoguNavigationUrl() !== expectedUrl) return;
-    const maintained = maintainLuoguCrossOjRecordPage(route);
-    if (!maintained.needsRender && !shouldRefreshLuoguCrossOjRecordPage(route))
-      return;
-    rendering = true;
-    document.querySelector("[data-ojtrace-record-detail-error]")?.remove();
-    void send({
-      type: "GET_CROSS_OJ_DETAIL",
-      submissionId: route.submissionId,
-      oj: route.oj,
-      pageUrl: currentLuoguNavigationUrl(),
-    })
-      .then(async (response) => {
-        if (
-          !active ||
-          !isControllerCurrent() ||
-          currentLuoguNavigationUrl() !== expectedUrl
-        )
-          return;
-        if (
-          response.code === "record-detail-loaded" &&
-          response.detail &&
-          (
-            await renderLuoguCrossOjRecordPage(
-              route,
-              response.detail,
-              expectedUrl,
-              isControllerCurrent,
-            )
-          ).installed
-        )
-          return;
-        throw new Error(response.message ?? "洛谷原生记录详情暂时无法加载。");
-      })
-      .catch((error: unknown) => {
-        if (
-          !active ||
-          !isControllerCurrent() ||
-          currentLuoguNavigationUrl() !== expectedUrl
-        )
-          return;
-        showRecordDetailError(error);
-        window.setTimeout(() => {
-          if (active && shouldRefreshLuoguCrossOjRecordPage(route)) paint();
-        }, 400);
-      })
-      .finally(() => {
-        rendering = false;
-        if (pendingPaint && active && isControllerCurrent()) {
-          pendingPaint = false;
-          paint();
-        }
-      });
-  };
-
-  const isExtensionMutation = (mutation: MutationRecord): boolean => {
-    const target =
-      mutation.target instanceof Element
-        ? mutation.target
-        : mutation.target.parentElement;
-    if (
-      target?.closest(
-        "[data-ojtrace-luogu-record-node], [data-ojtrace-record-breadcrumb]",
-      )
-    )
-      return true;
-    const changedNodes = [...mutation.addedNodes, ...mutation.removedNodes];
-    return (
-      changedNodes.length > 0 &&
-      changedNodes.every(
-        (node) =>
-          node instanceof Element &&
-          (node.hasAttribute("data-ojtrace-luogu-record-node") ||
-            node.hasAttribute("data-ojtrace-record-breadcrumb") ||
-            node.closest(
-              "[data-ojtrace-luogu-record-node], [data-ojtrace-record-breadcrumb]",
-            )),
-      )
-    );
-  };
-  const schedulePaint = (): void => {
-    if (!active || paintFrame !== undefined) return;
-    paintFrame = window.requestAnimationFrame(() => {
-      paintFrame = undefined;
-      paint();
-    });
-  };
-  observer = new MutationObserver((mutations) => {
-    if (active && !mutations.every(isExtensionMutation)) schedulePaint();
-  });
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-  });
-  paint();
-  return () => {
-    active = false;
-    observer?.disconnect();
-    if (paintFrame !== undefined) window.cancelAnimationFrame(paintFrame);
-    if (
-      isControllerCurrent() &&
-      document
-        .querySelector("[data-ojtrace-luogu-record-page]")
-        ?.getAttribute("data-ojtrace-luogu-record-route") === routeKey
-    )
-      unmountLuoguCrossOjRecordPage();
-    document.querySelector("[data-ojtrace-record-detail-error]")?.remove();
-  };
-}
-
 function reconcile(): void {
+  const legacyDetailUrl = legacyLuoguRecordDetailUrl(location.href);
+  if (legacyDetailUrl) {
+    location.replace(legacyDetailUrl);
+    return;
+  }
   const existing = document.getElementById(LUOGU_CROSS_OJ_ENTRY_ID);
   const current = currentProblem();
   const onProblemRoute = /^\/problem\/[^/]+\/?$/.test(location.pathname);
   syncProblemHistoryStatus(onProblemRoute ? current : undefined);
-  const recordRoute = readLuoguCrossOjRecordRoute(location.href);
-  if (recordRoute) {
-    existing?.remove();
-    mountRecordView(
-      `record:${recordRoute.oj}:${recordRoute.contestId}:${recordRoute.submissionId}`,
-      () => mountNativeCrossOjRecordPage(recordRoute, controllerIsCurrent),
-    );
-    return;
-  }
   if (
     location.pathname === "/record/list" &&
     current &&
@@ -438,16 +277,22 @@ function reconcile(): void {
           send({
             type: "GET_CROSS_OJ_RECORDS",
             problem: current.problem,
-            pageUrl: currentLuoguDocumentUrl(),
+            pageUrl: location.href,
           }),
         (continueScan = false) =>
           send({
             type: "REFRESH_CROSS_OJ_RECORDS",
             problem: current.problem,
-            pageUrl: currentLuoguDocumentUrl(),
+            pageUrl: location.href,
             ...(continueScan ? { continueScan: true } : {}),
           }),
         current.problemId,
+        () =>
+          send({
+            type: "GET_CROSS_OJ_PROBLEM_DIFFICULTY",
+            problem: current.problem,
+            pageUrl: location.href,
+          }),
       ),
     );
     return;
@@ -556,7 +401,6 @@ export default defineContentScript({
     const historyObserver =
       observeLuoguProblemHistoryChanges(scheduleReconcile);
     const stopLocationWatch = watchLuoguLocationChanges(scheduleReconcile);
-    const stopClickGuard = installLuoguCrossOjRecordClickGuard();
     ctx.addEventListener(window, "hashchange", scheduleReconcile);
     ctx.addEventListener(window, "popstate", scheduleReconcile);
     ctx.addEventListener(window, "wxt:locationchange", scheduleReconcile);
@@ -564,10 +408,7 @@ export default defineContentScript({
 
     function disposeController(): void {
       if (disposed) return;
-      // During takeover the new controller owns the marker already.  The old
-      // controller must stop immediately; its view disposer checks the marker
-      // and therefore will not unmount the new controller's pair.
-      disposeActiveRecordView(controllerIsCurrent());
+      disposeActiveRecordView();
       disposed = true;
       if (controllerIsCurrent()) controllerIsCurrent = () => false;
       window.removeEventListener(
@@ -589,7 +430,6 @@ export default defineContentScript({
       observer.disconnect();
       historyObserver.disconnect();
       stopLocationWatch();
-      stopClickGuard();
       problemHistoryController.sync(undefined);
       pageAccessGate.dispose();
       document.getElementById(LUOGU_CROSS_OJ_ENTRY_ID)?.remove();
@@ -599,7 +439,9 @@ export default defineContentScript({
       document.documentElement?.removeAttribute(DIAGNOSTIC_ATTRIBUTE);
       document.documentElement?.removeAttribute(DIAGNOSTIC_ENABLED_ATTRIBUTE);
     }
-    ctx.onInvalidated(() => disposeController());
+    ctx.onInvalidated(() => {
+      disposeController();
+    });
     reconcile();
   },
 });

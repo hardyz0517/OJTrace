@@ -2,8 +2,6 @@
 // generated PublicPath currently requires a leading slash for this field.
 const LUOGU_SCRIPT_EXECUTION_PATH =
   "content-scripts/luogu-cross-oj.js" as unknown as `/content-scripts/luogu-cross-oj.js`;
-const LUOGU_MAIN_SCRIPT_EXECUTION_PATH =
-  "content-scripts/luogu-cross-oj-main.js" as unknown as `/content-scripts/luogu-cross-oj.js`;
 const CLOUDFLARE_CHALLENGE_PERMISSION = "https://challenges.cloudflare.com/*";
 
 export class CrossOjClientError extends Error {
@@ -99,11 +97,6 @@ export async function enableLuoguPageIntegration(input: {
   // Manifest-declared content scripts already run on every Luogu page. This
   // injection only bootstraps a tab opened before install or extension reload;
   // the scripts' own instance guards make it a no-op otherwise.
-  await browser.scripting.executeScript({
-    target: { tabId: input.tabId },
-    files: [LUOGU_MAIN_SCRIPT_EXECUTION_PATH],
-    world: "MAIN",
-  });
   await browser.scripting.executeScript({
     target: { tabId: input.tabId },
     files: [LUOGU_SCRIPT_EXECUTION_PATH],

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { handleCrossOjSubmitMessage } from "../../src/oj-enhancer/features/cross-oj-submit/background-bridge";
 import {
-  isAuthorizedLuoguRecordDetailPage,
-  isAuthorizedLuoguRecordListPage,
-} from "../../src/oj-enhancer/features/cross-oj-submit/record-list-authorization";
+  handleCrossOjSubmitMessage,
+  registerCrossOjSubmitBackground,
+} from "../../src/oj-enhancer/features/cross-oj-submit/background-bridge";
+import { isAuthorizedLuoguRecordListPage } from "../../src/oj-enhancer/features/cross-oj-submit/record-list-authorization";
 import type {
   AtCoderProblemRef,
   ProblemRef,
@@ -24,18 +24,52 @@ const atcoderProblem: AtCoderProblemRef = {
   originUrl: "https://atcoder.jp/contests/abc175/tasks/abc175_f",
 };
 
-const codeforcesRoute = {
-  oj: "codeforces" as const,
-  contestId: "1",
-  submissionId: "397475296",
-  problemId: "CF1A",
-};
-
 afterEach(() => {
   Reflect.deleteProperty(globalThis, "browser");
 });
 
 describe("Luogu cross-OJ record-list authorization", () => {
+  it("deletes retired detail snapshots when the background starts", async () => {
+    const snapshotsKey = "ojtrace:cross-oj-submit:details";
+    const listKey = "ojtrace:cross-oj-submit:record-list-cache-v2:entry:list";
+    const session = new Map<string, unknown>([
+      [snapshotsKey, [{ sourceCode: "old source", tests: [] }]],
+      [listKey, { records: [] }],
+    ]);
+    const remove = vi.fn(async (key: string) => {
+      session.delete(key);
+    });
+    const get = vi.fn(async () => Object.fromEntries(session));
+    Object.defineProperty(globalThis, "browser", {
+      configurable: true,
+      value: { storage: { session: { get, remove } }, tabs: {} },
+    });
+    registerCrossOjSubmitBackground();
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    expect(remove).toHaveBeenCalledExactlyOnceWith(snapshotsKey);
+    expect(session.has(snapshotsKey)).toBe(false);
+    expect(session.has(listKey)).toBe(true);
+  });
+
+  it("keeps registering the background if legacy snapshot cleanup throws", async () => {
+    const remove = vi.fn(() => {
+      throw new Error("session storage unavailable");
+    });
+    const get = vi.fn(async () => ({}));
+    const addListener = vi.fn();
+    Object.defineProperty(globalThis, "browser", {
+      configurable: true,
+      value: {
+        storage: { session: { get, remove } },
+        tabs: { onUpdated: { addListener } },
+      },
+    });
+    expect(() => registerCrossOjSubmitBackground()).not.toThrow();
+    expect(addListener).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    expect(remove).toHaveBeenCalledOnce();
+  });
+
   it("accepts Codeforces record-list URLs when only non-problem filters change", () => {
     expect(
       isAuthorizedLuoguRecordListPage(
@@ -71,21 +105,6 @@ describe("Luogu cross-OJ record-list authorization", () => {
         "https://www.luogu.com.cn/problem/CF1A",
         codeforcesProblem,
         listUrl,
-      ),
-    ).toBe(true);
-    expect(
-      isAuthorizedLuoguRecordDetailPage(
-        "https://www.luogu.com.cn/record/list?pid=CF1A",
-        "https://www.luogu.com.cn/record/list?pid=CF1A#ojtrace-record=cf/397475296",
-        codeforcesRoute,
-      ),
-    ).toBe(true);
-    expect(
-      isAuthorizedLuoguRecordDetailPage(
-        "https://www.luogu.com.cn/record/list?pid=CF1A",
-        "https://www.luogu.com.cn/record/list?pid=CF1A",
-        codeforcesRoute,
-        "https://www.luogu.com.cn/record/list?pid=CF1A#ojtrace-record=cf/397475296",
       ),
     ).toBe(true);
   });
@@ -250,112 +269,5 @@ describe("Luogu cross-OJ record-list authorization", () => {
       code: "records-loaded",
     });
     expect(executeScript).not.toHaveBeenCalled();
-  });
-
-  it("loads a native record detail after SPA navigation from the list page", async () => {
-    const detailUrl =
-      "https://www.luogu.com.cn/record/list?pid=CF1A#ojtrace-record=cf/397475296";
-    Object.defineProperty(globalThis, "browser", {
-      configurable: true,
-      value: {
-        runtime: { id: "ojtrace-test" },
-        tabs: { get: async () => ({ id: 7, url: detailUrl }) },
-        storage: {
-          local: {
-            get: async () => ({
-              "ojtrace:cross-oj-submit:history": [
-                {
-                  oj: "codeforces",
-                  submissionId: "397475296",
-                  problemId: "1/A",
-                  detailUrl:
-                    "https://codeforces.com/contest/1/submission/397475296",
-                  observedAt: 1,
-                  evaluationStatus: "accepted",
-                  statusUpdatedAt: 1,
-                },
-              ],
-            }),
-          },
-          session: { get: async () => ({}) },
-        },
-      },
-    });
-
-    const response = await handleCrossOjSubmitMessage(
-      {
-        schemaVersion: 1,
-        requestId: "spa-detail",
-        type: "GET_CROSS_OJ_DETAIL",
-        submissionId: "397475296",
-        oj: "codeforces",
-        pageUrl: detailUrl,
-      },
-      {
-        id: "ojtrace-test",
-        url: "https://www.luogu.com.cn/record/list?pid=CF1A",
-        frameId: 0,
-        tab: { id: 7 },
-      },
-    );
-
-    expect(response).toMatchObject({
-      ok: true,
-      code: "record-detail-loaded",
-      detail: { submissionId: "397475296" },
-    });
-
-    Object.defineProperty(globalThis, "browser", {
-      configurable: true,
-      value: {
-        runtime: { id: "ojtrace-test" },
-        tabs: {
-          get: async () => ({
-            id: 7,
-            url: "https://www.luogu.com.cn/record/list?pid=CF1A",
-          }),
-        },
-        storage: {
-          local: {
-            get: async () => ({
-              "ojtrace:cross-oj-submit:history": [
-                {
-                  oj: "codeforces",
-                  submissionId: "397475296",
-                  problemId: "1/A",
-                  detailUrl:
-                    "https://codeforces.com/contest/1/submission/397475296",
-                  observedAt: 1,
-                  evaluationStatus: "accepted",
-                  statusUpdatedAt: 1,
-                },
-              ],
-            }),
-          },
-          session: { get: async () => ({}) },
-        },
-      },
-    });
-    const pendingTab = await handleCrossOjSubmitMessage(
-      {
-        schemaVersion: 1,
-        requestId: "spa-detail-pending-tab",
-        type: "GET_CROSS_OJ_DETAIL",
-        submissionId: "397475296",
-        oj: "codeforces",
-        pageUrl: detailUrl,
-      },
-      {
-        id: "ojtrace-test",
-        url: "https://www.luogu.com.cn/record/list?pid=CF1A",
-        frameId: 0,
-        tab: { id: 7 },
-      },
-    );
-    expect(pendingTab).toMatchObject({
-      ok: true,
-      code: "record-detail-loaded",
-      detail: { submissionId: "397475296" },
-    });
   });
 });

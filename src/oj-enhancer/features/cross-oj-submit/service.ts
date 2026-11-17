@@ -25,6 +25,7 @@ import type {
   CrossOjSubmitTask,
   EditorSnapshot,
 } from "./model";
+import type { CodeforcesSubmissionLookup } from "./codeforces-submission-lookup";
 import {
   readCrossOjHistory,
   updateCrossOjEvaluation,
@@ -63,6 +64,13 @@ export interface CrossOjTargetAdapter {
     languageValue: string,
     documentId?: string,
   ): Promise<CrossOjFillResult>;
+  captureCodeforcesBaseline?(
+    task: CrossOjSubmitTask,
+    handle: string,
+  ): Promise<string | undefined>;
+  findCodeforcesSubmission?(
+    task: CrossOjSubmitTask,
+  ): Promise<CodeforcesSubmissionLookup>;
 }
 
 export interface CrossOjServiceOptions {
@@ -132,7 +140,8 @@ function isCodeforcesSubmissionListRoute(
   if (task.problem.oj !== "codeforces") return false;
   try {
     const url = new URL(rawUrl);
-    if (url.origin !== "https://codeforces.com") return false;
+    if (url.origin !== "https://codeforces.com" || url.username || url.password)
+      return false;
     if (url.pathname === "/problemset/status") return true;
     const contest = /^\/contest\/(\d+)\/(?:status|my)\/?$/.exec(url.pathname);
     return contest?.[1] === task.problem.contestId;
@@ -151,6 +160,96 @@ function isAtCoderSubmissionListRoute(
     route?.kind === "submission-list" &&
     route.contestId === task.problem.contestId
   );
+}
+
+function codeforcesSubmissionFromDetailUrl(
+  task: CrossOjSubmitTask,
+  rawUrl: string,
+): { submissionId: string; detailUrl: string } | undefined {
+  if (task.problem.oj !== "codeforces") return undefined;
+  try {
+    const url = new URL(rawUrl);
+    if (
+      url.origin !== task.targetOrigin ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    )
+      return undefined;
+    const match = /^\/contest\/(\d+)\/submission\/(\d+)\/?$/.exec(url.pathname);
+    if (
+      !match ||
+      match[1] !== task.problem.contestId ||
+      !/^[1-9]\d{0,19}$/.test(match[2]!)
+    )
+      return undefined;
+    const parsed = codeforcesSubmissionFromUrl(url.href);
+    if (!parsed || parsed.submissionId !== match[2]) return undefined;
+    return {
+      submissionId: parsed.submissionId,
+      detailUrl: `https://codeforces.com/contest/${match[1]}/submission/${match[2]}`,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function isCodeforcesSubmitReferrer(
+  task: CrossOjSubmitTask,
+  rawUrl: string | undefined,
+): boolean {
+  if (task.problem.oj !== "codeforces" || !rawUrl) return false;
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  if (
+    url.origin !== task.targetOrigin ||
+    url.username ||
+    url.password ||
+    url.hash
+  )
+    return false;
+  const route = parseCodeforcesSubmitUrl(rawUrl);
+  return (
+    route?.kind === "submit" &&
+    route.contestId === task.problem.contestId &&
+    (!route.index || route.index === task.problem.index.toUpperCase())
+  );
+}
+
+function submissionIdIsAfterBaseline(
+  submissionId: string,
+  baselineSubmissionId: string | undefined,
+): boolean {
+  return (
+    !!baselineSubmissionId &&
+    /^\d{1,20}$/.test(submissionId) &&
+    /^\d{1,20}$/.test(baselineSubmissionId) &&
+    BigInt(submissionId) > BigInt(baselineSubmissionId)
+  );
+}
+
+function isCodeforcesListReferrer(
+  task: CrossOjSubmitTask,
+  rawUrl: string | undefined,
+): boolean {
+  if (!rawUrl) return false;
+  try {
+    const url = new URL(rawUrl);
+    return (
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      isCodeforcesSubmissionListRoute(task, url.href)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function safeLuoguProblemId(rawUrl: string): string | undefined {
@@ -382,8 +481,20 @@ export class CrossOjSubmitService {
       }
       if (inspection.codePresent) return { ok: false, code: "existing-code" };
 
+      const inspectedTask: CrossOjSubmitTask =
+        task.problem.oj === "codeforces" && inspection.status === "ready"
+          ? {
+              ...task,
+              ...(inspection.accountHandle &&
+              /^[A-Za-z0-9_.-]{3,24}$/.test(inspection.accountHandle)
+                ? { codeforcesHandle: inspection.accountHandle }
+                : {}),
+            }
+          : task;
+      await this.options.storage.set(taskKey(tabId), inspectedTask);
+
       let selectedLanguage: CrossOjLanguageOption | undefined;
-      if (task.problem.oj === "atcoder") {
+      if (inspectedTask.problem.oj === "atcoder") {
         selectedLanguage = findAtCoderCpp23Language(inspection.languageOptions);
         if (!selectedLanguage)
           return { ok: false, code: "unsupported-language" };
@@ -422,15 +533,36 @@ export class CrossOjSubmitService {
           };
         }
       }
-      if (!task.editor) {
-        await this.remove(task);
+      if (!inspectedTask.editor) {
+        await this.remove(inspectedTask);
         return { ok: false, code: "editor-unavailable" };
       }
 
       // Persist the one-time claim before code reaches the page. If filling or
       // the response fails, the task will never be automatically replayed.
+      let baselineSubmissionId: string | undefined;
+      if (
+        inspectedTask.problem.oj === "codeforces" &&
+        inspectedTask.codeforcesHandle &&
+        this.options.adapter.captureCodeforcesBaseline
+      ) {
+        try {
+          const candidate =
+            await this.options.adapter.captureCodeforcesBaseline(
+              inspectedTask,
+              inspectedTask.codeforcesHandle,
+            );
+          if (candidate && /^\d{1,20}$/.test(candidate))
+            baselineSubmissionId = candidate;
+        } catch {
+          // Direct submission-detail URLs can still be correlated without a baseline.
+        }
+      }
       const claimed: CrossOjSubmitTask = {
-        ...task,
+        ...inspectedTask,
+        ...(baselineSubmissionId
+          ? { codeforcesBaselineSubmissionId: baselineSubmissionId }
+          : {}),
         state: "submitting",
       };
       await this.options.storage.set(taskKey(tabId), claimed);
@@ -511,6 +643,115 @@ export class CrossOjSubmitService {
     });
   }
 
+  async findCodeforcesSubmission(
+    tabId: number,
+    currentUrl: string,
+  ): Promise<{
+    ok: boolean;
+    code:
+      | "submission-candidate-pending"
+      | "submission-candidate-matched"
+      | "submission-candidate-ambiguous"
+      | "submission-candidate-unavailable";
+    detailUrl?: string;
+  }> {
+    return this.runByTab(String(tabId), async () => {
+      const task = await this.options.storage.get(taskKey(tabId));
+      if (!task || task.problem.oj !== "codeforces")
+        return { ok: false, code: "submission-candidate-unavailable" };
+      if (this.now() >= task.expiresAt) {
+        await this.remove(task);
+        return { ok: false, code: "submission-candidate-unavailable" };
+      }
+      const tab = await this.options.tabs.get(tabId);
+      if (
+        task.state !== "observing-result" ||
+        tab.url !== currentUrl ||
+        !isCodeforcesSubmissionListRoute(task, currentUrl)
+      )
+        return { ok: false, code: "submission-candidate-unavailable" };
+      // Once a unique candidate has been selected, keep returning that same
+      // URL if the page retries after navigation or a background restart.
+      if (task.codeforcesCandidateSubmissionId) {
+        const candidate = codeforcesSubmissionFromDetailUrl(
+          task,
+          `https://codeforces.com/contest/${task.problem.contestId}/submission/${task.codeforcesCandidateSubmissionId}`,
+        );
+        return candidate
+          ? {
+              ok: true,
+              code: "submission-candidate-matched",
+              detailUrl: candidate.detailUrl,
+            }
+          : { ok: true, code: "submission-candidate-unavailable" };
+      }
+
+      if (
+        !task.codeforcesHandle ||
+        !task.codeforcesBaselineSubmissionId ||
+        task.submitObservedAt === undefined ||
+        !this.options.adapter.findCodeforcesSubmission
+      )
+        return { ok: true, code: "submission-candidate-unavailable" };
+
+      const lookup = await this.options.adapter.findCodeforcesSubmission(task);
+      if (lookup.status === "matched") {
+        const candidate = codeforcesSubmissionFromDetailUrl(
+          task,
+          lookup.detailUrl,
+        );
+        if (
+          !candidate ||
+          !submissionIdIsAfterBaseline(
+            candidate.submissionId,
+            task.codeforcesBaselineSubmissionId,
+          )
+        )
+          return { ok: true, code: "submission-candidate-unavailable" };
+
+        // The network lookup may finish after navigation or task expiry. Do
+        // not persist or return its result unless the same task and list page
+        // are still active.
+        const latestTask = await this.options.storage.get(taskKey(tabId));
+        const latestTab = await this.options.tabs.get(tabId);
+        if (
+          !latestTask ||
+          latestTask.createdAt !== task.createdAt ||
+          latestTask.sourceUrl !== task.sourceUrl ||
+          latestTask.codeforcesHandle !== task.codeforcesHandle ||
+          latestTask.codeforcesBaselineSubmissionId !==
+            task.codeforcesBaselineSubmissionId ||
+          latestTask.submitObservedAt !== task.submitObservedAt ||
+          latestTask.state !== "observing-result" ||
+          latestTask.expiresAt <= this.now() ||
+          latestTab.url !== currentUrl ||
+          !isCodeforcesSubmissionListRoute(latestTask, currentUrl)
+        )
+          return { ok: true, code: "submission-candidate-unavailable" };
+        if (
+          latestTask.codeforcesCandidateSubmissionId &&
+          latestTask.codeforcesCandidateSubmissionId !== candidate.submissionId
+        )
+          return { ok: true, code: "submission-candidate-ambiguous" };
+        if (!latestTask.codeforcesCandidateSubmissionId)
+          await this.options.storage.set(taskKey(tabId), {
+            ...latestTask,
+            codeforcesCandidateSubmissionId: candidate.submissionId,
+          });
+        return {
+          ok: true,
+          code: "submission-candidate-matched",
+          detailUrl: candidate.detailUrl,
+        };
+      }
+      if (lookup.status === "ambiguous")
+        return { ok: true, code: "submission-candidate-ambiguous" };
+      if (lookup.status === "pending")
+        return { ok: true, code: "submission-candidate-pending" };
+      return { ok: true, code: "submission-candidate-unavailable" };
+    });
+  }
+
   async update(
     tabId: number,
     currentUrl: string,
@@ -523,6 +764,7 @@ export class CrossOjSubmitService {
           detailUrl: string;
           contestId: string;
           index: string;
+          submitReferrer?: string;
         }
       | {
           kind: "result-observed";
@@ -632,6 +874,15 @@ export class CrossOjSubmitService {
             detailUrl.origin === task.targetOrigin &&
             codeforcesSubmissionFromUrl(detailUrl.href)?.submissionId ===
               event.submissionId &&
+            (!task.codeforcesBaselineSubmissionId ||
+              submissionIdIsAfterBaseline(
+                event.submissionId,
+                task.codeforcesBaselineSubmissionId,
+              )) &&
+            (task.codeforcesCandidateSubmissionId
+              ? task.codeforcesCandidateSubmissionId === event.submissionId &&
+                isCodeforcesListReferrer(task, event.submitReferrer)
+              : isCodeforcesSubmitReferrer(task, event.submitReferrer)) &&
             problemIdsMatch(
               {
                 oj: "codeforces",

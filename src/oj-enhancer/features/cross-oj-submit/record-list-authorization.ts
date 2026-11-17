@@ -1,10 +1,5 @@
 import type { CrossOjProblemRef } from "./model";
 import { resolveLuoguProblem } from "./luogu-problem";
-import {
-  readLuoguCrossOjRecordRoute,
-  type LuoguCrossOjRecordRoute,
-} from "./record-details";
-
 function recordListPage(
   rawUrl: string,
 ): { problemId: string; problem: CrossOjProblemRef } | undefined {
@@ -80,12 +75,12 @@ function visibleLuoguRouteUrl(
  * Authorize a cross-OJ record query from the visible Luogu route alone.
  * Record-list requests do not need to execute code in the page's main world.
  */
-export function isAuthorizedLuoguRecordListPage(
+export function authorizedLuoguRecordListProblemId(
   senderUrl: string,
   currentTabUrl: string,
   expectedProblem: CrossOjProblemRef,
   claimedPageUrl?: string,
-): boolean {
+): string | undefined {
   const routeUrl = visibleLuoguRouteUrl(
     senderUrl,
     currentTabUrl,
@@ -93,47 +88,23 @@ export function isAuthorizedLuoguRecordListPage(
     recordListPage,
   );
   const page = routeUrl ? recordListPage(routeUrl) : undefined;
-  return (
-    page !== undefined && sameProblemIdentity(page.problem, expectedProblem)
-  );
+  return page && sameProblemIdentity(page.problem, expectedProblem)
+    ? page.problemId
+    : undefined;
 }
 
-export function isAuthorizedLuoguRecordDetailPage(
+export function isAuthorizedLuoguRecordListPage(
   senderUrl: string,
   currentTabUrl: string,
-  expected: LuoguCrossOjRecordRoute,
+  expectedProblem: CrossOjProblemRef,
   claimedPageUrl?: string,
 ): boolean {
-  const route = resolveAuthorizedLuoguRecordRoute(
-    senderUrl,
-    currentTabUrl,
-    claimedPageUrl,
-    expected,
-  );
   return (
-    route !== undefined &&
-    route.contestId.toLowerCase() === expected.contestId.toLowerCase()
+    authorizedLuoguRecordListProblemId(
+      senderUrl,
+      currentTabUrl,
+      expectedProblem,
+      claimedPageUrl,
+    ) !== undefined
   );
-}
-
-export function resolveAuthorizedLuoguRecordRoute(
-  senderUrl: string,
-  currentTabUrl: string,
-  claimedPageUrl: string | undefined,
-  expected: Pick<LuoguCrossOjRecordRoute, "oj" | "submissionId">,
-): LuoguCrossOjRecordRoute | undefined {
-  const routeUrl = visibleLuoguRouteUrl(
-    senderUrl,
-    currentTabUrl,
-    claimedPageUrl,
-    readLuoguCrossOjRecordRoute,
-  );
-  const route = routeUrl ? readLuoguCrossOjRecordRoute(routeUrl) : undefined;
-  if (
-    !route ||
-    route.oj !== expected.oj ||
-    route.submissionId !== expected.submissionId
-  )
-    return undefined;
-  return route;
 }

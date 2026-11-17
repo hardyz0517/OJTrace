@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it } from "vitest";
-import { readLuoguPageProblemContextInPage } from "../../src/oj-enhancer/features/cross-oj-submit/luogu-page-context";
+import { runInNewContext } from "node:vm";
+import {
+  luoguDifficultyColor,
+  parseLuoguProblemDifficulty,
+  parseLuoguProblemDifficultyFromHtml,
+  readLuoguPageProblemContextInPage,
+} from "../../src/oj-enhancer/features/cross-oj-submit/luogu-page-context";
 import {
   resolveLuoguProblem,
   sameLuoguPageDocumentUrl,
@@ -10,6 +16,23 @@ import {
 afterEach(() => document.body.replaceChildren());
 
 describe("Luogu embedded problem context", () => {
+  it("can be serialized into MAIN world without module closures", () => {
+    document.body.innerHTML =
+      '<script id="lentille-context" type="application/json">' +
+      JSON.stringify({
+        data: { problem: { pid: "CF1A", type: "CF", difficulty: 1 } },
+      }) +
+      "</script>";
+    expect(
+      runInNewContext(`(${readLuoguPageProblemContextInPage.toString()})()`, {
+        document,
+      }),
+    ).toEqual({
+      problemId: "CF1A",
+      type: "CF",
+      difficulty: 1,
+    });
+  });
   it("treats submit-panel fragment changes as the same page document", () => {
     expect(
       sameLuoguPageDocumentUrl(
@@ -88,5 +111,63 @@ describe("Luogu embedded problem context", () => {
         {"data":{"problem":{"type":"AT"}}}
       </script>`;
     expect(readLuoguPageProblemContextInPage()).toBeUndefined();
+  });
+});
+
+describe("Luogu problem difficulty context", () => {
+  it("maps the current Luogu difficulty scale", () => {
+    expect(
+      parseLuoguProblemDifficulty(
+        { data: { problem: { pid: "CF1616D", difficulty: 5 } } },
+        "CF1616D",
+      ),
+    ).toBe(5);
+    expect(luoguDifficultyColor(5)).toBe("cyan-3");
+    expect(luoguDifficultyColor(8)).toBe("lapis-4");
+  });
+
+  it("reads a matching problem from the record list payload", () => {
+    expect(
+      parseLuoguProblemDifficulty(
+        {
+          data: {
+            problem: { pid: "CF1A" },
+            records: { result: [{ problem: { pid: "CF1A", difficulty: 1 } }] },
+          },
+        },
+        "CF1A",
+      ),
+    ).toBe(1);
+    expect(
+      parseLuoguProblemDifficulty(
+        {
+          currentData: {
+            records: {
+              result: [
+                { problem: { pid: "P1001", difficulty: 1 } },
+                { problem: { pid: "AT_abc175_f", difficulty: 5 } },
+              ],
+            },
+          },
+        },
+        "AT_abc175_f",
+      ),
+    ).toBe(5);
+    expect(
+      parseLuoguProblemDifficulty(
+        { data: { problem: { pid: "P1001", difficulty: 1 } } },
+        "CF1616D",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("parses the embedded HTML context and rejects invalid difficulty values", () => {
+    const html =
+      '<script id="lentille-context" type="application/json">' +
+      JSON.stringify({ data: { problem: { pid: "CF1616D", difficulty: 5 } } }) +
+      "</script>";
+    expect(parseLuoguProblemDifficultyFromHtml(html, "CF1616D")).toBe(5);
+    expect(luoguDifficultyColor(9)).toBeUndefined();
+    expect(luoguDifficultyColor("5")).toBeUndefined();
   });
 });

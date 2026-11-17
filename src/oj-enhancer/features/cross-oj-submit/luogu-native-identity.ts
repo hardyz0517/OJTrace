@@ -12,10 +12,25 @@ export function displayDate(timestamp: number): string {
     : `${date.getFullYear()}-${month}-${day} ${time}`;
 }
 
-export function displayMemory(bytes: number | undefined): string | undefined {
+export function displayBytes(bytes: number | undefined): string | undefined {
   if (bytes === undefined) return undefined;
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)}GB`;
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)}MB`;
-  return `${(bytes / 1024).toFixed(2)}KB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(2)}KB`;
+  return `${bytes}B`;
+}
+
+export function displayDuration(milliseconds: number): string {
+  for (const [divisor, unit] of [
+    [86_400_000, "d"],
+    [3_600_000, "h"],
+    [60_000, "min"],
+    [1_000, "s"],
+  ] as const) {
+    if (milliseconds >= divisor)
+      return `${(milliseconds / divisor).toFixed(2)}${unit}`;
+  }
+  return `${milliseconds}ms`;
 }
 
 export function currentLuoguUsername(): HTMLElement | undefined {

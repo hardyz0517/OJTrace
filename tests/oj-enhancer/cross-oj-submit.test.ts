@@ -15,6 +15,7 @@ import type {
   CrossOjFormInspection,
   CrossOjSubmitTask,
 } from "../../src/oj-enhancer/features/cross-oj-submit/model";
+import type { CodeforcesSubmissionLookup } from "../../src/oj-enhancer/features/cross-oj-submit/codeforces-submission-lookup";
 
 describe("cross OJ problem and route parsing", () => {
   it("parses only unambiguous Codeforces references", () => {
@@ -159,6 +160,12 @@ function setupService(now = () => 1_000) {
             languageLabel: "GNU C++17",
           }
         : { status: "filled" as const, languageLabel: "GNU C++17" },
+    ),
+    captureCodeforcesBaseline: vi.fn(
+      async () => undefined as string | undefined,
+    ),
+    findCodeforcesSubmission: vi.fn(
+      async (): Promise<CodeforcesSubmissionLookup> => ({ status: "pending" }),
     ),
   };
   const scheduleExpiration = vi.fn(async () => undefined);
@@ -308,6 +315,8 @@ describe("cross OJ task lifecycle", () => {
           detailUrl,
           contestId: "1",
           index: "A",
+          submitReferrer:
+            "https://codeforces.com/problemset/submit?contestId=1&problemIndex=A",
         });
       }),
     );
@@ -698,6 +707,7 @@ describe("cross OJ task lifecycle", () => {
       detailUrl,
       contestId: "1",
       index: "A",
+      submitReferrer: submitUrl,
     });
     expect(completed).toMatchObject({
       ok: true,
@@ -707,6 +717,164 @@ describe("cross OJ task lifecycle", () => {
     expect(entries.has(`${CROSS_OJ_TASK_PREFIX}${target.targetTabId}`)).toBe(
       false,
     );
+  });
+
+  it("captures a Codeforces baseline before submit and resolves only a matched detail", async () => {
+    const { service, adapter, tabs, entries } = setupService();
+    adapter.inspect.mockResolvedValue({
+      status: "ready",
+      languageOptions: [{ value: "54", label: "GNU C++17" }],
+      codePresent: false,
+      problemMatches: true,
+      accountHandle: "tourist",
+    });
+    adapter.captureCodeforcesBaseline.mockResolvedValue("100");
+    adapter.findCodeforcesSubmission.mockResolvedValue({
+      status: "matched",
+      detailUrl: "https://codeforces.com/contest/1/submission/101",
+    });
+
+    const target = await service.create(cfInput);
+    expect(await service.claim(target.targetTabId)).toMatchObject({
+      ok: true,
+      code: "submission-triggered",
+    });
+    expect(adapter.captureCodeforcesBaseline).toHaveBeenCalledWith(
+      expect.objectContaining({ codeforcesHandle: "tourist" }),
+      "tourist",
+    );
+    expect(
+      entries.get(`${CROSS_OJ_TASK_PREFIX}${target.targetTabId}`),
+    ).toMatchObject({
+      codeforcesHandle: "tourist",
+      codeforcesBaselineSubmissionId: "100",
+      state: "observing-result",
+    });
+
+    const listUrl = "https://codeforces.com/contest/1/status";
+    tabs.set(target.targetTabId, { id: target.targetTabId, url: listUrl });
+    await service.onTabUrlUpdated(target.targetTabId, listUrl);
+    expect(
+      await service.findCodeforcesSubmission(target.targetTabId, listUrl),
+    ).toEqual({
+      ok: true,
+      code: "submission-candidate-matched",
+      detailUrl: "https://codeforces.com/contest/1/submission/101",
+    });
+    expect(
+      entries.get(`${CROSS_OJ_TASK_PREFIX}${target.targetTabId}`),
+    ).toMatchObject({ codeforcesCandidateSubmissionId: "101" });
+    expect(
+      await service.findCodeforcesSubmission(target.targetTabId, listUrl),
+    ).toMatchObject({
+      ok: true,
+      code: "submission-candidate-matched",
+      detailUrl: "https://codeforces.com/contest/1/submission/101",
+    });
+    expect(adapter.findCodeforcesSubmission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codeforcesHandle: "tourist",
+        codeforcesBaselineSubmissionId: "100",
+      }),
+    );
+    expect(adapter.findCodeforcesSubmission).toHaveBeenCalledOnce();
+
+    const staleUrl = "https://codeforces.com/contest/1/submission/99";
+    tabs.set(target.targetTabId, { id: target.targetTabId, url: staleUrl });
+    expect(
+      await service.update(target.targetTabId, staleUrl, {
+        kind: "result-observed",
+        submissionId: "99",
+        detailUrl: staleUrl,
+        contestId: "1",
+        index: "A",
+        submitReferrer: listUrl,
+      }),
+    ).toMatchObject({ ok: false, code: "result-unmatched" });
+
+    const detailUrl = "https://codeforces.com/contest/1/submission/101";
+    tabs.set(target.targetTabId, { id: target.targetTabId, url: detailUrl });
+    expect(
+      await service.update(target.targetTabId, detailUrl, {
+        kind: "result-observed",
+        submissionId: "101",
+        detailUrl,
+        contestId: "1",
+        index: "A",
+        submitReferrer:
+          "https://codeforces.com/problemset/submit?contestId=1&problemIndex=A",
+      }),
+    ).toMatchObject({ ok: false, code: "result-unmatched" });
+    expect(
+      await service.update(target.targetTabId, detailUrl, {
+        kind: "result-observed",
+        submissionId: "101",
+        detailUrl,
+        contestId: "1",
+        index: "A",
+        submitReferrer: listUrl,
+      }),
+    ).toMatchObject({ ok: true, code: "completed" });
+  });
+
+  it("does not bind a Codeforces candidate that fails the baseline or races navigation", async () => {
+    const { service, adapter, tabs, entries } = setupService();
+    adapter.inspect.mockResolvedValue({
+      status: "ready",
+      languageOptions: [{ value: "54", label: "GNU C++17" }],
+      codePresent: false,
+      problemMatches: true,
+      accountHandle: "tourist",
+    });
+    adapter.captureCodeforcesBaseline.mockResolvedValue("100");
+    const target = await service.create(cfInput);
+    await service.claim(target.targetTabId);
+
+    const listUrl = "https://codeforces.com/contest/1/status";
+    tabs.set(target.targetTabId, { id: target.targetTabId, url: listUrl });
+    await service.onTabUrlUpdated(target.targetTabId, listUrl);
+    adapter.findCodeforcesSubmission.mockResolvedValueOnce({
+      status: "matched",
+      detailUrl: "https://codeforces.com/contest/1/submission/100",
+    });
+    expect(
+      await service.findCodeforcesSubmission(target.targetTabId, listUrl),
+    ).toMatchObject({ ok: true, code: "submission-candidate-unavailable" });
+    expect(
+      entries.get(`${CROSS_OJ_TASK_PREFIX}${target.targetTabId}`),
+    ).not.toHaveProperty("codeforcesCandidateSubmissionId");
+
+    let release!: () => void;
+    let lookupStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      lookupStarted = resolve;
+    });
+    adapter.findCodeforcesSubmission.mockImplementationOnce(async () => {
+      lookupStarted();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return {
+        status: "matched",
+        detailUrl: "https://codeforces.com/contest/1/submission/101",
+      };
+    });
+    const pending = service.findCodeforcesSubmission(
+      target.targetTabId,
+      listUrl,
+    );
+    await started;
+    const movedUrl = "https://codeforces.com/contest/1/submission/101";
+    tabs.set(target.targetTabId, { id: target.targetTabId, url: movedUrl });
+    release();
+
+    expect(await pending).toMatchObject({
+      ok: true,
+      code: "submission-candidate-unavailable",
+    });
+    expect(
+      entries.get(`${CROSS_OJ_TASK_PREFIX}${target.targetTabId}`),
+    ).not.toHaveProperty("codeforcesCandidateSubmissionId");
   });
 
   it("does not associate a different problem's detail with the task", async () => {
@@ -742,6 +910,7 @@ describe("cross OJ task lifecycle", () => {
       detailUrl,
       contestId: "2",
       index: "B",
+      submitReferrer: submitUrl,
     });
     expect(rejected).toMatchObject({ ok: false, code: "result-unmatched" });
     expect(

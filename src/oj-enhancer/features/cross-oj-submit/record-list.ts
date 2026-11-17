@@ -11,7 +11,8 @@ import {
   applyCurrentLuoguAvatar,
   applyCurrentLuoguUsername,
   displayDate,
-  displayMemory,
+  displayBytes,
+  displayDuration,
   nativeLinkAttributes,
   updateNativeTemplateUsername,
 } from "./luogu-native-identity";
@@ -22,8 +23,11 @@ import {
   allLuoguComponentStylesheets,
   scopedAttributes,
 } from "./luogu-native-styles";
-import { buildLuoguCrossOjRecordUrl } from "./record-details";
-import { adoptLuoguCrossOjRecordUrl } from "./luogu-record-route";
+import {
+  createRecordDifficultyController,
+  findDifficultyToggle,
+} from "./record-difficulty";
+import { canonicalCrossOjDetailUrl } from "./history";
 import clockIconSource from "./assets/record-clock.svg?raw";
 import databaseIconSource from "./assets/record-database.svg?raw";
 import fileCodeIconSource from "./assets/record-file-code.svg?raw";
@@ -198,45 +202,6 @@ function statusLabel(record: CrossOjRecordListItem): {
   return { label: "Unknown", colorClass: "lcolor--grey-3" };
 }
 
-function bindRecordDetailLink(link: HTMLAnchorElement): void {
-  if (link.dataset.ojtraceRecordNav === "1") return;
-  link.dataset.ojtraceRecordNav = "1";
-  link.addEventListener(
-    "click",
-    (event) => {
-      if (event.defaultPrevented || event.button !== 0) return;
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
-        return;
-      if (link.target && link.target !== "_self") return;
-      if (!adoptLuoguCrossOjRecordUrl(link.href)) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    },
-    true,
-  );
-}
-
-function detailHref(record: CrossOjRecordListItem): string {
-  let contestId: string | undefined;
-  if (record.oj === "codeforces") {
-    contestId = /^(\d{1,10})\/[A-Z]\d*$/i.exec(record.problemId)?.[1];
-  } else {
-    contestId =
-      /^https:\/\/atcoder\.jp\/contests\/([a-z0-9-]+)\/submissions\/\d+\/?$/i.exec(
-        record.detailUrl,
-      )?.[1];
-  }
-  return contestId
-    ? (buildLuoguCrossOjRecordUrl(
-        record.oj,
-        contestId,
-        record.submissionId,
-        record.problemId,
-        location.href,
-      ) ?? "#")
-    : "#";
-}
-
 function recordKey(record: CrossOjRecordListItem): string {
   return `${record.oj}:${record.problemId}:${record.submissionId}`;
 }
@@ -335,53 +300,48 @@ function renderNativeMetrics(
 
   const templateGroups = template?.querySelectorAll(".metrics > span");
   const measures = nativeMetricGroup(scopes, templateGroups?.[0]);
-  const hasTime = record.timeMs !== undefined;
-  const hasMemory = record.memoryBytes !== undefined;
-  if (hasTime) {
-    appendNativeMetric(
-      measures,
-      nativeIcon(
-        template,
-        ".metrics .fa-clock",
-        clockIconSource,
-        "clock",
-        scopes,
-      ),
-      `${record.timeMs}ms`,
-    );
-  }
-  if (hasTime && hasMemory)
-    measures.append(document.createTextNode("\u00a0/\u00a0"));
-  if (hasMemory) {
-    appendNativeMetric(
-      measures,
-      nativeIcon(
-        template,
-        ".metrics .fa-database",
-        databaseIconSource,
-        "database",
-        scopes,
-      ),
-      displayMemory(record.memoryBytes)!,
-    );
-  }
-  if (hasTime || hasMemory) metrics.append(measures);
+  appendNativeMetric(
+    measures,
+    nativeIcon(
+      template,
+      ".metrics .fa-clock",
+      clockIconSource,
+      "clock",
+      scopes,
+    ),
+    record.timeMs === undefined ? "—" : displayDuration(record.timeMs),
+  );
+  measures.append(document.createTextNode(" \u00a0/\u00a0 "));
+  appendNativeMetric(
+    measures,
+    nativeIcon(
+      template,
+      ".metrics .fa-database",
+      databaseIconSource,
+      "database",
+      scopes,
+    ),
+    displayBytes(record.memoryBytes) ?? "—",
+  );
+  // Match RecordListBlock's literal separator after memory as well as time.
+  measures.append(document.createTextNode(" \u00a0/\u00a0 "));
+  metrics.append(measures);
 
-  if (record.codeLength !== undefined) {
-    const codeLength = nativeMetricGroup(scopes, templateGroups?.[1]);
-    appendNativeMetric(
-      codeLength,
-      nativeIcon(
-        template,
-        ".metrics .fa-ruler-combined",
-        rulerIconSource,
-        "ruler-combined",
-        scopes,
-      ),
-      `${record.codeLength}B`,
-    );
-    metrics.append(codeLength);
-  }
+  const codeLength = nativeMetricGroup(scopes, templateGroups?.[1]);
+  codeLength.title =
+    record.codeLength === undefined ? "代码长度暂不可用" : "代码长度";
+  appendNativeMetric(
+    codeLength,
+    nativeIcon(
+      template,
+      ".metrics .fa-ruler-combined",
+      rulerIconSource,
+      "ruler-combined",
+      scopes,
+    ),
+    displayBytes(record.codeLength) ?? "—",
+  );
+  metrics.append(codeLength);
   detail.append(metrics);
 
   if (!record.language) return;
@@ -443,9 +403,13 @@ function renderFromNativeTemplate(
   if (!applyCurrentLuoguAvatar(avatar, scopedAttributes(user))) avatar.remove();
   submittedAt.textContent = displayDate(record.observedAt);
 
-  statusLink.href = detailHref(record);
+  statusLink.href =
+    canonicalCrossOjDetailUrl(
+      record.oj,
+      record.detailUrl,
+      record.submissionId,
+    ) ?? "#";
   statusLink.removeAttribute("target");
-  bindRecordDetailLink(statusLink);
   statusLink.replaceChildren();
   const status = statusLabel(record);
   const statusText = document.createElement("span");
@@ -486,8 +450,7 @@ function renderFromNativeTemplate(
     (template.querySelector<HTMLElement>(".problem strong")?.cloneNode(true) as
       HTMLElement | undefined) ?? document.createElement("strong");
   problemName.textContent = problemId;
-  if (!problemName.style.color)
-    problemName.style.color = "var(--lfe-color--pink-3)";
+  problemName.style.removeProperty("color");
   problemLink.replaceChildren(problemName);
   const title = displayedProblemName(record);
   if (title) problemLink.append(document.createTextNode(` ${title}`));
@@ -537,8 +500,12 @@ function renderRecord(
   const statusCell = createCell(scopes.cell);
   const statusLink = document.createElement("a");
   statusLink.className = "status";
-  statusLink.href = detailHref(record);
-  bindRecordDetailLink(statusLink);
+  statusLink.href =
+    canonicalCrossOjDetailUrl(
+      record.oj,
+      record.detailUrl,
+      record.submissionId,
+    ) ?? "#";
   for (const attribute of scopes.cell) statusLink.setAttribute(attribute, "");
   const status = statusLabel(record);
   const statusText = document.createElement("span");
@@ -570,7 +537,6 @@ function renderRecord(
     problemLink.setAttribute(attribute, "");
   for (const attribute of scopes.cell) problemLink.setAttribute(attribute, "");
   const problemName = document.createElement("strong");
-  problemName.style.color = "var(--lfe-color--pink-3)";
   problemName.textContent = officialProblemId;
   for (const attribute of scopes.cell) problemName.setAttribute(attribute, "");
   problemLink.append(problemName);
@@ -630,10 +596,7 @@ function makeGeneratedList(
 
 function attachStatusMessage(result: HTMLElement, message: HTMLElement): void {
   const count = result.querySelector(".count");
-  const hideDifficulty = [...result.querySelectorAll("a, button, span")].find(
-    (element) =>
-      /^(隐藏难度|显示难度)$/.test((element.textContent ?? "").trim()),
-  );
+  const hideDifficulty = findDifficultyToggle(result);
   if (hideDifficulty && hideDifficulty.parentElement !== result) {
     if (message.previousElementSibling !== hideDifficulty)
       hideDifficulty.after(message);
@@ -699,6 +662,7 @@ export function mountLuoguCrossOjRecordList(
   request: () => Promise<CrossOjResponse>,
   refresh?: (continueScan?: boolean) => Promise<CrossOjResponse>,
   explicitProblemId?: string,
+  requestDifficulty?: () => Promise<CrossOjResponse>,
 ): () => void {
   let active = true;
   const disposeUserCard = mountLuoguUserCard();
@@ -715,6 +679,86 @@ export function mountLuoguCrossOjRecordList(
   let renderInFlight = false;
   let pendingRender = false;
   let nativeListAttempts = 0;
+  const pageProblemId = explicitProblemId ?? luoguProblemId(problem);
+  const mountedUrl = new URL(location.href);
+  mountedUrl.hash = "";
+  const isCurrentRoute = (): boolean => {
+    const current = new URL(location.href);
+    current.hash = "";
+    return current.href === mountedUrl.href;
+  };
+  let difficultyMessage: string | undefined;
+  let recordMessage: string | undefined;
+  const difficulty = createRecordDifficultyController({
+    problemId: pageProblemId,
+    isActive: () => active && isCurrentRoute(),
+    result: () => findContent()?.result,
+    rows: () => injectedRows,
+    request: requestDifficulty,
+    onMessage(message) {
+      difficultyMessage = message;
+      if (activeResult) setMessage(activeResult, combinedMessage());
+    },
+  });
+  function combinedMessage(): string | undefined {
+    return (
+      [recordMessage, difficultyMessage].filter(Boolean).join(" ") || undefined
+    );
+  }
+  function setRecordMessage(result: HTMLElement, message?: string): void {
+    recordMessage = message;
+    setMessage(result, combinedMessage());
+  }
+  let searchControls: HTMLElement | undefined;
+  let searchRefreshTimer: number | undefined;
+  let initialRequestInFlight = true;
+  let refreshInFlight = false;
+
+  const scheduleSearchRefresh = (): void => {
+    if (
+      !refresh ||
+      initialRequestInFlight ||
+      refreshInFlight ||
+      searchRefreshTimer !== undefined
+    )
+      return;
+    // Let Luogu's search handler update its route before checking this scope.
+    searchRefreshTimer = window.setTimeout(() => {
+      searchRefreshTimer = undefined;
+      if (active && isCurrentRoute()) {
+        difficulty.retry();
+        void refreshRecords();
+      }
+    }, 0);
+  };
+
+  const onSearchClick = (event: MouseEvent): void => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest("button, .l-button, [role='button']");
+    if (button?.textContent?.trim() === "搜索") scheduleSearchRefresh();
+  };
+
+  const onSearchKeyup = (event: KeyboardEvent): void => {
+    if (
+      event.key === "Enter" &&
+      event.target instanceof HTMLInputElement &&
+      ["题目编号", "用户名或 ID", "比赛 ID"].includes(event.target.placeholder)
+    )
+      scheduleSearchRefresh();
+  };
+
+  const unbindSearchControls = (): void => {
+    searchControls?.removeEventListener("click", onSearchClick, true);
+    searchControls?.removeEventListener("keyup", onSearchKeyup, true);
+  };
+
+  const bindSearchControls = (filterCard: HTMLElement): void => {
+    if (!refresh || searchControls === filterCard) return;
+    unbindSearchControls();
+    filterCard.addEventListener("click", onSearchClick, true);
+    filterCard.addEventListener("keyup", onSearchKeyup, true);
+    searchControls = filterCard;
+  };
 
   const restoreEmptyState = (): void => {
     if (!hiddenEmptyState) return;
@@ -742,20 +786,31 @@ export function mountLuoguCrossOjRecordList(
   };
 
   const renderImpl = async (): Promise<void> => {
-    if (!active) return;
+    if (!active || !isCurrentRoute()) return;
     const content = findContent();
     if (!content) return;
-    const { result, resultCard } = content;
+    const { filterCard, result, resultCard } = content;
     activeResult = result;
+    bindSearchControls(filterCard);
+    difficulty.sync();
+    setMessage(result, combinedMessage());
     if (!response) {
       const ojLabel = problem.oj === "codeforces" ? "Codeforces" : "AtCoder";
-      setMessage(result, requestError ?? `正在读取 ${ojLabel} 提交记录…`);
+      setRecordMessage(result, requestError ?? `正在读取 ${ojLabel} 提交记录…`);
       return;
     }
 
     const records = [
       ...new Map(
-        (response.records ?? []).map((record) => [recordKey(record), record]),
+        (response.records ?? [])
+          .filter((record) =>
+            canonicalCrossOjDetailUrl(
+              record.oj,
+              record.detailUrl,
+              record.submissionId,
+            ),
+          )
+          .map((record) => [recordKey(record), record]),
       ).values(),
     ];
     const nativeListBeforeRender = [
@@ -814,7 +869,7 @@ export function mountLuoguCrossOjRecordList(
 
     if (!records.length) {
       updateResultCount(result, 0);
-      setMessage(
+      setRecordMessage(
         result,
         response.recordsMessage ?? "暂无匹配的 Codeforces / AtCoder 提交记录。",
       );
@@ -834,12 +889,17 @@ export function mountLuoguCrossOjRecordList(
     nativeListAttempts = 0;
 
     const scopes = await resolveScopes();
-    if (!active || !resultCard.isConnected) return;
+    if (
+      !active ||
+      !isCurrentRoute() ||
+      findContent()?.resultCard !== resultCard
+    )
+      return;
     const existingNativeList = [
       ...resultCard.querySelectorAll<HTMLElement>(".list"),
     ].find((list) => !list.hasAttribute(CROSS_OJ_ROWS_ATTRIBUTE));
     if (!scopes) {
-      setMessage(
+      setRecordMessage(
         result,
         "未能识别洛谷记录样式，未替换原生结果区域，请刷新后重试。",
       );
@@ -860,8 +920,9 @@ export function mountLuoguCrossOjRecordList(
         );
         nativeRows.prepend(...rows);
         injectedRows = rows;
+        difficulty.sync();
         updateResultCount(result, records.length);
-        setMessage(result, response.recordsMessage);
+        setRecordMessage(result, response.recordsMessage);
         renderedResultCard = resultCard;
         renderedSignature = signature;
         return;
@@ -873,6 +934,7 @@ export function mountLuoguCrossOjRecordList(
       records,
       problem,
       explicitProblemId,
+      undefined,
     );
     if (existingEmpty) existingEmpty.before(nextList);
     else resultCard.append(nextList);
@@ -880,8 +942,9 @@ export function mountLuoguCrossOjRecordList(
     injectedRows = [
       ...nextList.querySelectorAll<HTMLElement>(".row-wrap > .row"),
     ];
+    difficulty.sync();
     updateResultCount(result, records.length);
-    setMessage(result, response.recordsMessage);
+    setRecordMessage(result, response.recordsMessage);
     renderedResultCard = resultCard;
     renderedSignature = signature;
   };
@@ -916,7 +979,7 @@ export function mountLuoguCrossOjRecordList(
           : mutation.target.parentElement;
       if (
         target?.closest(
-          `[${CROSS_OJ_ROWS_ATTRIBUTE}], [${STATUS_MESSAGE_ATTRIBUTE}]`,
+          `[data-ojtrace-cross-oj-record], [${CROSS_OJ_ROWS_ATTRIBUTE}], [${STATUS_MESSAGE_ATTRIBUTE}]`,
         )
       )
         return true;
@@ -936,7 +999,14 @@ export function mountLuoguCrossOjRecordList(
     void render();
   });
   const content = document.body;
-  if (content) observer.observe(content, { childList: true, subtree: true });
+  if (content)
+    observer.observe(content, {
+      attributes: true,
+      attributeFilter: ["aria-hidden", "class", "hidden", "style"],
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
 
   const readResponse = async (
     nextRequest: () => Promise<CrossOjResponse>,
@@ -944,6 +1014,7 @@ export function mountLuoguCrossOjRecordList(
     const nextResponse = await nextRequest();
     if (!nextResponse.ok)
       throw new Error(nextResponse.message || "提交记录查询失败。");
+    difficulty.accept(nextResponse);
     return nextResponse;
   };
 
@@ -999,50 +1070,66 @@ export function mountLuoguCrossOjRecordList(
     }
   };
 
-  void readResponse(request)
-    .then(async (cachedResponse) => {
-      if (!active) return;
-      response = cachedResponse;
-      const refreshResult = refresh
-        ? readResponse(refresh).then(
-            (latestResponse) => ({ latestResponse }),
-            (error: unknown) => ({ error }),
-          )
-        : undefined;
-      await render();
-      if (!refreshResult) return;
-      const result = await refreshResult;
-      if (!active) return;
-      if ("error" in result) {
-        const error = result.error;
-        const message =
-          error instanceof Error
-            ? `最新记录暂时无法刷新：${error.message}`
-            : "最新记录暂时无法刷新，请稍后重试。";
-        if (response) response = { ...response, recordsMessage: message };
-        else requestError = message;
-        await render();
-        return;
-      }
-      response = result.latestResponse;
+  async function refreshRecords(): Promise<void> {
+    if (!active || !isCurrentRoute() || !refresh || refreshInFlight) return;
+    refreshInFlight = true;
+    if (activeResult) {
+      setRecordMessage(activeResult, "正在刷新提交记录…");
+    }
+    try {
+      const latestResponse = await readResponse(() => refresh(false));
+      if (!active || !isCurrentRoute()) return;
+      response = latestResponse;
       requestError = undefined;
       await render();
       await retryTransientQueryOnce();
-      if (response.recordScanHasMore) void continueReadingOlderRecords();
-    })
-    .catch((error: unknown) => {
+      if (active && response.recordScanHasMore)
+        await continueReadingOlderRecords();
+    } catch (error) {
+      if (!active) return;
+      const message =
+        error instanceof Error
+          ? `最新记录暂时无法刷新：${error.message}`
+          : "最新记录暂时无法刷新，请稍后重试。";
+      if (response) response = { ...response, recordsMessage: message };
+      else requestError = message;
+    } finally {
+      refreshInFlight = false;
+      if (active) await render();
+    }
+  }
+
+  async function loadRecords(): Promise<void> {
+    try {
+      const cachedResponse = await readResponse(request);
+      if (!active) return;
+      response = cachedResponse;
+      await render();
+    } catch (error) {
       if (!active) return;
       requestError =
         error instanceof Error
           ? `提交记录读取失败：${error.message}`
           : "提交记录读取失败，请稍后重试。";
-      void render();
-    });
+      await render();
+    } finally {
+      initialRequestInFlight = false;
+      if (active) await refreshRecords();
+    }
+  }
+  void render();
+  void loadRecords();
 
   const dispose = (): void => {
+    if (!active) return;
     active = false;
     disposeUserCard();
+    difficulty.dispose();
     observer.disconnect();
+    unbindSearchControls();
+    if (searchRefreshTimer !== undefined)
+      window.clearTimeout(searchRefreshTimer);
+    window.removeEventListener("pagehide", dispose);
     injectedRows.forEach((row) => row.remove());
     generatedList?.remove();
     restoreEmptyState();

@@ -114,12 +114,7 @@ describe("Luogu page integration bootstrap", () => {
 
     expect(registerContentScripts).not.toHaveBeenCalled();
     expect(getRegisteredContentScripts).not.toHaveBeenCalled();
-    expect(executeScript).toHaveBeenNthCalledWith(1, {
-      target: { tabId: 7 },
-      files: ["content-scripts/luogu-cross-oj-main.js"],
-      world: "MAIN",
-    });
-    expect(executeScript).toHaveBeenNthCalledWith(2, {
+    expect(executeScript).toHaveBeenCalledExactlyOnceWith({
       target: { tabId: 7 },
       files: ["content-scripts/luogu-cross-oj.js"],
     });
@@ -127,12 +122,10 @@ describe("Luogu page integration bootstrap", () => {
 
   it("rejects a tab that navigated away before injection", async () => {
     const request = vi.fn().mockResolvedValue(true);
-    const get = vi
-      .fn()
-      .mockResolvedValue({
-        id: 7,
-        url: "https://www.luogu.com.cn/problem/P1002",
-      });
+    const get = vi.fn().mockResolvedValue({
+      id: 7,
+      url: "https://www.luogu.com.cn/problem/P1002",
+    });
     const executeScript = vi.fn();
     vi.stubGlobal("browser", {
       permissions: { request },

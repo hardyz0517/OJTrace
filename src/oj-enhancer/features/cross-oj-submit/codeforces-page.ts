@@ -100,10 +100,24 @@ export function inspectCodeforcesFormInPage(): CrossOjFormInspection {
   // CodeMirror later saves its still-empty buffer during form submission.
   // Only report ready after reading a live editor API above.
   if (editorValue === undefined) return { status: "editor-unavailable" };
+  let accountHandle: string | undefined;
+  const profile = document.querySelector<HTMLAnchorElement>(
+    '#header a[href^="/profile/"], header a[href^="/profile/"]',
+  );
+  if (profile) {
+    try {
+      const profilePath = new URL(profile.href).pathname;
+      const match = /^\/profile\/([A-Za-z0-9_.-]{3,24})\/?$/.exec(profilePath);
+      accountHandle = match?.[1];
+    } catch {
+      // Keep account correlation optional when the page has no usable profile link.
+    }
+  }
   return {
     status: "ready",
     languageOptions,
     codePresent: editorValue.length > 0,
+    ...(accountHandle ? { accountHandle } : {}),
   };
 }
 

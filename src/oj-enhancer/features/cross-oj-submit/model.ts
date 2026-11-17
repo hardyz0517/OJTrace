@@ -1,5 +1,4 @@
 export const CROSS_OJ_SCHEMA_VERSION = 1 as const;
-
 export interface ProblemRef {
   oj: "codeforces";
   contestId: string;
@@ -22,42 +21,6 @@ export type CrossOjEvaluationStatus =
 
 export type ProblemHistoryStatus =
   "accepted" | "unaccepted" | "none" | "unavailable";
-
-export interface CrossOjTestCaseDetail {
-  index: number;
-  verdict?: string;
-  timeMs?: number;
-  memoryBytes?: number;
-  exitCode?: number;
-  checkerExitCode?: number;
-  input?: string;
-  output?: string;
-  answer?: string;
-  checkerLog?: string;
-}
-
-/** Bounded, locally stored detail captured from an official submission page. */
-export interface CrossOjSubmissionDetail {
-  oj: "codeforces" | "atcoder";
-  submissionId: string;
-  problemId: string;
-  detailUrl: string;
-  observedAt: number;
-  evaluationStatus: CrossOjEvaluationStatus;
-  rawVerdict?: string;
-  username?: string;
-  problemName?: string;
-  language?: string;
-  submittedAt?: string;
-  judgedAt?: string;
-  timeMs?: number;
-  memoryBytes?: number;
-  passedTestCount?: number;
-  score?: number;
-  sourceCode?: string;
-  tests: CrossOjTestCaseDetail[];
-  truncated: boolean;
-}
 
 export interface CrossOjSubmissionRecord {
   oj: CrossOjProblemRef["oj"];
@@ -93,6 +56,8 @@ export type CrossOjFormInspection =
       languageOptions: CrossOjLanguageOption[];
       codePresent: boolean;
       problemMatches?: boolean;
+      accountHandle?: string;
+      codeforcesBaselineSubmissionId?: string;
       documentId?: string;
     }
   | { status: "login-required" }
@@ -148,6 +113,10 @@ export interface CrossOjSubmitTask {
   createdAt: number;
   expiresAt: number;
   state: CrossOjTaskState;
+  /** Public account handle and submission ID captured before a CF submit. */
+  codeforcesHandle?: string;
+  codeforcesBaselineSubmissionId?: string;
+  codeforcesCandidateSubmissionId?: string;
   submitObservedAt?: number;
   errorCode?:
     | "unsupported-language"
@@ -202,6 +171,7 @@ export type CrossOjMessage =
             detailUrl: string;
             contestId: string;
             index: string;
+            submitReferrer?: string;
           }
         | {
             kind: "result-observed";
@@ -216,6 +186,11 @@ export type CrossOjMessage =
   | {
       schemaVersion: typeof CROSS_OJ_SCHEMA_VERSION;
       requestId: string;
+      type: "RESOLVE_CODEFORCES_SUBMISSION";
+    }
+  | {
+      schemaVersion: typeof CROSS_OJ_SCHEMA_VERSION;
+      requestId: string;
       type: "UPDATE_CROSS_OJ_EVALUATION";
       submissionId: string;
       detailUrl: string;
@@ -224,21 +199,14 @@ export type CrossOjMessage =
   | {
       schemaVersion: typeof CROSS_OJ_SCHEMA_VERSION;
       requestId: string;
-      type: "SAVE_CROSS_OJ_DETAIL";
-      detail: CrossOjSubmissionDetail;
-    }
-  | {
-      schemaVersion: typeof CROSS_OJ_SCHEMA_VERSION;
-      requestId: string;
-      type: "GET_CROSS_OJ_DETAIL";
-      submissionId: string;
-      oj?: CrossOjSubmissionRecord["oj"];
+      type: "GET_CROSS_OJ_RECORDS";
+      problem: CrossOjProblemRef;
       pageUrl?: string;
     }
   | {
       schemaVersion: typeof CROSS_OJ_SCHEMA_VERSION;
       requestId: string;
-      type: "GET_CROSS_OJ_RECORDS";
+      type: "GET_CROSS_OJ_PROBLEM_DIFFICULTY";
       problem: CrossOjProblemRef;
       pageUrl?: string;
     }
@@ -281,16 +249,16 @@ export interface CrossOjResponse {
   problemStatus?: ProblemHistoryStatus;
   problemStatusMessage?: string;
   targetTabId?: number;
-  sourceDetailUrl?: string;
+  submissionDetailUrl?: string;
   record?: CrossOjRecordListItem;
   records?: CrossOjRecordListItem[];
   recordsMessage?: string;
   recordScanHasMore?: boolean;
+  problemDifficulty?: number;
+  problemDifficultyRetryAt?: number;
   languageOptions?: Array<{ value: string; label: string }>;
   taskState?: CrossOjTaskState;
   result?: CrossOjSubmitTask["result"];
-  detail?: CrossOjSubmissionDetail;
-  recordInstalled?: boolean;
   editor?: EditorSnapshot;
 }
 
@@ -339,6 +307,8 @@ export function isCrossOjMessage(value: unknown): value is CrossOjMessage {
         value.targetLanguageValue === undefined ||
         typeof value.targetLanguageValue === "string"
       );
+    case "RESOLVE_CODEFORCES_SUBMISSION":
+      return true;
     case "UPDATE_CROSS_OJ_TASK":
       return (
         isRecord(value.event) &&
@@ -349,7 +319,10 @@ export function isCrossOjMessage(value: unknown): value is CrossOjMessage {
             typeof value.event.submissionId === "string" &&
             typeof value.event.detailUrl === "string" &&
             typeof value.event.contestId === "string" &&
-            typeof value.event.index === "string") ||
+            typeof value.event.index === "string" &&
+            (value.event.submitReferrer === undefined ||
+              (typeof value.event.submitReferrer === "string" &&
+                value.event.submitReferrer.length <= 2048))) ||
           (value.event.kind === "result-observed" &&
             value.event.oj === "atcoder" &&
             typeof value.event.submissionId === "string" &&
@@ -368,18 +341,8 @@ export function isCrossOjMessage(value: unknown): value is CrossOjMessage {
           value.evaluationStatus === "rejected" ||
           value.evaluationStatus === "unknown")
       );
-    case "SAVE_CROSS_OJ_DETAIL":
-      return isCrossOjSubmissionDetail(value.detail);
-    case "GET_CROSS_OJ_DETAIL":
-      return (
-        typeof value.submissionId === "string" &&
-        /^\d{1,20}$/.test(value.submissionId) &&
-        (value.oj === undefined ||
-          value.oj === "codeforces" ||
-          value.oj === "atcoder") &&
-        isOptionalLuoguPageUrl(value.pageUrl)
-      );
     case "GET_CROSS_OJ_RECORDS":
+    case "GET_CROSS_OJ_PROBLEM_DIFFICULTY":
       return (
         isProblemRef(value.problem) && isOptionalLuoguPageUrl(value.pageUrl)
       );
@@ -432,95 +395,6 @@ function isEditorSnapshot(value: unknown): value is EditorSnapshot {
   );
 }
 
-export function isCrossOjSubmissionDetail(
-  value: unknown,
-): value is CrossOjSubmissionDetail {
-  if (!isRecord(value)) return false;
-  const detail = value as Partial<CrossOjSubmissionDetail>;
-  const textBudget =
-    (typeof detail.sourceCode === "string" ? detail.sourceCode.length : 0) +
-    (Array.isArray(detail.tests)
-      ? detail.tests.reduce(
-          (sum, test) =>
-            sum +
-            ["input", "output", "answer", "checkerLog"].reduce(
-              (fieldSum, key) =>
-                fieldSum +
-                (isRecord(test) && typeof test[key] === "string"
-                  ? (test[key] as string).length
-                  : 0),
-              0,
-            ),
-          0,
-        )
-      : 0);
-  return (
-    (detail.oj === "codeforces" || detail.oj === "atcoder") &&
-    typeof detail.submissionId === "string" &&
-    /^\d{1,20}$/.test(detail.submissionId) &&
-    typeof detail.problemId === "string" &&
-    detail.problemId.length <= 80 &&
-    typeof detail.detailUrl === "string" &&
-    detail.detailUrl.length <= 2048 &&
-    Number.isFinite(detail.observedAt) &&
-    (detail.evaluationStatus === "judging" ||
-      detail.evaluationStatus === "accepted" ||
-      detail.evaluationStatus === "rejected" ||
-      detail.evaluationStatus === "unknown") &&
-    (detail.rawVerdict === undefined ||
-      (typeof detail.rawVerdict === "string" &&
-        detail.rawVerdict.length <= 120)) &&
-    (detail.username === undefined ||
-      (typeof detail.username === "string" && detail.username.length <= 80)) &&
-    (detail.problemName === undefined ||
-      (typeof detail.problemName === "string" &&
-        detail.problemName.length <= 240)) &&
-    (detail.language === undefined ||
-      (typeof detail.language === "string" && detail.language.length <= 120)) &&
-    (detail.submittedAt === undefined ||
-      (typeof detail.submittedAt === "string" &&
-        detail.submittedAt.length <= 80)) &&
-    (detail.judgedAt === undefined ||
-      (typeof detail.judgedAt === "string" && detail.judgedAt.length <= 80)) &&
-    (detail.timeMs === undefined ||
-      (Number.isSafeInteger(detail.timeMs) && detail.timeMs >= 0)) &&
-    (detail.memoryBytes === undefined ||
-      (Number.isSafeInteger(detail.memoryBytes) && detail.memoryBytes >= 0)) &&
-    (detail.passedTestCount === undefined ||
-      (Number.isSafeInteger(detail.passedTestCount) &&
-        detail.passedTestCount >= 0)) &&
-    (detail.score === undefined ||
-      (typeof detail.score === "number" && Number.isFinite(detail.score))) &&
-    (detail.sourceCode === undefined ||
-      (typeof detail.sourceCode === "string" &&
-        detail.sourceCode.length <= 120_000)) &&
-    Array.isArray(detail.tests) &&
-    detail.tests.length <= 200 &&
-    textBudget <= 180_000 &&
-    detail.tests.every(
-      (test) =>
-        isRecord(test) &&
-        Number.isSafeInteger(test.index) &&
-        test.index > 0 &&
-        (test.verdict === undefined ||
-          (typeof test.verdict === "string" && test.verdict.length <= 120)) &&
-        (test.timeMs === undefined ||
-          (Number.isSafeInteger(test.timeMs) && test.timeMs >= 0)) &&
-        (test.memoryBytes === undefined ||
-          (Number.isSafeInteger(test.memoryBytes) && test.memoryBytes >= 0)) &&
-        (test.exitCode === undefined || Number.isSafeInteger(test.exitCode)) &&
-        (test.checkerExitCode === undefined ||
-          Number.isSafeInteger(test.checkerExitCode)) &&
-        ["input", "output", "answer", "checkerLog"].every(
-          (key) =>
-            test[key] === undefined ||
-            (typeof test[key] === "string" && test[key].length <= 20_000),
-        ),
-    ) &&
-    typeof detail.truncated === "boolean"
-  );
-}
-
 export function crossOjResponse(
   requestId: string,
   ok: boolean,
@@ -566,17 +440,12 @@ export function isCrossOjResponse(
       (typeof value.returnUrl === "string" &&
         value.returnUrl.length <= 2048 &&
         responseUrlHasOrigin(value.returnUrl, "https://www.luogu.com.cn"))) &&
-    (value.sourceDetailUrl === undefined ||
-      (typeof value.sourceDetailUrl === "string" &&
-        value.sourceDetailUrl.length <= 2048 &&
-        (responseUrlHasOrigin(
-          value.sourceDetailUrl,
-          "https://codeforces.com",
-        ) ||
-          responseUrlHasOrigin(
-            value.sourceDetailUrl,
-            "https://atcoder.jp",
-          )))) &&
+    (value.submissionDetailUrl === undefined ||
+      (typeof value.submissionDetailUrl === "string" &&
+        value.submissionDetailUrl.length <= 2048 &&
+        /^https:\/\/codeforces\.com\/(?:contest\/\d+|problemset)\/submission\/\d+\/?$/.test(
+          value.submissionDetailUrl,
+        ))) &&
     (value.record === undefined || isCrossOjRecordListItem(value.record)) &&
     (value.records === undefined ||
       (Array.isArray(value.records) &&
@@ -587,6 +456,15 @@ export function isCrossOjResponse(
         value.recordsMessage.length <= 240)) &&
     (value.recordScanHasMore === undefined ||
       typeof value.recordScanHasMore === "boolean") &&
+    (value.problemDifficulty === undefined ||
+      (typeof value.problemDifficulty === "number" &&
+        Number.isInteger(value.problemDifficulty) &&
+        value.problemDifficulty >= 0 &&
+        value.problemDifficulty <= 8)) &&
+    (value.problemDifficultyRetryAt === undefined ||
+      (typeof value.problemDifficultyRetryAt === "number" &&
+        Number.isSafeInteger(value.problemDifficultyRetryAt) &&
+        value.problemDifficultyRetryAt >= 0)) &&
     (value.message === undefined || typeof value.message === "string") &&
     (value.problem === undefined || isProblemRef(value.problem)) &&
     (value.problemStatus === undefined ||
@@ -597,9 +475,6 @@ export function isCrossOjResponse(
     (value.problemStatusMessage === undefined ||
       (typeof value.problemStatusMessage === "string" &&
         value.problemStatusMessage.length <= 240)) &&
-    (value.detail === undefined || isCrossOjSubmissionDetail(value.detail)) &&
-    (value.recordInstalled === undefined ||
-      typeof value.recordInstalled === "boolean") &&
     (value.editor === undefined || isEditorSnapshot(value.editor)) &&
     (value.languageOptions === undefined ||
       (Array.isArray(value.languageOptions) &&
@@ -648,6 +523,9 @@ export function isCrossOjRecordListItem(
       (Number.isSafeInteger(item.timeMs) && item.timeMs >= 0)) &&
     (item.memoryBytes === undefined ||
       (Number.isSafeInteger(item.memoryBytes) && item.memoryBytes >= 0)) &&
+    (item.passedTestCount === undefined ||
+      (Number.isSafeInteger(item.passedTestCount) &&
+        item.passedTestCount >= 0)) &&
     (item.codeLength === undefined ||
       (Number.isSafeInteger(item.codeLength) && item.codeLength >= 0))
   );

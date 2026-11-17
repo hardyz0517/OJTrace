@@ -79,30 +79,11 @@ if (!luoguCrossOjScript) {
     "Luogu cross-OJ script must run at document_start on luogu.com.cn",
   );
 }
-const luoguCrossOjMainScript = (manifest.content_scripts ?? []).find(
-  (item) =>
-    (item.matches ?? []).includes("https://www.luogu.com.cn/*") &&
-    (item.js ?? []).some((file) => file.includes("luogu-cross-oj-main.js")) &&
-    item.world === "MAIN" &&
-    item.run_at === "document_start",
-);
-if (!luoguCrossOjMainScript) {
-  throw new Error(
-    "Luogu MAIN-world record route script must run at document_start",
-  );
-}
 const luoguRuntimeScript = new URL(
   "../.output/chrome-mv3/content-scripts/luogu-cross-oj.js",
   import.meta.url,
 );
 if (!(await readFile(luoguRuntimeScript)).byteLength) {
   throw new Error("Luogu runtime content script was not emitted");
-}
-const luoguMainRuntimeScript = new URL(
-  "../.output/chrome-mv3/content-scripts/luogu-cross-oj-main.js",
-  import.meta.url,
-);
-if (!(await readFile(luoguMainRuntimeScript)).byteLength) {
-  throw new Error("Luogu MAIN-world record route script was not emitted");
 }
 console.log("Manifest permission audit passed.");

@@ -17,11 +17,7 @@ import {
   atcoderEvaluationFromPage,
   pollAndReportEvaluation,
 } from "../src/oj-enhancer/features/cross-oj-submit/evaluation";
-import {
-  buildLuoguCrossOjRecordUrl,
-  parseAtCoderSubmissionDetail,
-  safeLuoguReturnUrl,
-} from "../src/oj-enhancer/features/cross-oj-submit/record-details";
+import { safeLuoguReturnUrl } from "../src/oj-enhancer/features/cross-oj-submit/record-links";
 import {
   hideAtCoderSubmitMask,
   showAtCoderSubmitMask,
@@ -133,6 +129,7 @@ function showBanner(
   message: string,
   options?: Array<{ value: string; label: string }>,
   retry?: (value?: string) => void,
+  action?: { label: string; href: string },
 ): void {
   document.getElementById(BANNER_ID)?.remove();
   const banner = document.createElement("section");
@@ -178,6 +175,14 @@ function showBanner(
     button.textContent = "重试填入";
     button.addEventListener("click", () => retry(), { once: true });
     banner.append(button);
+  }
+  if (action) {
+    const link = document.createElement("a");
+    link.href = action.href;
+    link.textContent = action.label;
+    link.style.marginLeft = "8px";
+    link.style.color = "#1769aa";
+    banner.append(link);
   }
   const close = document.createElement("button");
   close.type = "button";
@@ -283,6 +288,7 @@ function submissionDetailForTask(
   baselineSubmissionId?: string,
 ): string | undefined {
   const expectedTask = taskId.toLowerCase();
+  const candidates = new Set<string>();
   for (const row of document.querySelectorAll("tr")) {
     const taskLink = Array.from(
       row.querySelectorAll<HTMLAnchorElement>('a[href*="/tasks/"]'),
@@ -315,9 +321,9 @@ function submissionDetailForTask(
         ? idCorrelated && (submittedAt === undefined || timeCorrelated)
         : timeCorrelated
     )
-      return detail.href;
+      candidates.add(detail.href);
   }
-  return undefined;
+  return candidates.size === 1 ? candidates.values().next().value : undefined;
 }
 
 async function inspectSubmissionList(): Promise<boolean> {
@@ -327,7 +333,7 @@ async function inspectSubmissionList(): Promise<boolean> {
   if (!expected || expected.contestId !== route.contestId) return false;
   showAtCoderSubmitMask("正在确认 AtCoder 是否已收到本次提交…");
   const startedAt = Date.now();
-  while (Date.now() - startedAt < 15_000) {
+  while (Date.now() - startedAt < 30_000) {
     const detail = submissionDetailForTask(
       route.contestId,
       expected.taskId,
@@ -344,15 +350,22 @@ async function inspectSubmissionList(): Promise<boolean> {
     type: "UPDATE_CROSS_OJ_TASK",
     event: { kind: "result-unmatched" },
   });
-  if (response?.ok && response.code === "result-unknown") {
-    sessionStorage.removeItem(EXPECTED_PROBLEM_KEY);
-    showAtCoderSubmitMask(
-      "AtCoder 已收到提交，但暂时无法确认对应记录；正在返回洛谷。",
-    );
-    const destination = safeLuoguReturnUrl(response.returnUrl);
-    if (destination)
-      window.setTimeout(() => location.assign(destination), 3_000);
-  }
+  sessionStorage.removeItem(EXPECTED_PROBLEM_KEY);
+  const destination =
+    response?.ok && response.code === "result-unknown"
+      ? safeLuoguReturnUrl(response.returnUrl)
+      : undefined;
+  hideAtCoderSubmitMask();
+  showBanner(
+    response?.ok && response.code === "result-unknown"
+      ? "AtCoder 已收到提交，但暂时无法唯一确认对应记录。请先核对 AtCoder 提交列表。"
+      : "OJTrace 未能确认这次提交，自动关联已停止。请核对当前 AtCoder 提交列表。",
+    undefined,
+    undefined,
+    destination
+      ? { label: "手动返回洛谷题目页", href: destination }
+      : undefined,
+  );
   return true;
 }
 
@@ -366,18 +379,14 @@ function evaluationLabel(status: CrossOjEvaluationStatus): string {
 
 async function syncEvaluation(
   submissionId: string,
-  returnUrl?: string,
+  showStatus = false,
 ): Promise<void> {
   const detailUrl = location.href;
-  const submission = atcoderSubmissionFromUrl(detailUrl);
-  const detail = parseAtCoderSubmissionDetail(document, detailUrl);
-  if (detail) {
-    await send({
-      type: "SAVE_CROSS_OJ_DETAIL",
-      detail,
-    });
+  if (showStatus) {
+    hideAtCoderSubmitMask();
+    showBanner(`提交 #${submissionId} 已识别，可在当前 AtCoder 页面查看详情。`);
   }
-  void pollAndReportEvaluation({
+  await pollAndReportEvaluation({
     isCurrentPage: () => location.href === detailUrl,
     readStatus: atcoderEvaluationFromPage,
     report: async (evaluationStatus) => {
@@ -389,39 +398,17 @@ async function syncEvaluation(
       });
       return response?.ok === true && response.code === "evaluation-updated";
     },
-    onReported: (status) => showAtCoderSubmitMask(evaluationLabel(status)),
+    onReported: (status) => {
+      if (showStatus) showBanner(evaluationLabel(status));
+    },
   });
-  const destination = safeLuoguReturnUrl(returnUrl);
-  const recordPage =
-    destination && submission
-      ? (() => {
-          const problemId =
-            detail?.problemId ??
-            (expectedProblem()?.taskId
-              ? `${submission.contestId}_${expectedProblem()!.taskId}`
-              : undefined);
-          return problemId
-            ? buildLuoguCrossOjRecordUrl(
-                "atcoder",
-                submission.contestId,
-                submissionId,
-                problemId,
-                destination,
-              )
-            : undefined;
-        })()
-      : undefined;
-  if (recordPage)
-    window.setTimeout(() => {
-      if (location.href !== detailUrl) return;
-      location.assign(recordPage);
-    }, 2_500);
 }
 
 async function inspectResult(): Promise<boolean> {
   const submission = atcoderSubmissionFromUrl(location.href);
   if (!submission) return false;
   const expected = expectedProblem();
+  const crossOjFlow = isAtCoderCrossOjFlow(expected);
   const displayedProblem = taskInPage();
   if (
     expected &&
@@ -454,7 +441,7 @@ async function inspectResult(): Promise<boolean> {
         response.message ??
           `提交 #${submission.submissionId} 已识别，正在读取评测状态。`,
       );
-      syncEvaluation(submission.submissionId, response.returnUrl);
+      syncEvaluation(submission.submissionId, true);
       return true;
     }
     hideAtCoderSubmitMask();
@@ -481,9 +468,17 @@ async function inspectResult(): Promise<boolean> {
         showAtCoderSubmitMask(
           `提交 #${submission.submissionId} 已识别，正在读取评测状态。`,
         );
-        syncEvaluation(submission.submissionId, resumed.returnUrl);
+        syncEvaluation(submission.submissionId, true);
         return true;
       }
+    }
+    if (crossOjFlow) {
+      sessionStorage.removeItem(EXPECTED_PROBLEM_KEY);
+      hideAtCoderSubmitMask();
+      showBanner(
+        `AtCoder 提交 #${submission.submissionId} 无法与本次洛谷操作可靠关联。请核对当前 AtCoder 记录。`,
+      );
+      return true;
     }
     syncEvaluation(submission.submissionId);
     return true;
@@ -498,10 +493,23 @@ async function inspectResult(): Promise<boolean> {
       type: "UPDATE_CROSS_OJ_TASK",
       event: { kind: "result-unmatched" },
     });
-    if (response?.ok && response.code === "result-unknown")
-      showAtCoderSubmitMask(
-        `已观察到 AtCoder 提交 #${submission.submissionId}，但无法可靠确认题目归属。不会自动重试。`,
-      );
+    if (!crossOjFlow) return true;
+    sessionStorage.removeItem(EXPECTED_PROBLEM_KEY);
+    const destination =
+      response?.ok && response.code === "result-unknown"
+        ? safeLuoguReturnUrl(response.returnUrl)
+        : undefined;
+    hideAtCoderSubmitMask();
+    showBanner(
+      response?.ok && response.code === "result-unknown"
+        ? `已观察到 AtCoder 提交 #${submission.submissionId}，但无法可靠确认题目归属。请核对 AtCoder 记录。`
+        : `OJTrace 未能确认提交 #${submission.submissionId} 的题目归属，自动关联已停止。请核对当前 AtCoder 记录。`,
+      undefined,
+      undefined,
+      destination
+        ? { label: "手动返回洛谷题目页", href: destination }
+        : undefined,
+    );
     return true;
   }
   const response = await send({
@@ -522,7 +530,13 @@ async function inspectResult(): Promise<boolean> {
     );
   if (response?.ok && response.code === "completed") {
     sessionStorage.removeItem(EXPECTED_PROBLEM_KEY);
-    syncEvaluation(submission.submissionId, response.returnUrl);
+    syncEvaluation(submission.submissionId, true);
+  } else if (crossOjFlow) {
+    sessionStorage.removeItem(EXPECTED_PROBLEM_KEY);
+    hideAtCoderSubmitMask();
+    showBanner(
+      `发现 AtCoder 提交 #${submission.submissionId}，但 OJTrace 无法确认本次关联。请核对当前 AtCoder 记录。`,
+    );
   }
   return true;
 }
@@ -663,15 +677,27 @@ function installSubmitObserver(): void {
       const startedAt = Date.now();
       const check = async (): Promise<void> => {
         if (await inspectResult()) return;
-        if (Date.now() - startedAt >= 15_000) {
+        if (Date.now() - startedAt >= 30_000) {
           const response = await send({
             type: "UPDATE_CROSS_OJ_TASK",
             event: { kind: "result-unmatched" },
           });
-          if (response?.ok && response.code === "result-unknown")
-            showAtCoderSubmitMask(
-              "已观察到提交操作，但无法可靠关联本次提交结果。不会自动重试。",
-            );
+          sessionStorage.removeItem(EXPECTED_PROBLEM_KEY);
+          const destination =
+            response?.ok && response.code === "result-unknown"
+              ? safeLuoguReturnUrl(response.returnUrl)
+              : undefined;
+          hideAtCoderSubmitMask();
+          showBanner(
+            response?.ok && response.code === "result-unknown"
+              ? "AtCoder 已收到提交，但 OJTrace 未能确认对应记录。请检查当前 AtCoder 页面。"
+              : "OJTrace 未能确认这次提交，自动关联已停止。请检查当前 AtCoder 页面。",
+            undefined,
+            undefined,
+            destination
+              ? { label: "手动返回洛谷题目页", href: destination }
+              : undefined,
+          );
           return;
         }
         window.setTimeout(() => void check(), 500);

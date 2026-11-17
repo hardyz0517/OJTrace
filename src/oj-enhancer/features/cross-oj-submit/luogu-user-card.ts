@@ -606,8 +606,7 @@ export function mountLuoguUserCard(): () => void {
     link?.focus();
   };
   const onReposition = (): void => {
-    if (activeLink && card.classList.contains("shown"))
-      position(activeLink);
+    if (activeLink && card.classList.contains("shown")) position(activeLink);
   };
 
   document.addEventListener("mouseover", onMouseOver);

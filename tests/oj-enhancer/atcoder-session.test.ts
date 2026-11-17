@@ -19,6 +19,8 @@ describe("AtCoder session handle parsing", () => {
   });
 
   it("does not treat a logged-out page as an account", () => {
-    expect(parseAtCoderSessionHandle('<a href="/login">Sign In</a>')).toBeUndefined();
+    expect(
+      parseAtCoderSessionHandle('<a href="/login">Sign In</a>'),
+    ).toBeUndefined();
   });
 });

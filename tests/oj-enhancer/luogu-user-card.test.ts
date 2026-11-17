@@ -166,7 +166,10 @@ describe("Luogu user hover cards", () => {
     expect(card.style.opacity).toBe("1");
 
     link.dispatchEvent(
-      new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }),
+      new MouseEvent("mouseout", {
+        bubbles: true,
+        relatedTarget: document.body,
+      }),
     );
     expect(card.classList.contains("shown")).toBe(true);
     await vi.advanceTimersByTimeAsync(79);

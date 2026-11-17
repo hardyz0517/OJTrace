@@ -77,7 +77,9 @@ function parseUnixMillis(value: string | undefined): number | undefined {
   return parseTimestamp(value);
 }
 
-function timestampFromCell(cell: HtmlElementNode | undefined): number | undefined {
+function timestampFromCell(
+  cell: HtmlElementNode | undefined,
+): number | undefined {
   if (!cell) return undefined;
   const timeNode = findFirst(cell, (node) => node.tagName === "time");
   return (
@@ -99,11 +101,12 @@ function parseMemoryBytes(value: string): number | undefined {
   const amount = parseNumber(value);
   if (amount === undefined) return undefined;
   const unit = value.match(/\b(kib|kb|mib|mb|bytes?|b)\b/i)?.[1]?.toLowerCase();
-  const multiplier = unit === "mib" || unit === "mb"
-    ? 1024 * 1024
-    : unit === "kib" || unit === "kb"
-      ? 1024
-      : 1;
+  const multiplier =
+    unit === "mib" || unit === "mb"
+      ? 1024 * 1024
+      : unit === "kib" || unit === "kb"
+        ? 1024
+        : 1;
   const bytes = amount * multiplier;
   return Number.isSafeInteger(bytes) ? bytes : undefined;
 }
@@ -113,8 +116,7 @@ function statusFromText(value: string): {
   raw: string;
 } {
   const raw = normalized(value);
-  if (/^(?:AC|Accepted)$/i.test(raw))
-    return { status: "accepted", raw };
+  if (/^(?:AC|Accepted)$/i.test(raw)) return { status: "accepted", raw };
   if (/^(?:WJ|Waiting for Judging|Judging)$/i.test(raw))
     return { status: "judging", raw };
   return { status: raw ? "rejected" : "unknown", raw };
@@ -123,7 +125,8 @@ function statusFromText(value: string): {
 function childCells(row: HtmlElementNode): HtmlElementNode[] {
   return row.children.filter(
     (child): child is HtmlElementNode =>
-      child.type === "element" && (child.tagName === "td" || child.tagName === "th"),
+      child.type === "element" &&
+      (child.tagName === "td" || child.tagName === "th"),
   );
 }
 
@@ -143,9 +146,11 @@ function cellText(cell: HtmlElementNode | undefined): string {
 }
 
 function tableLooksLikeSubmissions(table: HtmlElementNode): boolean {
-  const header = directRows(table).find((row) =>
-    childCells(row).some((cell) => /submission\s*time/i.test(cellText(cell))) &&
-    childCells(row).some((cell) => /^status$/i.test(cellText(cell))),
+  const header = directRows(table).find(
+    (row) =>
+      childCells(row).some((cell) =>
+        /submission\s*time/i.test(cellText(cell)),
+      ) && childCells(row).some((cell) => /^status$/i.test(cellText(cell))),
   );
   if (!header) return false;
   const names = childCells(header).map(cellText);
@@ -214,7 +219,9 @@ function escapeRegExp(value: string): string {
 
 function pageNumberFromHref(href: string): number | undefined {
   try {
-    const page = Number(new URL(href, "https://atcoder.jp").searchParams.get("page"));
+    const page = Number(
+      new URL(href, "https://atcoder.jp").searchParams.get("page"),
+    );
     return Number.isSafeInteger(page) && page > 0 ? page : undefined;
   } catch {
     return undefined;
@@ -225,13 +232,14 @@ function nextPageAvailable(
   html: string,
   root: ReturnType<typeof parseHtmlDocument>,
 ): boolean {
-  const labelled = findAll(root, (node) => {
-    if (node.tagName !== "a") return false;
-    const text = normalized(textContent(node));
-    if (!/^(?:next\s*>|>)$/i.test(text)) return false;
-    const parent = node.parent;
-    return !(parent && hasClass(parent, "disabled"));
-  }).length > 0;
+  const labelled =
+    findAll(root, (node) => {
+      if (node.tagName !== "a") return false;
+      const text = normalized(textContent(node));
+      if (!/^(?:next\s*>|>)$/i.test(text)) return false;
+      const parent = node.parent;
+      return !(parent && hasClass(parent, "disabled"));
+    }).length > 0;
   if (labelled) return true;
   let current = 1;
   const laterPages: number[] = [];
@@ -242,9 +250,10 @@ function nextPageAvailable(
     if (link.parent && hasClass(link.parent, "active")) current = page;
   }
   if (laterPages.some((page) => page > current)) return true;
-  const rawActive = /class=["'][^"']*\bactive\b[^"']*["'][^>]*>[\s\S]{0,240}?page=(\d+)/i.exec(
-    html,
-  );
+  const rawActive =
+    /class=["'][^"']*\bactive\b[^"']*["'][^>]*>[\s\S]{0,240}?page=(\d+)/i.exec(
+      html,
+    );
   if (rawActive?.[1]) current = Number(rawActive[1]) || current;
   return [...html.matchAll(/[?&]page=(\d+)/gi)].some((match) => {
     const page = Number(match[1]);
@@ -368,6 +377,7 @@ export function parseAtCoderSubmissionsPage(
       ...(memoryBytes !== undefined ? { memoryBytes } : {}),
     });
   }
-  if (!records.length && fallback.length) return { records: fallback, hasNextPage: nextPageAvailable(html, root) };
+  if (!records.length && fallback.length)
+    return { records: fallback, hasNextPage: nextPageAvailable(html, root) };
   return { records, hasNextPage: nextPageAvailable(html, root) };
 }

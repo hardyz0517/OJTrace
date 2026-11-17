@@ -1,6 +1,6 @@
 # OJTrace 跨 OJ 提交实施计划
 
-> 状态：P1 Codeforces 与 P2 AtCoder 均已实现目标站原生表单自动提交和有界结果关联，并通过自动化验证；洛谷登录态编辑器、Codeforces 登录态编辑器和自动提交、AtCoder 登录态最终提交仍待真实提交验收。AtCoder 页面结构已在浏览器核对，尚未触发真实提交。Codeforces Gym/Group 暂不纳入支持范围，等取得登录态页面证据再评估。
+> 状态：P1 Codeforces 与 P2 AtCoder 均已实现目标站原生表单自动提交和有界结果关联，并通过自动化验证；洛谷登录态编辑器、Codeforces 登录态编辑器和自动提交、AtCoder 登录态最终提交仍待真实提交验收。AtCoder 页面结构已在浏览器核对，尚未触发真实提交。提交结果唯一确认后停留在对应 OJ 官方详情页；无法确认时停留在目标 OJ 并提供手动返回入口。Codeforces Gym/Group 暂不纳入支持范围，等取得登录态页面证据再评估。
 > 本文对应“洛谷 → 原 OJ 提交”功能，第一阶段优先支持 Codeforces，第二阶段支持 AtCoder。
 > 本计划建立在 2026-11-03 的源码审计、参考项目阅读和匿名页面测试之上；登录态浏览器验证完成前，不把目标站页面选择器、语言 ID 或提交响应当作稳定接口。
 
@@ -26,7 +26,7 @@
 4. 在目标页唯一识别编辑器 API，填入代码和目标语言、回读校验，等待原生 Cloudflare 验证完成后点击唯一的 Codeforces Submit 控件发起一次提交。
 5. 解析能够明确归属于本次操作的 Submission ID 和详情链接。
 6. 将成功、失败、登录失效、安全验证、结果未知、等待评测等状态反馈给用户；结果不确定时不重试。
-7. AtCoder 选择页面当前提供的 C++23 option（与洛谷语言无关），在 OJTrace 全屏提交面板覆盖下写入原生表单并点击原生 Submit；Cloudflare 验证控件显示在该面板中，仍由 AtCoder 页面处理，完成后按题目和提交信息关联本次提交并返回原洛谷题目页。
+7. AtCoder 选择页面当前提供的 C++23 option（与洛谷语言无关），在 OJTrace 全屏提交面板覆盖下写入原生表单并点击原生 Submit；Cloudflare 验证控件显示在该面板中，仍由 AtCoder 页面处理，完成后按题目和提交信息关联本次提交并打开对应 OJ 官方详情页。
 
 本功能不做以下事情：
 
@@ -220,7 +220,7 @@ P1 只解析 Codeforces 来源，按以下优先级解析：
 4. 目标 Content Script 只发送不带任务标识的 `CLAIM_CROSS_OJ_TASK`；Background 用 `sender.tab.id` 查找唯一绑定任务，并从浏览器提供的当前 URL 取得 origin，不信任页面自报的 tabId 或 origin。登录和已识别验证路径不领取任务；同一 tab 回到允许的 CF 提交路由且检查通过后再领取。
 5. Background 通过按 `targetTabId` 建立的 keyed serial queue 串行执行“查找 → 校验 → 标记 `claimed` → 写回”。只有写回成功后才返回一次任务内容；竞争请求或已领取任务失败。
 6. 离开 Codeforces origin、进入不在允许列表中的路径、重复领取或任务过期时返回结构化错误并清理任务；已识别的登录/验证跳转保留 `pending` 任务。Codeforces 页面唯一定位编辑器并回读代码后，Content Script 等待原生验证完成，再点击唯一的 Submit 控件最多提交一次；Background 清除代码并观察结果。
-7. 目标页仅在确认本绑定标签页的原生 submit 事件后，将任务改为 `observing-result`，才尝试读取随后的成功响应页/详情页。只有能从该导航链明确取得 Submission ID 和对应题号时才报成功；无法唯一关联就写入 `result-unknown`，不通过“最新提交”列表猜测。
+7. 目标页仅在确认本绑定标签页的原生 submit 事件后，将任务改为 `observing-result`。Codeforces 原生重定向若落在提交列表，Background 使用提交前 ID 基线、当前账号、题目和提交时间查询官方 `user.status`；只有唯一候选才先固定 Submission ID，再打开详情页并核验该 ID。AtCoder 也只在提交列表里唯一匹配题目、基线和时间后打开详情页。任何歧义、详情 ID 不符或超时都停止自动动作；不按“最新一条记录”猜测，不自动返回洛谷，也不重复提交。
 
 任务中不得保存 Cookie、密码、CSRF token 或目标站页面全文。任务完成、失败、过期和取消都要清理。
 
@@ -233,6 +233,14 @@ P1 支持常规 contest 和 problemset；Gym、Group 不预建接口，待有真
 语言映射不能把洛谷名称直接传给 CF。先定义稳定的内部语言键，例如 `cpp17`、`cpp20`、`python3`，再根据目标页面当前 `<option>` 文本和 value 选择。匹配顺序为：精确名称 → 版本和编译器特征 → 明确别名；多个选项匹配时要求用户选择，零匹配返回 `unsupported-language`。
 
 P1 不自行构造 Codeforces POST，也不读取或复制 CSRF；通过当前页面的原生表单控件提交，保留 Codeforces 的登录态、表单校验和站点事件处理。Cloudflare 验证组件若已出现在表单中，就在 OJTrace 遮罩下展示并等待用户完成；独立拦截页或登录页不注入代码、不绕过验证。一次提交无法确认时不重试。
+
+### 4.6 提交结果与原站记录详情联动
+
+提交成功后打开对应 OJ 官方详情页并撤掉操作遮罩，当前页面的可见评测状态继续有界更新到本地提交摘要。洛谷中的记录列表使用普通链接指向原站详情，支持中键、Ctrl 点击和复制链接。旧版 `#ojtrace-record=…` 书签转到对应官方详情页。扩展启动时清理旧版源码和测试点快照缓存。
+
+详情展示由原站负责，记录列表继续使用现有列表接口和摘要缓存。源码、测试点采集、详情快照协议、仿洛谷详情页面及其 MAIN-world 路由脚本已经移除。
+
+Codeforces 采用两种明确来源：从原生提交表单直接进入的详情页必须有同源、匹配 contest 的表单 referrer；先进入 status 列表时，官方 `user.status` API 候选必须同时高于提交前 ID 基线、账号与题号一致、提交时间在本次操作前后 30 秒内，并且候选唯一（接口证据见 [`docs/research/codeforces.md`](../research/codeforces.md)）。Background 每次最多取最近 100 条，通过约 2.1 秒的站点节流和 8 秒请求超时，在导航前保存候选 ID；详情页必须与该 ID 完全相同且由对应 status 列表到达。AtCoder 继续使用详情页中的题目、提交 ID 基线和提交时间做唯一匹配。跨页面失败后清除一次性任务和遮罩，不自动重试。
 
 ### 4.5 AtCoder Adapter（P2）
 
@@ -324,6 +332,8 @@ Codeforces 与 AtCoder 页上的提示应说明提交已发起、不要重复操
 - [x] 新增洛谷原生提交按钮右侧入口和状态提示；Codeforces 与 AtCoder 点击即授权一次原生表单提交；popup 仅负责首次授权和启用页面脚本。
 - [x] Codeforces 复用当前标签；兼容 CodeMirror/Ace live editor，回读并同步实际提交字段，再点击原生 Submit 控件；检测到 Turnstile 时等待用户完成验证，不覆盖已有代码。
 - [x] 只在观察到本任务目标页的原生表单提交后读取结果；不能由导航链明确关联 Submission ID 时报告未知。
+- [x] Codeforces 列表重定向使用官方提交 API 与提交前基线做唯一候选匹配；候选 ID 在详情页再次精确验证。
+- [x] Codeforces / AtCoder 在详情与本次任务关联成功后停留在对应原站记录详情；未知状态留在目标 OJ 并由用户手动选择后续动作。
 - [x] 为题号/语言纯函数、Codeforces 表单编辑器、任务状态迁移、并发 claim 和结果关联增加针对性测试。
 - [x] 更新 manifest/architecture 集成并运行审计。
 
@@ -336,6 +346,7 @@ Codeforces 与 AtCoder 页上的提示应说明提交已发起、不要重复操
 - [x] 新增 ACE 与纯文本编辑器读取/写入桥接，并校验写入后的完整代码。
 - [x] AtCoder 固定选择当前页面的 C++23 option；不读取洛谷语言版本，不硬编码 option value；缺少 C++23 时安全停止。
 - [x] 新增 AtCoder 提交 ID 识别、提交时间关联和未知结果降级。
+- [x] AtCoder 在本次记录唯一关联后打开原站记录详情；超时或桥接错误撤掉全屏遮罩并留在当前 AtCoder 页面。
 - [x] 支持洛谷题号不编码 contest ID 的 AtCoder 题目：必须以洛谷结构化数据中的原题 URL 解析，并由 Background 对照当前页面再次验证。
 - [x] 增加 AtCoder 页面夹具、任务链路自动化测试和浏览器页面结构核对记录。
 - [ ] 用已登录浏览器验收 AtCoder 原生表单提交和本次提交结果关联；不通过自动化触发真实提交。

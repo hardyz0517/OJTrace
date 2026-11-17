@@ -69,6 +69,12 @@ Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck `
 
 最后验证证据：上述官方 API 文档、2026-09-28 的真实 200/400 响应及脱敏 fixtures。
 
+## 2026-11-17 记录列表内存值与官网详情差异
+
+- 匿名请求官方 `GET /api/contest.status?contestId=1&handle={handle}&from=1&count=10` 返回 `status=OK`。提交 `397475296` 的 `timeConsumedMillis=46`、`memoryConsumedBytes=0`，用户提供的同一条官方详情截图显示 `46 ms / 8 KB`。该账号在本次响应中的另外三条提交也返回内存零值。选取并脱敏的响应字段保存在 [`zero-memory.json`](../fixtures/codeforces/zero-memory.json)。
+- 当前字段映射使用 API 的字节值。接口的零值与官网详情存在差异，现有证据无法确认差异的具体计算原因。列表如实格式化接口数值，内存零值显示 `0B`，只有字段缺失时显示 `—`，使用洛谷原生 B / KB / MB / GB 格式。
+- 官方 Submission 对象与本次响应均未包含代码长度字段。列表固定保留代码长度图标，缺失值显示 `—`，已取得的长度使用洛谷原生 B / KB / MB / GB 格式。此行为同时适用于已有缓存行。
+
 ## 2026-10-07 浏览器登录检测排查
 
 - 用户在 Edge 中能打开首页并确认已登录，但 OJTrace 显示 `site-error`，没有诊断文字。当前实现通过扩展后台 `fetch` 请求首页（`credentials: include`）识别账号，不读取已打开网页的 DOM。浏览器会话请求不手动注入或选择 `JSESSIONID`。
